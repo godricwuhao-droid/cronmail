@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cronmail-backend-worker
+  namespace: cronmail
+  labels:
+    app: cronmail-backend
+    component: worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cronmail-backend
+      component: worker
+  template:
+    metadata:
+      labels:
+        app: cronmail-backend
+        component: worker
+    spec:
+      containers:
+        - name: worker
+          image: harbor.xhwltech.com/xhcloud/cronmail-backend:latest
+          imagePullPolicy: Always
+          command: ["celery", "-A", "src.scheduler.celery_app", "worker", "--loglevel=info"]
+          envFrom:
+            - configMapRef:
+                name: cronmail-config
+            - secretRef:
+                name: cronmail-secret
+          # Worker 进程存活检查
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - "celery -A src.scheduler.celery_app inspect ping -d celery@$HOSTNAME 2>/dev/null || exit 1"
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+      restartPolicy: Always

@@ -1,0 +1,85 @@
+- generic [ref=e3]:
+  - generic [ref=e4]:
+    - generic [ref=e5]:
+      - button [ref=e6] [cursor=pointer]:
+        - img [ref=e8]
+      - generic [ref=e10]: 📧 CronMail
+      - generic [ref=e11]: 邮件平台
+    - generic [ref=e12]:
+      - navigation "Breadcrumb" [ref=e13]:
+        - generic [ref=e14]:
+          - link "首页" [ref=e15]
+          - text: /
+        - link "仪表盘" [ref=e17]
+      - button "A Admin" [ref=e19] [cursor=pointer]:
+        - generic [ref=e20]: A
+        - generic [ref=e21]: Admin
+        - img [ref=e23]
+  - generic [ref=e25]:
+    - complementary [ref=e26]:
+      - menubar [ref=e27]:
+        - menuitem "仪表盘" [ref=e28] [cursor=pointer]:
+          - img [ref=e30]
+          - text: 仪表盘
+        - menuitem "客户管理" [ref=e34] [cursor=pointer]:
+          - img [ref=e36]
+          - text: 客户管理
+        - menuitem "租赁管理" [ref=e38] [cursor=pointer]:
+          - img [ref=e40]
+          - text: 租赁管理
+        - menuitem "邮件模板" [ref=e42] [cursor=pointer]:
+          - img [ref=e44]
+          - text: 邮件模板
+        - menuitem "发送日志" [ref=e47] [cursor=pointer]:
+          - img [ref=e49]
+          - text: 发送日志
+        - menuitem "系统配置" [ref=e51]:
+          - generic [ref=e52] [cursor=pointer]:
+            - img [ref=e54]
+            - generic [ref=e56]: 系统配置
+            - img [ref=e58]
+    - main [ref=e60]:
+      - generic [ref=e61]:
+        - generic [ref=e62]:
+          - generic [ref=e64]:
+            - generic [ref=e65]: 📊 仪表盘
+            - generic [ref=e67]: 后端状态：ok
+          - table [ref=e71]:
+            - rowgroup [ref=e72]:
+              - row "平台名称 CronMail 邮件平台 当前版本 v0.2.0" [ref=e73]:
+                - cell "平台名称" [ref=e74]
+                - cell "CronMail 邮件平台" [ref=e75]
+                - cell "当前版本" [ref=e76]
+                - cell "v0.2.0" [ref=e77]
+              - row "技术栈 Vue 3 + Element Plus + Vite 后端框架 FastAPI" [ref=e78]:
+                - cell "技术栈" [ref=e79]
+                - cell "Vue 3 + Element Plus + Vite" [ref=e80]
+                - cell "后端框架" [ref=e81]
+                - cell "FastAPI" [ref=e82]
+        - generic [ref=e83]:
+          - generic [ref=e87]:
+            - generic [ref=e88]: 👥
+            - generic [ref=e89]:
+              - generic [ref=e90]: 客户数
+              - generic [ref=e91]: "2"
+          - generic [ref=e95]:
+            - generic [ref=e96]: 🧑‍💼
+            - generic [ref=e97]:
+              - generic [ref=e98]: 内部同事数
+              - generic [ref=e99]: "1"
+          - generic [ref=e103]:
+            - generic [ref=e104]: 📇
+            - generic [ref=e105]:
+              - generic [ref=e106]: 邮件发送总数
+              - generic [ref=e107]: "--"
+          - generic [ref=e111]:
+            - generic [ref=e112]: 📦
+            - generic [ref=e113]:
+              - generic [ref=e114]: 客户联系人总数
+              - generic [ref=e115]: "--"
+              - generic [ref=e116]: 进入客户列表查看
+        - alert [ref=e117]:
+          - img [ref=e119]
+          - generic [ref=e121]:
+            - generic [ref=e122]: 说明
+            - paragraph [ref=e123]: 本仪表盘首批统计指标已对接后端 customer / contact / logs 接口。租赁相关（临期 / 已到期）等更细粒度统计可在租赁管理列表页查看。

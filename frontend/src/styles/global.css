@@ -1,0 +1,253 @@
+/**
+ * 全局样式
+ * 深蓝主题：专业级配色
+ */
+/* 全局变量 */
+:root {
+  --primary-color: #1a73e8;
+  --primary-hover: #1557b0;
+  --bg-color: #f0f2f5;
+  --card-bg: #ffffff;
+  --sidebar-bg: #001529;
+  --sidebar-hover: #002140;
+  --header-bg: #ffffff;
+  --text-primary: #1f2937;
+  --text-secondary: #6b7280;
+  --border-color: #e5e7eb;
+  --success-color: #10b981;
+  --warning-color: #f59e0b;
+  --danger-color: #ef4444;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  background: var(--bg-color);
+  color: var(--text-primary);
+}
+
+/* 侧边栏 */
+.el-menu {
+  border-right: none !important;
+}
+
+/* 卡片 */
+.page-container {
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.card-header h2 {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* 表格优化 */
+.el-table {
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.el-table th {
+  background: #f8fafc !important;
+  color: var(--text-secondary);
+  font-weight: 500;
+  font-size: 13px;
+}
+
+/* 按钮 */
+.el-button--primary {
+  background: var(--primary-color);
+  border-color: var(--primary-color);
+}
+
+.el-button--primary:hover {
+  background: var(--primary-hover);
+  border-color: var(--primary-hover);
+}
+
+/* 搜索框 */
+.search-bar {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+/* 状态标签优化 */
+.status-tag {
+  padding: 2px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* 统计卡片 */
+.stat-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.stat-card {
+  background: var(--card-bg);
+  border-radius: 12px;
+  padding: 20px 24px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  transition: box-shadow 0.2s;
+}
+
+.stat-card:hover {
+  box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+}
+
+.stat-card .label {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+
+.stat-card .value {
+  font-size: 32px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.stat-card .footer {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+/* ============================================================
+ * 全站 UI 统一规范
+ * ============================================================ */
+
+/* 描述列表统一样式 */
+.el-descriptions {
+  border-radius: 8px;
+  overflow: hidden;
+}
+.el-descriptions__label {
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: #fafbfc !important;
+  width: 120px;
+}
+.el-descriptions__content {
+  color: var(--text-primary);
+}
+
+/* 卡片阴影统一 */
+.el-card {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06) !important;
+  border-radius: 8px;
+}
+
+/* 按钮间距 */
+.el-button + .el-button {
+  margin-left: 8px;
+}
+
+/* 卡片头部标题区 */
+.el-card__header {
+  padding: 14px 20px;
+}
+.el-card__body {
+  padding: 20px;
+}
+
+/* 分页器上边距 */
+.pagination {
+  margin-top: 16px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* Section 标题（在表单/详情页内分区用） */
+.section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 18px 0 12px;
+  padding-left: 10px;
+  border-left: 3px solid var(--primary-color);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.section-title .el-icon {
+  color: var(--primary-color);
+  font-size: 16px;
+}
+
+/* 页面容器 */
+.page-container {
+  padding: 24px;
+}
+
+/* 工具栏：搜索/筛选/操作行 */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+/* 卡片标题区域 */
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.card-header .title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.card-header .title .el-icon {
+  color: var(--primary-color);
+  font-size: 18px;
+}
+
+/* 弱化文本 */
+.muted {
+  color: #c0c4cc;
+}
+
+/* el-input prefix 内的图标样式 */
+.el-input__prefix .el-icon,
+.el-input__suffix .el-icon {
+  font-size: 16px;
+  color: var(--text-secondary);
+}
+
+/* 标签页 / 步骤条统一样式微调 */
+.el-tag {
+  border-radius: 4px;
+}
+
+/* 弹窗标题加粗 */
+.el-dialog__title {
+  font-weight: 600;
+}

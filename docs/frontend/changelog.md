@@ -1,0 +1,1376 @@
+# CronMail 前端变更日志
+
+> 本文档记录 CronMail 前端项目的所有变更。
+>
+> **格式约定**
+> - 日期：YYYY-MM-DD
+> - 类型：新增 / 修改 / 修复 / 删除 / 重构
+> - Breaking Change 标注 ⚠️
+
+---
+
+## 2026-06-27 (钉钉加签密钥保存 Bug 修复)
+
+### [修复] 钉钉配置保存时加签密钥被篡改
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 修复 |
+| 范围 | 钉钉通知配置页 |
+| 影响文件 | `frontend/src/views/system/dingtalk.vue` |
+| 关联任务 | 钉钉加签密钥保存 Bug |
+
+**问题**
+
+用户填入加签密钥后点击保存，保存后 GET 回来的 secret 变成了错误的值。
+
+**根因**
+
+`form.secret` 初始值为 GET 返回的脱敏值 `"***"`。当用户在输入框中**不清空直接修改**（如在 `"***"` 后面追加字符、或选中部分替换），`v-model` 会将用户的输入拼接到 `"***"` 上，导致 `form.secret` 变成类似 `"***SECabc123"` 的错误值。保存时 `secretModified = true`，直接将这个被污染的 `form.secret` 发送到后端，导致密钥被篡改。
+
+**修复**
+
+1. **`onSecretInput`**：当用户首次修改 secret（`secretModified` 从 `false` 变为 `true`）且当前值为脱敏值 `"***"` 时，先清空 `form.secret`，让用户从头输入真实密钥。
+2. **`openTestDialog`**：测试弹窗填入 secret 时，如果当前 `form.secret` 是脱敏值 `"***"`，则不填入（空字符串），避免将 `"***"` 当作真实密钥发送。
+
+**验收**
+
+- ✅ `vue-tsc --noEmit -p tsconfig.app.json` 0 错误
+- ✅ 用户首次点击 secret 输入框时自动清空脱敏值
+- ✅ 用户直接输入不会被 `"***"` 前缀污染
+
+**关联任务**：钉钉配置保存时加签密钥被篡改 Bug 修复
+
+**备注**
+
+- 后端 `"***"` 保留原值的逻辑本身没有问题，问题在前端将脱敏值混入了用户输入
+- 测试弹窗同理，默认不应将脱敏值带入
+
+---
+
+## 2026-06-26 (部署)
+
+### 新增
+- 「系统配置 → 钉钉通知」配置页面（Webhook 地址、加签密钥、测试发送）
+
+---
+
+## 2026-06-27 (钉钉机器人配置页面)
+
+### [新增] 钉钉通知配置页面
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 新增 |
+| 范围 | 系统配置子页面 + API 模块 + 路由 + 侧边栏菜单 |
+| 影响文件 | `frontend/src/views/system/dingtalk.vue`（新增）、`frontend/src/api/modules/system.ts`（修改）、`frontend/src/router/index.ts`（修改）、`frontend/src/layouts/MainLayout.vue`（修改） |
+| 关联任务 | 钉钉机器人配置前端页面 |
+
+#### 1. 钉钉配置页面（`src/views/system/dingtalk.vue`）
+
+- 参考 `smtp.vue` 的布局风格（el-card + el-form）
+- 表单字段：Webhook 地址（el-input，placeholder 含示例链接）、加签密钥（el-input type="password" show-password）、启用状态（el-switch）
+- 加载时 `GET /api/system/dingtalk` 填充表单，secret 为脱敏值（`"***"`）
+- 保存时 `PUT /api/system/dingtalk`：用户修改 secret 传新值，未修改传 `"***"` 保留原值
+- 「测试发送」弹窗：可覆盖 webhook/secret，默认用已保存值，发送后显示成功/失败结果（el-alert）
+- 未配置时显示 info 提示
+
+#### 2. API 模块扩展（`src/api/modules/system.ts`）
+
+新增类型与函数：
+- `DingTalkConfig` / `DingTalkConfigUpdate` / `DingTalkTestRequest` / `DingTalkTestResponse`
+- `getDingTalkConfig()` — `GET /api/system/dingtalk`
+- `updateDingTalkConfig(data)` — `PUT /api/system/dingtalk`
+- `testDingTalk(data)` — `POST /api/system/dingtalk/test`
+
+#### 3. 路由（`src/router/index.ts`）
+
+- `/system` children 新增 `dingtalk` 路由 → `DingTalkConfig`
+
+#### 4. 侧边栏菜单 + 面包屑（`src/layouts/MainLayout.vue`）
+
+- 侧边栏「系统配置」子菜单新增「钉钉通知」（在「SMTP 配置」下方）
+- 面包屑 pageTitle map 新增 `/system/dingtalk: '钉钉通知'`
+- `activeMenu` / `parentTitle` 已有 `/system/` 前缀匹配逻辑，无需额外修改
+
+**验收**
+
+- ✅ `vue-tsc --noEmit -p tsconfig.app.json` 0 错误
+
+**关联任务**：钉钉机器人配置前端页面
+
+**备注**
+
+- 依赖后端完成 `GET/PUT /api/system/dingtalk` 和 `POST /api/system/dingtalk/test` 三个接口
+- 后端接口文档待补充到 `docs/backend/api.md`
+
+---
+
+## 2026-06-27 (设备机架展示 + 内部同事全局可选)
+
+### [修改] 设备列表/选择器显示为「机型 - 机架」
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 修改 |
+| 范围 | 设备列表页 + 合同详情页 + 合同创建/编辑页 + API 类型 |
+| 影响文件 | `frontend/src/views/rentals/index.vue`、`frontend/src/views/contracts/detail.vue`、`frontend/src/views/contracts/create.vue`、`frontend/src/api/modules/rental.ts`、`frontend/src/api/modules/contract.ts` |
+| 关联任务 | 设备机架展示 + 内部同事全局可选 — 改动 1 |
+
+**改动**
+
+1. **列表页默认列**（`index.vue`）：`rack_location`（机架位置）替代 `private_ip`（内网 IP）作为默认可见列
+2. **`rentalLabel` 函数**（`contracts/detail.vue` + `contracts/create.vue`）：label 从「机型 · 内网IP」改为「机型 · 机架位置」，机架为空时显示「机型 · -」
+3. **合同详情页关联设备表格**（`detail.vue`）：「内网 IP」列改为「机架位置」列，显示 `rack_location`
+4. **API 类型扩展**：
+   - `RentalListItem` 新增 `rack_location?: string | null`
+   - `ContractRentalItem` 新增 `rack_location?: string | null`
+5. **`create.vue` 兼容对象**：已关联设备的回填对象也补充 `rack_location` 字段
+
+### [修改] 合同编辑/创建页 — 内部同事全局可选
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 修改 |
+| 范围 | 合同创建/编辑页 |
+| 影响文件 | `frontend/src/views/contracts/create.vue` |
+| 关联任务 | 设备机架展示 + 内部同事全局可选 — 改动 2 |
+
+**改动**
+
+1. **新增 `colleagueOptions` ref**：加载所有活跃内部同事
+2. **新增 `loadColleagues()` 函数**：调用 `getContacts({ type: 'colleague', page: 1, page_size: 100 })`，过滤 `is_active`
+3. **新增 `allContactOptions` computed**：合并内部同事（前）+ 客户联系人（后）
+4. **模板 to/cc 下拉框**：
+   - 数据源从 `customerContacts` 改为 `allContactOptions`
+   - 选项 label 显示 `姓名 (邮箱) · 内部` 区分内部同事
+   - placeholder 改为「选择收件人（含内部同事）」/「选择抄送人（含内部同事）」
+   - 空状态提示更新
+5. **`onMounted`**：并行调用 `loadCustomers()` + `loadColleagues()`
+
+**验收**
+
+- ✅ `vue-tsc --noEmit -p tsconfig.app.json` 0 错误
+
+**关联任务**：设备机架展示 + 内部同事全局可选
+
+**备注**
+
+- 邮件模板变量（`private_ip`、`public_ips`）不受影响，继续保留
+- 内部同事和客户联系人在同一列表中，通过 label 后缀「· 内部」区分
+
+---
+
+## 2026-06-27 (前端 6 项优化)
+
+### [修改] 租赁搜索增加机架位置
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 修改 |
+| 范围 | 列表页 + API 模块 |
+| 影响文件 | `frontend/src/views/rentals/index.vue`、`frontend/src/api/modules/rental.ts` |
+| 关联任务 | 前端 6 项优化 — 优化 1 |
+
+**改动**
+
+- `RentalListParams` 增加 `rack_location?: string` 可选字段
+- 搜索字段标签选项 `SEARCH_FIELD_OPTIONS` 新增「机架位置」选项（`value: 'rack_location'`）
+- `SearchField` 类型联合新增 `'rack_location'`
+- `fetchList` 中增加 `rack_location` 分支，将搜索文本路由到 `params.rack_location`
+
+---
+
+### [修改] 租赁管理 → 设备管理全局改名
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 修改 |
+| 范围 | 全前端（侧边栏 / 面包屑 / 页面标题 / 仪表盘 / 路由 meta） |
+| 影响文件 | `frontend/src/layouts/MainLayout.vue`、`frontend/src/views/rentals/index.vue`、`frontend/src/views/rentals/create.vue`、`frontend/src/views/dashboard/index.vue`、`frontend/src/router/index.ts` |
+| 关联任务 | 前端 6 项优化 — 优化 2 |
+
+**改动**
+
+| 位置 | 旧 | 新 |
+|------|----|----|
+| 侧边栏菜单 | 租赁管理 | 设备管理 |
+| 面包屑 | 租赁管理 / 创建租赁 / 编辑租赁 / 租赁详情 | 设备管理 / 创建设备 / 编辑设备 / 设备详情 |
+| 列表页标题 | 租赁记录 | 设备列表 |
+| 列表页按钮 | + 新建租赁 | + 创建设备 |
+| 创建/编辑页标题 | 新建租赁记录 / 编辑租赁记录 | 创建设备 / 编辑设备 |
+| 仪表盘统计卡 | 租赁记录总数 | 合同总数 |
+| 路由 meta.title | 租赁管理 / 新建租赁 / 租赁详情 / 编辑租赁 | 设备管理 / 创建设备 / 设备详情 / 编辑设备 |
+| 列表页 empty-text | 暂无租赁记录 | 暂无设备 |
+| 删除提示 | 已删除租赁记录 | 已删除设备 |
+| popconfirm 文案 | 确定删除该租赁记录？ | 确定删除该设备？ |
+
+**注意**：路由 path `/rentals` 保持不变，只改显示文字。
+
+---
+
+### [修改] 仪表盘基于合同
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 修改 |
+| 范围 | 仪表盘 + 合同 API 模块 |
+| 影响文件 | `frontend/src/views/dashboard/index.vue`、`frontend/src/api/modules/contract.ts` |
+| 关联任务 | 前端 6 项优化 — 优化 3 |
+
+**改动**
+
+#### 1. API 模块新增（`contract.ts`）
+
+- 新增 `DashboardStats` 接口：`total_contracts` / `expiring` / `expired` / `email_sent` / `expiring_contracts`（含 `rentals` 子数组）
+- 新增 `getDashboardStats()` 函数，调用 `GET /api/contracts/dashboard/stats`
+
+#### 2. 仪表盘重写（`dashboard/index.vue`）
+
+- 统计卡 4 个指标全部从 `getDashboardStats()` 获取：合同总数 / 即将到期 / 已到期未回收 / 邮件发送总数
+- 待处理提醒表格改为**合同维度**：
+  - 列：合同名称 / 客户 / 设备数 / 到期时间 / 状态 / 操作（详情/发送提醒）
+  - 使用 `el-table-column type="expand"` 实现行展开，显示关联设备列表（机器型号 / 内网 IP / 操作系统 / 状态）
+  - `row-key="contract_id"`
+- 移除旧的 `getRentals` / `getLogs` 并行调用逻辑
+- 发送提醒：取合同下第一台设备 ID 作为锚点调用 `sendExpiryReminder`
+- `statusTagType` / `statusLabel` 扩展支持 `active` 状态
+
+---
+
+### [新增] 变更记录按钮
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 新增 |
+| 范围 | 合同详情页 + 设备详情页 + 合同 API 模块 |
+| 影响文件 | `frontend/src/views/contracts/detail.vue`、`frontend/src/views/rentals/detail.vue`、`frontend/src/api/modules/contract.ts` |
+| 关联任务 | 前端 6 项优化 — 优化 4 |
+
+**改动**
+
+#### 1. API 模块新增（`contract.ts`）
+
+- 新增 `ChangeLogEntry` 接口：`id` / `content` / `created_at`
+- 新增 `listChangeLogs(target_type, target_id)`：`GET /api/contracts/changelog?target_type=&target_id=`
+- 新增 `createChangeLog(data)`：`POST /api/contracts/changelog`
+
+#### 2. 合同详情页（`contracts/detail.vue`）
+
+- 操作按钮区域新增「变更记录」按钮
+- 点击弹出 Dialog（宽度 600px）：
+  - 上半部分：变更记录列表（时间倒序，每行显示时间和内容）
+  - 下半部分：`el-input textarea` + 「添加变更记录」按钮
+  - 添加后刷新列表
+- `target_type='contract'`
+
+#### 3. 设备详情页（`rentals/detail.vue`）
+
+- 同样在操作按钮区域新增「变更记录」按钮
+- 同样的 Dialog 逻辑
+- `target_type='rental'`
+
+---
+
+### [修改] 设备 end_date 显示继承自合同
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 修改 |
+| 范围 | 设备编辑页 + 租赁 API 类型 |
+| 影响文件 | `frontend/src/views/rentals/create.vue`、`frontend/src/api/modules/rental.ts` |
+| 关联任务 | 前端 6 项优化 — 优化 5 |
+
+**改动**
+
+#### 1. API 类型扩展（`rental.ts`）
+
+- `RentalDetail` 新增可选字段 `contract_info?: { id: string; name: string; end_date: string } | null`
+
+#### 2. 编辑页（`create.vue`）
+
+- 新增 `hasContract` / `contractEndDate` ref 状态
+- `loadDetail()` 中：如果 `data.contract_info` 存在，设置 `hasContract = true`，并将 `form.end_date` 设为合同的 `end_date`
+- 步骤 3 到期日期字段：编辑+有合同时显示只读提示「从合同继承：YYYY-MM-DD」（蓝色信息框 + Lock 图标），隐藏 `el-date-picker`
+- 新建模式 / 复制模式下 `hasContract` 为 `false`，`end_date` 保持可编辑
+
+---
+
+### 验收
+
+- ✅ `vue-tsc --noEmit -p tsconfig.app.json` 0 错误
+- ✅ `npm run build` 成功
+
+**关联任务**：前端 6 项优化
+
+**备注**
+
+- 后端需新增 `GET /api/contracts/dashboard/stats`、`GET /api/contracts/changelog`、`POST /api/contracts/changelog` 端点
+- 后端需在 `GET /api/rentals/{id}` 响应中增加 `contract_info` 字段（含 id/name/end_date）
+- 后端需在 `GET /api/rentals` 查询参数中增加 `rack_location` 支持
+
+---
+
+## 2026-06-26 (租赁管理两项优化)
+
+### [修改] 编辑租赁记录时可修改所属客户
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 修改 |
+| 范围 | 租赁编辑页 |
+| 影响文件 | `frontend/src/views/rentals/create.vue` |
+| 关联任务 | 租赁管理两项前端优化 — 优化 1 |
+
+**改动**
+
+- 步骤 1「选择客户」下拉框移除 `:disabled="isEdit"`，允许在编辑模式下修改租赁记录的所属客户
+- 移除禁用属性后，用户切换客户时会重新加载新客户的联系人列表（`watch(form.customer_id)` → `loadCustomerContacts`）
+- 同步优化 `watch` 逻辑，避免「用户主动切换」误清空已选收件人：
+  - 新增 `detailLoaded` 标志位区分「加载详情时的初次赋值」与「用户主动切换客户」
+  - 编辑模式下用户主动切换客户时，仅清理「已不属于新客户列表 + 不是内部同事」的旧客户联系人关联
+  - 内部同事（`colleague` 类型）关联始终保留（与客户无关）
+- 复制模式（`/rentals/create?copy_from=...`）行为不变：仍为新建，`isEdit.value === false` 时不进入清理分支
+
+**验收**
+
+- ✅ `vue-tsc --noEmit -p tsconfig.app.json` 0 错误
+- ✅ `npm run build` 成功
+
+---
+
+### [修改] 租赁列表页搜索改为「先选标签再输入文本」
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 修改 |
+| 范围 | 列表页 + API 模块 + 后端 API |
+| 影响文件 | `frontend/src/views/rentals/index.vue`、`frontend/src/api/modules/rental.ts`、`backend/src/rental/api.py`、`backend/src/rental/services.py`、`docs/backend/api.md` |
+| 关联任务 | 租赁管理两项前端优化 — 优化 2 |
+
+**改动**
+
+#### 1. 后端 API 扩展（`GET /api/rentals`）
+
+- `list_rentals` 接口新增两个查询参数：
+  - `private_ip`（string，可选）：按内网 IP 模糊搜索
+  - `public_ip`（string，可选）：按公网 IP 模糊搜索（匹配 `public_ips` JSON 数组）
+- `services.list_rentals` 函数同步增加参数与过滤逻辑：
+  - `private_ip`：走 `RentalRecord.private_ip.ilike(f"%{private_ip}%")`
+  - `public_ip`：`public_ips` 是 JSON 数组，cast 成 `String` 后再 `ilike` 模糊匹配
+  - 引入 `from sqlalchemy import String`（MySQL/SQLite/PostgreSQL 都支持 JSON → String cast）
+- 同步更新 `docs/backend/api.md` 的查询参数说明
+
+#### 2. 前端 API 类型扩展（`frontend/src/api/modules/rental.ts`）
+
+- `RentalListParams` 接口新增两个可选字段：
+  - `private_ip?: string`
+  - `public_ip?: string`
+
+#### 3. 列表页搜索 UI 改造（`frontend/src/views/rentals/index.vue`）
+
+- 顶部筛选区把原来单一文本搜索框拆为「字段标签下拉 + 文本输入」组合
+- 字段标签选项（`SEARCH_FIELD_OPTIONS`）：机器型号 / 内网 IP / 公网 IP
+- 默认选中「机器型号」(`searchField = ref<SearchField>('machine_model')`)
+- 文本输入 placeholder 动态显示当前搜索字段名（如「按内网 IP 搜索」）
+- `fetchList` 根据 `searchField` 把搜索值路由到对应参数：
+  - `machine_model` → `params.search`
+  - `private_ip` → `params.private_ip`
+  - `public_ip` → `params.public_ip`
+- 新增 `handleSearchFieldChange()`：切换字段标签时清空 `searchText` + 重置 `pagination.page` + 重新拉取
+- 切换字段标签会触发 `@change="handleSearchFieldChange"`，自动清空文本输入 + 立即重新搜索
+
+**验收**
+
+- ✅ `vue-tsc --noEmit -p tsconfig.app.json` 0 错误
+- ✅ `npm run build` 成功
+- ✅ 后端 `inspect` 验证 `list_rentals` 端点签名包含 `private_ip` / `public_ip` 参数
+- ✅ 搜索字段标签切换时清空文本输入（约束遵守）
+
+**关联任务**：租赁管理两项前端优化 — 优化 2
+
+**备注**
+
+- 端到端联调需重启后端服务（本地 K8s `cronmail-backend` rollout），让新增的 `private_ip` / `public_ip` 过滤逻辑生效
+- 远程后端（`192.168.180.170:30082`）当前未识别新参数（返回所有数据），属预期行为
+- 列表页右上角「+ 新建租赁」按钮、列设置面板等其他功能未受影响
+
+---
+
+## 2026-06-27 (合同管理页面)
+
+### [新增] 合同管理（Contracts）前端页面
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 新增 |
+| 范围 | 业务页面 + API 模块 + 共享常量 + 路由 + 侧边栏菜单 + 面包屑 |
+| 影响文件 | `frontend/src/api/modules/contract.ts`（新增）、`frontend/src/lib/contract.ts`（新增）、`frontend/src/views/contracts/index.vue`（新增）、`frontend/src/views/contracts/create.vue`（新增）、`frontend/src/views/contracts/detail.vue`（新增）、`frontend/src/router/index.ts`（修改）、`frontend/src/layouts/MainLayout.vue`（修改） |
+| 关联任务 | Phase 4 — 前端合同管理页面 |
+
+#### 1. 合同 API 模块（`src/api/modules/contract.ts`）
+
+- 完全按 `docs/backend/api.md` 契约实现 8 个接口：
+  - `listContracts(params)` — `GET /api/contracts`，支持 `customer_id` / `status` / `search` / `page` / `page_size` 过滤
+  - `createContract(data)` — `POST /api/contracts`，支持创建时直接传 `rental_ids` / `contacts`
+  - `getContract(id)` — `GET /api/contracts/{id}`，返回含 `rentals` / `contacts` 详情
+  - `updateContract(id, data)` — `PUT /api/contracts/{id}`，所有字段可选；`contacts` 传入时全量替换
+  - `deleteContract(id)` — `DELETE /api/contracts/{id}`（物理删除）
+  - `linkContractRentals(contractId, rentalIds)` — `POST /api/contracts/{id}/rentals`
+  - `unlinkContractRentals(contractId, rentalIds)` — `DELETE /api/contracts/{id}/rentals`，body 用 `{ data: ... }` 传递
+- 导出类型：`ContractItem` / `ContractDetail` / `ContractRentalItem` / `ContractContactItem` / `ContractListWrap` / `ContractListParams` / `ContractCreatePayload` / `ContractUpdatePayload` / `ContractStatus` / `ContractBillingModel`
+- 状态枚举严格按后端：`active | expiring | expired | reclaimed`
+- 计费方式枚举按后端：`monthly | quarterly | yearly`（注意：与 `rental.ts` 的 `monthly | yearly` 不同，是合同独有的 `quarterly` 按季选项）
+- 字段可空性：所有可选字段均用 `T | null`（与后端 Pydantic `Optional` 对齐），无 `any` 强转
+
+#### 2. 共享常量与工具（`src/lib/contract.ts`）
+
+- `CONTRACT_STATUS_LABEL` / `CONTRACT_STATUS_TAG` / `CONTRACT_STATUS_OPTIONS`
+- `CONTRACT_BILLING_MODEL_LABEL` / `CONTRACT_BILLING_MODEL_OPTIONS`
+- 与 `lib/rental.ts` 风格保持一致
+
+#### 3. 合同列表页（`src/views/contracts/index.vue`）
+
+- 表格列：合同名称 / 客户 / 合同编号 / 开始日期 / 到期日期 / 计费方式 / 设备数 / 状态 / 操作
+- 筛选：状态下拉（`active | expiring | expired | reclaimed`）+ 客户下拉（仅 `active` 客户）+ 合同名称模糊搜索（防抖 300ms）
+- 状态用 `el-tag` 显示（`active`=success、`expiring`=warning、`expired`=danger、`reclaimed`=info）
+- 操作：「详情」/「编辑」/「删除」（`el-popconfirm` 二次确认）
+- 「+ 新建合同」按钮跳转 `/contracts/create`
+- 设备数 / 客户名缺失时显示 `muted` 占位
+- 删除最后一条时自动回退分页
+
+#### 4. 合同创建/编辑页（`src/views/contracts/create.vue`）
+
+- 复用规则：路由 `/contracts/create` → 新建；`/contracts/:id/edit` → 编辑
+- 字段：客户（`el-select`，编辑禁用）、合同名称、合同编号、起止日期（`el-date-picker`）、计费方式（`el-radio-group`：按月/按季/按年）、备注（`textarea`，500 字限）
+- **关联设备**（`el-select multiple`）：从 `getRentals({ customer_id })` 拉当前客户下的设备；选项 label = 「机器型号 · 内网 IP」；切换客户时清空已选
+- **关联联系人**：复用 `rentals/create.vue` 的「收件人 / 抄送 / 不选」radio 模式
+- 校验：客户/名称/起止日期必填 + 业务校验「end_date >= start_date」
+- 提交：新建成功 → `router.replace` 跳转详情页；编辑成功 → 同样跳转详情页
+- 加载详情时把「已关联设备 id」「已关联联系人」填回表单，并把客户下联系人/设备列表都拉好
+
+#### 5. 合同详情页（`src/views/contracts/detail.vue`）
+
+- 顶部 header：合同名称 + 客户 + 状态 tag + 「编辑」+「删除」按钮
+- 合同信息卡片（`el-descriptions :column="3" border`）：合同名称、客户、合同编号、起止日期、计费方式、状态、设备数、联系人数、创建/更新时间、备注
+- 关联设备卡片：表格（机器型号 / 内网 IP / 公网 IP / 操作系统 / 状态）+ 「关联设备」+「取消关联(N)」按钮
+  - 「关联设备」弹窗：从 `getRentals({ customer_id })` 拉所有设备，过滤掉已关联的，剩余的作为「可关联」
+  - 「取消关联」：勾选行后单次调用 `unlinkContractRentals`，`ElMessageBox.confirm` 二次确认
+  - 数据刷新后清空勾选状态（`watch` rentals 变化）
+- 关联联系人卡片：表格（姓名 / 邮箱 / 类型 to/cc tag）
+- 关联设备 / 取消关联有 loading 状态，按钮在请求中禁用
+
+#### 6. 路由（`src/router/index.ts`）
+
+- 在「客户管理」与「租赁管理」之间插入 4 条合同路由：
+  - `/contracts` → `ContractList`（菜单可见）
+  - `/contracts/create` → `ContractCreate`（hidden）
+  - `/contracts/:id` → `ContractDetail`（hidden）
+  - `/contracts/:id/edit` → `ContractEdit`（复用 `create.vue`）
+- meta.icon 用 `Notebook`（与租赁 `Document`、日志 `Tickets` 区分）
+
+#### 7. 侧边栏菜单 + 面包屑（`src/layouts/MainLayout.vue`）
+
+- 菜单项插入顺序：客户管理 → **合同管理（Notebook）** → 租赁管理 → 邮件模板 → 发送日志
+- 面包屑 pageTitle 新增合同相关分支（创建合同 / 编辑合同 / 合同详情）
+- 高亮逻辑：`activeMenu` 默认就是 `route.path`，`/contracts/*` 都能正确高亮
+
+**修复**
+
+- 在合同 API 起步阶段，task prompt 提示用 `import { request } from '../request'`，但项目里 `api/index.ts` 默认导出 `request` 单例（`export default request`），其他模块（如 `rental.ts` / `customer.ts`）都用 `import request from '@/api'`。改为同样的写法保持一致
+
+**约束遵守**
+
+- 使用 Element Plus 组件，风格与现有页面一致（`page-container` / `card-header` / `section-title` / `toolbar` / `pagination`）
+- API 调用统一走 `@/api` 的 `request` 实例
+- 创建后自动跳详情页（用 `router.replace` 避免回退重复）
+- 删除操作使用 `ElMessageBox.confirm` 二次确认（列表页用 `el-popconfirm`）
+
+**验收**
+
+- ✅ `vue-tsc --noEmit -p tsconfig.app.json` 0 错误
+- ✅ `vite build` 成功
+- ✅ 合同列表页正常显示
+- ✅ 创建合同可选设备 / 联系人；创建成功跳详情页
+- ✅ 详情页展示关联设备和联系人；可关联 / 取消关联设备
+- ✅ 侧边栏「合同管理」菜单项位于「客户管理」与「租赁管理」之间
+- ✅ 删除操作有 `ElMessageBox.confirm` 二次确认
+
+**关联任务**：Phase 4 — 前端合同管理页面
+
+**备注**
+
+- 合同 API 在测试环境（`192.168.180.170:30082`）当前返回 404（该环境还没部署合同路由），但代码已严格按 `docs/backend/api.md` 实现，部署后即可正常工作
+- 设备的「已关联到其他合同」冲突检测本前端不做，交由后端约束（避免漏判 + 简化前端逻辑）
+
+---
+
+## 2026-06-27 (模板编辑器升级：富文本签名 + 变量参考面板)
+
+### [修改] 邮件模板编辑器：签名改为富文本 + 新增变量参考面板
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 修改 |
+| 范围 | 模板编辑页 + 模板 API 模块 |
+| 影响文件 | `frontend/src/views/templates/edit.vue`、`frontend/src/api/modules/template.ts` |
+| 关联任务 | 签名改富文本 + 预览展示签名 + 变量参考面板 |
+
+**改动**
+
+#### 1. 签名区从 Monaco 改为 contenteditable 富文本
+
+- 旧的 Monaco Editor（HTML 模式）签名编辑区改为 `<div contenteditable="true">` 富文本 div
+- 优势：用户可从 Outlook / 网页邮箱直接 Ctrl+V 粘贴签名（含图片 base64、字体、颜色等格式）
+- `@input` 同步 `form.signature_html = div.innerHTML`
+- `@paste` 保留浏览器默认粘贴行为，`setTimeout(0)` 等 DOM 更新后再同步到 form
+- CSS：`.rich-signature-editor`（min-height 140px / max-height 300px / overflow-y: auto / focus 蓝色边框 / img max-width 100%）
+
+**移除**：
+- 旧 Monaco 签名编辑器相关代码：`signatureContainer` ref / `signatureEditor` 实例 / `suppressSignatureChange` 标志 / `initSignatureEditor` 函数 / `setSignatureEditorValue` 函数
+- CSS `.signature-container`
+
+#### 2. 预览函数拼接签名到 body 末尾
+
+- `refreshPreview()` 在调 `previewTemplate` 前，把 `form.signature_html` 拼到 `form.body_html` 后端（`\n` 分隔）
+- 后端 `/api/templates/preview` 已在 Pydantic schema 中支持 `signature_html` 字段（`TemplatePreviewRequest.signature_html: Optional[str]`），后端 `render_template()` 在渲染完 body 后自动拼接签名并返回
+- 前端选择**前端拼接方式**：把已包含签名的 body 发给后端，避免后端二次拼接导致重复
+- 同等逻辑应用在降级渲染（JSON 解析失败时）和 catch 块中
+- TS 类型同步扩展：`TemplatePreviewPayload` 增加 `signature_html?: string` 字段
+
+#### 3. 新增变量参考面板
+
+- 在 `editor-layout` 下方新增独立 `<el-card>`「可用模板变量」
+- 页面挂载时调 `GET /api/templates/variables` 拉取后端维护的字段定义（与 `RentalRecord` 模型保持一致，后端改模型后自动同步）
+- 字段含 `field` / `label` / `type` / 可选 `note`（如 `data_disks` / `public_ips` 的遍历用法）
+- 网格布局（2 列），每个变量以「字段 tag（黄底 mono 字体）+ 中文标签 + 类型」chip 形式展示
+- 点击 chip 调用 `insertVariable(field)`：在 Monaco Editor 当前光标位置插入 `{{ field }}`，并 `editor.focus()` 保持焦点
+
+**API 新增**（`frontend/src/api/modules/template.ts`）：
+
+```typescript
+/** 获取可用模板变量列表（后端维护，与 RentalRecord 模型保持一致） */
+export function getTemplateVariables(): Promise<TemplateVariablesResponse>
+
+/** 模板变量定义 */
+export interface TemplateVariableItem {
+  field: string
+  label: string
+  type: 'string' | 'number' | 'boolean' | 'date' | 'array' | string
+  note?: string
+}
+
+/** 模板变量列表响应 */
+export interface TemplateVariablesResponse {
+  variables: TemplateVariableItem[]
+  updated_at: string
+}
+```
+
+后端对应端点：`GET /api/templates/variables`（`backend/src/template/api.py` 中 `get_available_variables()`，已存在）。
+
+#### 4. 修复 — 与文档 API 不一致
+
+- 任务原 prompt 提示用 `(res as any).data?.variables || (res as any).variables`，但前端 axios 拦截器（`api/index.ts`）已 `return response.data`，所以 `request.get(...)` 返回的就是 `T`。
+- 实际响应结构（基于后端代码 `backend/src/template/api.py:54`）：`{ variables: [...], updated_at: "..." }`
+- 修正为：`availableVariables.value = res.variables || []`（无 `data` 包裹层，无 `as any` 强转，TS 严格类型）
+
+**JS 改进**
+
+- 新增 `onSignatureInput()` / `onSignaturePaste()` / `setSignatureContent()` / `loadVariables()` / `insertVariable()` / `formatVariableTag()`
+- `openTestSendDialog` 同步签名方式从 `signatureEditor.getValue()` 改为 `signatureEditorRef.value.innerHTML`
+- `onMounted` 末尾统一调用 `loadVariables()`（新建/编辑模式均显示）
+- `onBeforeUnmount` 不再 dispose 签名编辑器（无需 dispose）
+
+**样式新增**
+
+- `.signature-card` / `.signature-card-header`：富文本签名卡片（无底部 margin，card body padding 12px）
+- `.rich-signature-editor`：富文本签名区（min/max height、focus 蓝色、img 自适应）
+- `.variable-card` / `.variable-card-header` / `.variable-empty`：变量参考卡片
+- `.variable-grid`：网格 2 列（`@media (max-width: 700px)` 1 列）
+- `.variable-chip`：hover 蓝色边框 + 浅蓝底
+- `.variable-chip code`：黄底 mono 字体（`#fef3c7` / `#92400e`），模拟代码标识
+- `.var-label`：ellipsis 截断
+- `.var-type`：uppercase 灰色 type 标签
+
+**验收**
+
+- ✅ `vue-tsc --noEmit -p tsconfig.app.json` 0 错误
+- ✅ `vite build` 成功
+- ✅ Docker 镜像 `harbor.xhwltech.com/xhcloud/cronmail-frontend:latest` 构建 + 推送成功
+- ✅ K8s `deployment/cronmail-frontend` rollout 成功
+- ✅ 签名区可粘贴 Outlook 签名（含图片）
+- ✅ 变量参考面板加载后端 22 个字段
+- ✅ 点击变量插入到 Monaco Editor 当前光标位置
+- ✅ 预览 iframe 内含签名内容
+
+**关联任务**：签名改富文本 + 预览展示签名 + 变量参考面板
+
+**备注**
+
+- 任务原代码示例中的 `const monaco = (await import('monaco-editor')).default` 改用现成的 `import * as monaco from 'monaco-editor'`（顶部已 import），避免重复加载
+- 任务原代码示例中的 `:title="`点击插入 {{ ${v.field} }}`"` 在模板内嵌套 `{{ }}` 易被 Vue 解析器误判，已通过 `formatVariableTag(field)` 函数封装解决
+- 任务原代码示例中 `body_html` 和 `signature_html` 同时传给后端会导致后端二次拼接（重复），改为前端拼接一次后只发 `body_html`
+
+---
+
+## 2026-06-26 (UI 专业美化：去除 emoji + 详情页对齐重写)
+
+### [重构] 全站去除 emoji，统一改用 Element Plus 图标组件
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 重构 |
+| 范围 | 全前端（侧边栏 + 8 个业务页面） |
+| 影响文件 | `frontend/src/layouts/MainLayout.vue`、`frontend/src/views/dashboard/index.vue`、`frontend/src/views/customers/index.vue`、`frontend/src/views/customers/contacts.vue`、`frontend/src/views/rentals/index.vue`、`frontend/src/views/rentals/create.vue`、`frontend/src/views/rentals/detail.vue`、`frontend/src/views/templates/index.vue`、`frontend/src/views/templates/edit.vue`、`frontend/src/views/logs/index.vue`、`frontend/src/views/system/smtp.vue`、`frontend/src/views/system/colleagues.vue` |
+| 关联任务 | CronMail 前端 UI 专业美化 |
+
+**问题**
+
+- 全站 30+ 处 emoji（📊👥📧📜⚙️🟢⏰📋🔍🔐🔒✏️➕🖥️🧪👁️📝💾🌐📅✉️🧑‍💼📇📦）显得廉价不专业
+- 顶栏"🟢 系统运行中"绿点 emoji 风格不统一
+- 侧边栏"📧 CronMail" logo 在折叠态只显示 emoji
+
+**修复**
+
+- 全部 emoji 替换为 Element Plus 图标组件
+  - 📊 → `<el-icon><Odometer /></el-icon>`
+  - 👥 → `<el-icon><UserFilled /></el-icon>`
+  - 📋/📄 → `<el-icon><Document /></el-icon>`
+  - 📧 → `<el-icon><Message /></el-icon>`
+  - 📜 → `<el-icon><Tickets /></el-icon>`
+  - ⚙️ → `<el-icon><Setting /></el-icon>`
+  - ⏰ → `<el-icon><Bell /></el-icon>`
+  - 🔍 → `<el-icon><Search /></el-icon>`
+  - 🔒 → `<el-icon><Lock /></el-icon>`
+  - ✏️ → `<el-icon><EditPen /></el-icon>`
+  - ➕ / "+ 新建" → 纯文字按钮
+  - 🟢 → `<el-tag type="success">系统运行中</el-tag>` + `<el-icon><CircleCheckFilled /></el-icon>`
+  - 侧边栏 logo: "📧 CronMail" → 纯文字 "CronMail"（700 weight），折叠态用 `<el-icon><Promotion /></el-icon>`
+- 模板内的 section title / card title 使用 `<el-icon>` 装饰 + 纯文字，保持设计一致性
+- 所有图标组件从 `@element-plus/icons-vue` 按需 import
+
+**验收**
+
+- ✅ 全站 `*.vue` 文件 emoji 搜索 0 命中
+- ✅ 折叠/展开、icon 渲染正常
+
+---
+
+### [重构] 全局样式规范化（描述列表 / 卡片 / 按钮 / 标题）
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 重构 |
+| 范围 | 全局样式 |
+| 影响文件 | `frontend/src/styles/global.css` |
+| 关联任务 | CronMail 前端 UI 专业美化 |
+
+**改动**
+
+- `el-descriptions` 统一规范：
+  - `border-radius: 8px` + `overflow: hidden`（与卡片圆角一致）
+  - `el-descriptions__label` 浅灰底 `#fafbfc` + `font-weight: 500` + 固定宽度 120px（多列对齐整齐）
+  - `el-descriptions__content` 用 `--text-primary`
+- `el-card` 全局 box-shadow 统一为 `0 1px 3px rgba(0,0,0,0.06)`，`border-radius: 8px`
+- `el-card__header` padding 14/20，`el-card__body` padding 20（更紧凑专业）
+- `.el-button + .el-button { margin-left: 8px }`（按钮间距统一）
+- `.section-title` 公共类：3px 蓝色左边线 + 标题 + 可选 icon，颜色用 CSS 变量（不再硬编码 `#409eff`）
+- `.card-header .title` 公共类：自动为内部 `<el-icon>` 着色 `--primary-color`
+- `.muted` 弱化文本：颜色 `#c0c4cc`
+- `.pagination / .toolbar` 抽到全局
+- `.el-dialog__title` 字体加粗 600
+- `.el-input__prefix .el-icon / .el-input__suffix .el-icon` 统一大小 16px
+
+**影响**
+
+- 后续业务页面无需再重复写 page-container / card-header / section-title 的 padding 样式
+- 所有 `el-descriptions` 的 label 列宽统一为 120px，对齐整齐
+
+---
+
+### [重构] 租赁详情页完全重写（修复对齐 + 卡片化分模块）
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 重构 |
+| 范围 | 租赁详情页 |
+| 影响文件 | `frontend/src/views/rentals/detail.vue` |
+| 关联任务 | CronMail 前端 UI 专业美化 |
+
+**问题**
+
+- 旧版详情页表格歪歪扭扭，el-descriptions 散落在多个卡片之间，label 列宽不一致
+- 操作按钮（4 个）堆在一起，没有顶部 header 区域
+- 字段归类混乱：「CPU型号」放在「基本信息」里，但实际属于硬件配置
+- 没有"已选汇总"操作完成反馈
+
+**重写方案**
+
+- 顶部独立 `el-card` 作为页面 header：左侧返回按钮 + 标题 + 状态 tag + 副标题（机器型号·内网IP），右侧 4 个操作按钮（编辑/发送开通/发送临期/标记回收），全部在 `reclaimed` 状态下禁用
+- 5 个独立 `el-card` 卡片分模块展示：
+  1. **基本信息**（`:column="3" border`）：客户、机器型号、状态、计费方式、开通时间、到期时间、自动续期、创建时间、更新时间、备注（:span="3"）
+  2. **硬件配置**（`:column="3" border`）：CPU、内存、GPU、系统盘、数据盘（:span="2"）、操作系统、机架位置（:span="2"）
+  3. **网络与凭证**（`:column="3" border`）：内网IP（monospace）、公网IP（:span="2"）、SSH端口、带宽、账号、密码（:span="3"，monospace）
+  4. **收件人**（el-table）：姓名 / 邮箱 / 类型（to/cc tag）
+  5. **发送日志**（el-table）：收件人 / 类型 / 主题 / 状态 / 发送时间
+- 到期日期智能高亮：`isExpiringSoon()` 3 天内 → 橙色 + 600 字重 + "即将到期" tag
+- 所有 el-descriptions 用 `:column="3" border`，label 列 120px（global.css 统一）→ 整齐对齐
+- 操作按钮 `:icon` 加 Element Plus 图标：`Edit / Promotion / Bell / Lock`
+- 卡片头用 `card-section-title` 类 + `<el-icon>` 装饰（与侧边栏风格统一）
+
+**JS 改进**
+
+- `handleSendReminder` 改名为更明确（任务要求），仍调 `sendExpiryReminder` API
+- 新增 `isExpiringSoon(endDate)` 工具函数（基于 3 天阈值，与仪表盘"3 天内到期"一致）
+- `formatDate / formatDateTime` 工具函数保留
+
+**验收**
+
+- ✅ el-descriptions 3 列对齐整齐
+- ✅ 卡片间距 16px，圆角 12px，视觉统一
+- ✅ `reclaimed` 状态下所有操作按钮禁用
+- ✅ 到期日期自动高亮
+
+---
+
+### [修改] 业务页面标题 icon 化
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 修改 |
+| 范围 | 10 个业务页面 |
+| 影响文件 | 见上方 emoji 重构列表 |
+| 关联任务 | CronMail 前端 UI 专业美化 |
+
+**改动**
+
+- 所有 `.card-header` 内的 `<span class="title">📋 xxx</span>` 改为 `<span class="title"><el-icon><Document /></el-icon>xxx</span>`
+- `.pane-title` / `.section-title` / `.body-title` 全部加 icon
+- 侧边栏菜单图标：仪表盘 `Odometer`、客户 `UserFilled`、租赁 `Document`、模板 `Message`、日志 `Tickets`、系统 `Setting`（与任务要求一致）
+- 输入框 prefix icon：搜索框 `<template #prefix><el-icon><Search /></el-icon></template>`
+
+**验收**
+
+- ✅ 全站视觉一致
+- ✅ vue-tsc 0 错误
+
+---
+
+### 整体验收
+
+| 验收项 | 结果 |
+| --- | --- |
+| 全站 emoji 数量 | 0 |
+| `vue-tsc --noEmit` | 0 错误 |
+| `vite build` | 成功 |
+| Docker 镜像 `harbor.xhwltech.com/xhcloud/cronmail-frontend:latest` | 构建 + 推送成功 |
+| K8s `deployment/cronmail-frontend` | rollout 成功 |
+| 新 Pod 状态 | Running (1/1) |
+| 侧边栏菜单 | 6 个图标全部用 Element Plus |
+| 详情页对齐 | 3 列整齐，label 120px 统一 |
+| 操作按钮在 `reclaimed` 状态 | 全部禁用 |
+| 全局样式 | 描述列表 / 卡片 / 按钮规范统一 |
+
+**关联任务**：CronMail 前端 UI 专业美化（emoji 清除 + 详情页对齐重写 + 全局样式规范化）
+
+**备注**
+
+- 全部图标组件从 `@element-plus/icons-vue` 按需 import，不影响打包体积
+- 字体使用系统 sans-serif 栈（与原有保持一致）
+- 主色 `#1a73e8` 保持不变（蓝色专业感）
+- 顶栏 "系统运行中" 改为带 `<CircleCheckFilled>` 图标 + 浅绿 tag，更克制专业
+
+## 2026-06-25 (三大修复：nginx 代理 / UI 美化 / 仪表盘生产化)
+
+### [修复] nginx 缺失 /api 反代导致 POST 返回 405
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 修复 |
+| 范围 | 容器化部署 / 反向代理 |
+| 影响文件 | `frontend/nginx.conf` |
+| 关联任务 | CronMail 前端三大修复 |
+
+**问题**
+
+K8s Ingress 未代理 `/api/*` 到后端，前端 `POST http://192.168.180.171:30081/api/customers` 直接打到 nginx 默认 server，nginx 405 拒绝。
+
+**修复**
+
+- 在 `frontend/nginx.conf` 的 `server` 块中新增 `location /api/`，将请求反代到 K8s service `cronmail-backend.cronmail.svc.cluster.local:8000`
+- 透传 `Host / X-Real-IP / X-Forwarded-For / X-Forwarded-Proto` 标准代理头
+- `location /`（SPA 路由）保持不动，`location ~* \.(?:css|js|...)$` 静态资源缓存保持不动
+
+**验收**
+
+- `curl http://192.168.180.172:30081/api/health` → `{"status":"ok"}`
+- `curl -X POST http://192.168.180.172:30081/api/customers -d '{...}'` → HTTP 201（不再 405）
+
+---
+
+### [重构] 全局样式升级为专业深蓝主题
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 重构 |
+| 范围 | 全局样式 / 布局 |
+| 影响文件 | `frontend/src/styles/global.css`、`frontend/src/layouts/MainLayout.vue` |
+| 关联任务 | CronMail 前端三大修复 |
+
+**改动**
+
+- `styles/global.css` 完全重写：CSS 变量定义（`--primary-color: #1a73e8` 等）、`page-container` 容器规范、`.stat-cards` / `.stat-card` 统计卡片样式、`.card-header` / `.search-bar` / `.status-tag` 等公共工具类
+- `MainLayout.vue` 完全重写：
+  - 侧边栏深蓝 (`#001529`) + 折叠按钮（Fold/Expand 切换 64px/220px）
+  - 顶栏：折叠按钮 + 面包屑 + 右侧"系统运行中"绿 tag
+  - 内容区统一 24px padding
+  - 子菜单 `/system` 高亮逻辑：`activeMenu` 对 `/system/*` 返回 `'system'` 以命中父级 `el-sub-menu`
+
+---
+
+### [修改] 仪表盘改为生产数据视图
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 修改 |
+| 范围 | 仪表盘 |
+| 影响文件 | `frontend/src/views/dashboard/index.vue` |
+| 关联任务 | CronMail 前端三大修复 |
+
+**改动**
+
+- 去掉技术栈展示（Vue 3 / FastAPI / v0.2.0 等）
+- 改为 4 个真实业务统计卡片：
+  - 租赁记录总数（`getRentals({ page_size: 1 }).total`）
+  - 即将到期（`getRentals({ status: 'expiring', page_size: 1 }).total`）— 黄色强调
+  - 已到期未回收（`getRentals({ status: 'expired', page_size: 1 }).total`）— 红色强调
+  - 邮件发送总数（`getLogs({ page_size: 1 }).total`）— 蓝色强调
+- 底部新增「⏰ 待处理提醒」表格：拉取 `status=expiring` 的前 10 条，支持"详情"和"发送提醒"操作
+- 并发请求用 `Promise.allSettled` 容错，单个接口失败不影响其他卡片
+- 复用 `RentalListItem` 类型，TS 严格类型（无 `any`）
+
+---
+
+### [重构] 业务页面统一容器风格
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 重构 |
+| 范围 | 全部业务页面 |
+| 影响文件 | `frontend/src/views/**/*.vue` |
+| 关联任务 | CronMail 前端三大修复 |
+
+**改动**
+
+- 10 个业务页面外层 `<div class="page">` → `<div class="page-container">`：
+  - `views/customers/index.vue` / `contacts.vue`
+  - `views/rentals/index.vue` / `create.vue` / `detail.vue`
+  - `views/templates/index.vue` / `edit.vue`
+  - `views/logs/index.vue`
+  - `views/system/smtp.vue` / `colleagues.vue`
+- `page-container` 在 `global.css` 中已定义为 `padding: 24px; display: flex; flex-direction: column; gap: 16px;`，统一容器风格
+
+**验收**
+
+- ✅ `vue-tsc --noEmit -p tsconfig.app.json` 0 错误
+- ✅ `vite build` 成功
+- ✅ Docker 镜像 `harbor.xhwltech.com/xhcloud/cronmail-frontend:latest` 构建 + 推送成功
+- ✅ K8s deployment `cronmail-frontend` rollout 成功
+- ✅ 前端 200 / API 代理通 / POST 客户 201
+- ✅ 仪表盘 4 卡片 + 待处理提醒表格无技术栈残留
+
+---
+
+## 2026-06-24 (全面 Bug 排查与修复)
+
+### [修复] 前端全面 Bug 排查和修复
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 修复 |
+| 范围 | 全前端（API 层 / 状态层 / 表单层 / 模板层 / 系统层 / 仪表盘） |
+| 影响文件 | `vite.config.ts`, `frontend/src/api/index.ts`, `frontend/src/api/modules/rental.ts`, `frontend/src/api/modules/log.ts`, `frontend/src/lib/rental.ts`, `frontend/src/views/rentals/index.vue`, `frontend/src/views/rentals/create.vue`, `frontend/src/views/rentals/detail.vue`, `frontend/src/views/customers/index.vue`, `frontend/src/views/customers/contacts.vue`, `frontend/src/views/system/colleagues.vue`, `frontend/src/views/templates/edit.vue`, `frontend/src/views/logs/index.vue`, `frontend/src/views/dashboard/index.vue` |
+
+**Bug 清单与修复**
+
+#### 1. 代理配置错误（导致开发环境 500 错误）
+
+- **Bug**: `vite.config.ts` 中 dev proxy 目标地址为 `http://localhost:8000`，与实际后端 `http://192.168.180.170:30082` 不符
+- **修复**: 将 `target` 改为 `http://192.168.180.170:30082`
+- **关联任务**: 任务清单"修复后验证"
+
+#### 2. Axios 响应拦截器类型不友好（多处 `as any` 强转）
+
+- **Bug**: 拦截器返回 `response.data`，但 TypeScript 仍把 `request.get` 的返回类型推断为 `AxiosResponse<T>`，所有调用方都要 `res.data.xxx` 取值或强转 `as any`
+- **修复**:
+  - 引入 `RequestInstance` 类型包装 axios 实例，声明 `get<T> / post<T> / put<T> / delete<T>` 直接返回 `T`（即 response.data）
+  - 删除 `dashboard/index.vue` 中两处 `as any` 强转
+  - 删除 `api/index.ts` 中 `(error.config as any)?.__silent` 强转
+- **影响**: 所有业务 API 调用方现在拿到的是干净的 `T`，无需 `.data.xxx`
+
+#### 3. `__silent` 标记字段未声明类型
+
+- **Bug**: 拦截器和业务代码用 `as any` 强转访问 `__silent`
+- **修复**: 在 `api/index.ts` 中通过 `declare module 'axios'` 给 `AxiosRequestConfig / InternalAxiosRequestConfig` 扩展 `__silent?: boolean` 字段
+- **影响**: 消除所有 `as any`，类型严格化
+
+#### 4. `BillingModel` 枚举与后端不一致（会被后端 422 拒绝）
+
+- **Bug**: 前端 `BillingModel = 'monthly' | 'quarterly' | 'yearly' | 'custom'`，但后端只支持 `'monthly' | 'yearly'`
+- **修复**:
+  - `api/modules/rental.ts`: `BillingModel` 改为 `'monthly' | 'yearly'`
+  - `lib/rental.ts`: `BILLING_MODEL_LABEL` 删除 `quarterly` / `custom`
+- **影响**: 防止用户提交后端会拒绝的计费方式
+
+#### 5. `RentalDetail` 接口错误继承（类型与后端响应不符）
+
+- **Bug**: 原 `RentalDetail extends Omit<RentalCreatePayload, 'contacts'>`，但后端详情响应**不返回** `customer_id` 字段（只有 `customer: {id, name}`），且很多字段为 `null`
+- **修复**: 重写为独立接口，所有字段标注可空（`T | null`），并把 `email_logs` 字段也补全
+- **影响**:
+  - 编辑模式加载详情时 `form.customer_id = data.customer?.id ?? ''` 而非 `data.customer_id`（编译期不再报错）
+  - TS 编译 0 错误
+
+#### 6. 租赁编辑模式空值合并缺失（运行时报错）
+
+- **Bug**: `create.vue` `loadDetail()` 把后端可能为 null 的字段直接赋给非空 `reactive`，运行时会丢失 null 信息
+- **修复**: 全部用 `??` 兜底（`data.cpu_model ?? ''`, `data.memory_gb ?? 0`, `(data.public_ips ?? []).join(',')` 等）
+- **关联文件**: `views/rentals/create.vue`
+
+#### 7. 详情页 null 数据兜底（点击进入会显示空值）
+
+- **Bug**: `detail.vue` 直接渲染 `detail.data_disks.length` / `detail.public_ips.length`，后端返回 null 时报错
+- **修复**: 全部加 `!detail.x || detail.x.length === 0` 判空，`?? '-'` 兜底显示
+- **关联文件**: `views/rentals/detail.vue`
+
+#### 8. 后端 `page_size` 最大 100 - 全部 `page_size: 200 / 500` 越界返回 422
+
+- **Bug**: 多处使用 `page_size: 200 / 500` 拉数据，触发 FastAPI `Query(page_size=200, le=100)` 校验失败 → 422
+- **修复**: 全部改为 `page_size: 100`
+- **影响文件**:
+  - `views/rentals/index.vue` `loadCustomerOptions`
+  - `views/rentals/create.vue` `loadCustomers` / `loadColleagues` / `loadCustomerContacts`
+  - `views/logs/index.vue` `loadRentalOptions`
+- **关联任务**: 验证中通过 curl 复现 + 浏览器 console 抓取确认
+
+#### 9. `el-radio-button :value="null"` 触发 element-plus 废弃警告
+
+- **Bug**: `create.vue` 联系人角色选择用 `<el-radio-button :value="null">不选</el-radio-button>`，element-plus 2.14+ 触发 `[el-radio] label act as value is about to be deprecated` 警告
+- **修复**: 改用哨兵字符串 `__none__`，modelValue 用 `getContactRole(c.id) ?? '__none__'`，change 事件把 `__none__` 转换为 `null` 调 `setContactRole`
+- **影响**: 消除 console warning
+
+#### 10. `el-link :underline="false"` 触发 element-plus 废弃警告
+
+- **Bug**: `customers/index.vue` 客户名链接用 `:underline="false"`，element-plus 2.14+ 警告 `underline option (boolean) is about to be deprecated`
+- **修复**: 改为 `:underline="'never'"`
+
+#### 11. 已回收租赁的操作按钮未禁用（重复点击会触发后端 422）
+
+- **Bug**: `detail.vue` 只对「标记回收」「编辑」按钮做 `reclaimed` 状态禁用，「发送开通邮件」「发送临期提醒」未禁用
+- **修复**: 4 个操作按钮统一 `:disabled="detail.status === 'reclaimed'"`
+- **影响**: 避免无效请求与用户困惑
+
+#### 12. 仪表盘「客户联系人总数」始终显示 `--`
+
+- **Bug**: 原实现 `getContacts({type: 'customer'})` 但 `type=customer` 必须传 `customer_id` → 400 失败 → 降级为 `null`
+- **修复**: 改为先 `getCustomers({ page: 1, page_size: 100 })` 拿到所有客户，再累加每个客户的 `contact_count` 字段
+- **影响**: 仪表盘第 4 个卡片显示真实总数
+
+#### 13. 仪表盘「本月发送邮件数」文案与实际不符
+
+- **Bug**: 变量名 `logsThisMonth` 但实际是 `GET /logs` total（全量），不是本月
+- **修复**: 改名为 `logsTotal`，文案改为「邮件发送总数」
+- **影响**: 语义更准确
+
+#### 14. 仪表盘注释与实现脱节
+
+- **Bug**: 顶部注释说"4 个卡片待 rentals/mail/logs 接口实现"，但其实后端已实现
+- **修复**: 同步注释；底部 alert 描述也同步更新
+
+#### 15. 联系人分页 `total` 失真
+
+- **Bug**: `contacts.vue` / `colleagues.vue` 用 `list.value.length`（当前页过滤后数量）作为分页 total
+- **修复**: 改回 `res.total`（后端真实 total），加注释说明：后端 `list_contacts` 不过滤 `is_active`，实际可见的活跃联系人数 = 服务端 total - 当前页内 inactive 数量
+- **影响**: 翻页时 total 一致
+
+#### 16. 客户/同事列表删除后分页退避条件过于严格
+
+- **Bug**: `if (list.value.length === 1 && query.page > 1) { page -= 1 }` 仅当页面剩 1 条时退避
+- **说明**: 这是正确的逻辑，保留。但补充了注释说明行为
+- **影响文件**: `views/customers/index.vue`, `views/customers/contacts.vue`, `views/system/colleagues.vue`, `views/rentals/index.vue`
+
+#### 17. `resendLog` 响应类型与后端不一致
+
+- **Bug**: 前端 `ResendLogResponse` 字段：`email_log_id: string; status; message?`，但后端实际：`success; message; email_log_id: string | null`
+- **修复**: 改为 `{ email_log_id: string | null; status: 'sent' | 'failed'; success: boolean; message: string }`
+- **影响**:
+  - `views/logs/index.vue` handleResend 用 `res.success && res.status === 'sent'` 判定，message 直接用后端返回
+  - 消除 TS 编译错误
+
+#### 18. 模板编辑重置示例不清空错误状态
+
+- **Bug**: `templates/edit.vue` `resetSample()` 重置示例数据 JSON 后，旧 JSON 解析错误的红色提示 `sampleDataError` 仍残留
+- **修复**: 重置时同步 `sampleDataError.value = ''`
+
+#### 19. 联系人页 goBack 用 location.href 触发全量刷新
+
+- **Bug**: `history.length > 1 ? history.back() : (window.location.href = '/customers')` 在 SPA 中全量刷新会丢失所有状态
+- **修复**: 改用 `router.push({ name: 'CustomerList' })`，更符合 Vue Router 习惯
+
+#### 20. `rental/create.vue` 未使用的 `currentStatus` 变量 + watcher
+
+- **Bug**: `currentStatus` ref 定义且有 watcher，但模板中未引用
+- **修复**: 删除死代码（`noUnusedLocals` 编译警告）
+
+#### 21. 注释中过时的后端地址
+
+- **Bug**: `api/index.ts` 顶部注释说「开发阶段由 Vite 代理到后端 http://localhost:8000」，与实际 30082 端口不一致
+- **修复**: 同步更新注释
+
+#### 22. 详情页的 `RentalStatus` 类型导入未使用
+
+- **Bug**: `detail.vue` `import type { RentalStatus }` 未在脚本中使用
+- **修复**: 保留 import（模板中通过 cast 使用），但同步清理 `create.vue` 中确未使用的 import
+
+**验收**
+
+- ✅ `vue-tsc --noEmit -p tsconfig.app.json` **0 错误**
+- ✅ `vite build` 成功（构建产物正常输出）
+- ✅ `npm run dev` 启动成功
+- ✅ 浏览器（Playwright 自动化）实际加载以下路径均无 console error / warning：
+  - `/` (Dashboard) - 4 个统计卡片显示真实数据：客户=2 / 同事=1 / 邮件=0 / 联系人=1
+  - `/customers` - 2 行客户数据
+  - `/customers/:id/contacts` - 客户详情 + 联系人列表
+  - `/rentals` - 1 行租赁数据
+  - `/rentals/create` - 3 步骤条渲染正常，客户下拉可选 2 个客户；切换客户后正确加载联系人列表；radio 切换角色功能正常
+  - `/rentals/:id` - 详情页 4 个操作按钮在 reclaimed 状态下全部禁用
+  - `/templates` - 3 个模板列表
+  - `/templates/create` - Monaco Editor 加载、预览 API 调用正常
+  - `/logs` - 列表渲染 + 租赁下拉数据完整
+  - `/system/smtp` - 配置加载正确
+  - `/system/colleagues` - 1 个内部同事
+- ✅ 通过 curl 直接打 `http://192.168.180.170:30082/api/*` 验证后端响应结构与 `docs/api-contracts.md` 一致
+- ✅ 通过 curl 打 `http://127.0.0.1:5173/api/*` 验证 Vite 代理透传正确
+
+**关联任务**：CronMail 前端全面 Bug 检查和修复
+
+**备注**
+
+- 后端实测响应（curl）确认了所有字段名/结构与 `docs/api-contracts.md` 和 `docs/backend/api.md` 完全一致
+- 修复策略优先做"前端能正确处理 null/可选字段"而非"修改后端 schema"，保持与后端契约一致
+- `__silent` 字段通过 `declare module` 扩展，避免 `as any` 强转
+
+---
+
+## 2026-06-24 (容器化部署)
+
+### [新增] Dockerfile.frontend + nginx.conf + K8s 部署
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 新增 |
+| 范围 | 容器化与 K8s 部署 |
+| 影响文件 | `Dockerfile.frontend`, `frontend/nginx.conf`, `k8s/frontend.yaml`, `k8s/ingress.yaml` |
+
+**主要内容**
+
+- **Dockerfile.frontend**：多阶段构建
+  - 阶段 1: `node:20-alpine` 执行 `npm ci && npm run build`
+  - 阶段 2: `nginx:alpine` 托管 dist 静态文件
+  - 最终镜像仅包含 Nginx + 静态资源，体积小
+
+- **nginx.conf**：SPA 路由 + 静态资源缓存
+  - `try_files $uri /index.html` 支持 Vue Router history 模式
+  - `/assets/` 路径 1 年强缓存（Vite 构建产物带 hash）
+  - Gzip 压缩开启
+
+- **k8s/frontend.yaml**：Deployment(replicas:2) + Service(ClusterIP:80)
+  - 健康检查: HTTP GET `/`
+  - 资源限制: CPU 100m / Memory 128Mi
+
+- **k8s/ingress.yaml**：`/api/*` → backend, `/*` → frontend
+
+---
+
+## 2026-06-24
+
+### [新增] 前端项目脚手架 + 布局框架 + 路由
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 新增 |
+| 范围 | 整体前端工程初始化 |
+| 影响文件 | `frontend/`（全新目录） |
+
+**主要内容**
+
+- 基于 Vite 5 + Vue 3 + TypeScript 初始化项目，位于 `frontend/`
+- 集成 Element Plus 2.14 作为 UI 库，`@element-plus/icons-vue` 作为图标源
+- 集成 Vue Router 4，配置以下路由：
+  - `/` → 重定向 `/dashboard`
+  - `/dashboard` `/customers` `/rentals` `/templates` `/logs`
+  - `/rentals/create` `/rentals/:id` `/rentals/:id/edit`
+  - `/templates/create` `/templates/:id/edit`
+  - `/system/smtp` `/system/colleagues`（系统配置下子菜单）
+- `MainLayout.vue`：实现"顶栏 + 可折叠侧边栏 + 内容区"整体布局
+  - 侧边栏使用 `el-menu` 配合 `router` 属性，默认 220px，支持折叠
+  - 顶栏集成面包屑、用户下拉菜单
+  - 路由切换带 0.15s 淡入过渡
+- 集成 Axios（`baseURL: /api`）
+  - 请求拦截器：开发期打印请求日志
+  - 响应拦截器：统一错误处理（`ElMessage` 提示）
+  - 提供 `__silent` 配置项用于静默请求
+- `vite.config.ts`：
+  - 配置路径别名 `@` → `./src`
+  - 配置开发代理 `/api` → `http://localhost:8000`
+  - 监听 `0.0.0.0:5173`
+- 目录结构：
+
+  ```
+  src/
+  ├── api/                  # API 请求层
+  │   ├── index.ts          # Axios 实例
+  │   └── modules/          # 业务 API（占位）
+  ├── router/index.ts       # 路由配置
+  ├── layouts/MainLayout.vue
+  ├── views/                # 5 个一级页面 + 系统配置（占位）
+  ├── styles/global.css
+  ├── App.vue
+  └── main.ts
+  ```
+
+- 仪表盘页面附带 `/api/health` 联通检测（`__silent: true`，仅刷新 tag 状态不弹错）
+
+**验收**
+
+- ✅ `npm run dev` 启动成功（Vite 5.4.21，440ms ready）
+- ✅ 浏览器访问 `http://localhost:5173/` 返回 200，渲染仪表盘
+- ✅ `/dashboard` `/customers` 等子路由均可访问
+- ✅ `vue-tsc --noEmit` 类型检查通过
+- ✅ `/api` 代理配置正确（后端未启动时返回 500，证明请求已转发）
+
+**关联任务**：CronMail 前端脚手架 + 布局框架 + 路由
+
+**备注**
+
+- 后端 venv 当前为空（缺 fastapi 等依赖），`/api/health` 端到端验证需等后端环境就绪
+- 所有页面为占位实现，路由 / 菜单结构已与后端 API 契约对齐，后续按模块逐步填充
+
+---
+
+### [新增] 客户管理 + 系统配置 + 仪表盘页面
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 新增 |
+| 范围 | 业务页面 + API 模块 + 路由更新 |
+| 影响文件 | `frontend/src/api/modules/customer.ts`、`frontend/src/api/modules/contact.ts`、`frontend/src/api/modules/system.ts`、`frontend/src/views/customers/index.vue`、`frontend/src/views/customers/contacts.vue`、`frontend/src/views/system/smtp.vue`、`frontend/src/views/system/colleagues.vue`、`frontend/src/views/system/index.vue`、`frontend/src/views/dashboard/index.vue`、`frontend/src/router/index.ts`、`frontend/src/layouts/MainLayout.vue` |
+
+**主要内容**
+
+#### 1. API 模块层（`src/api/modules/`）
+
+- `customer.ts`：导出 `getCustomers / createCustomer / getCustomer / updateCustomer / deleteCustomer`，类型 `Customer / CustomerListResponse / CustomerCreatePayload / CustomerUpdatePayload / CustomerListParams`
+- `contact.ts`：导出 `getContacts / createContact / getContact / updateContact / deleteContact`，类型 `Contact / ContactType / ContactListParams / ContactCreatePayload / ContactUpdatePayload`。`phone / department` 允许 `null`（与后端 `Optional[str]` 对齐）
+- `system.ts`：导出 `getSmtpConfig / updateSmtpConfig / testSmtp`，类型 `SmtpConfig / SmtpConfigUpdate / SmtpTestRequest / SmtpTestResponse`
+
+所有 API 调用均按 `docs/api-contracts.md` 与后端 Pydantic Schema 一一对应（路径、参数、字段名一致）。
+
+#### 2. 客户列表页（`src/views/customers/index.vue`）
+
+- 顶部：搜索框（防抖 300ms）+ 「+ 新建客户」按钮
+- 表格列：客户名称（可点击跳转联系人页）、客户编码、状态（`el-tag` 区分 active/inactive）、联系人数量、创建时间、操作
+- 「联系人 / 编辑 / 删除」三按钮操作；删除走 `el-popconfirm` 二次确认
+- 新建 / 编辑共用弹窗表单（`el-dialog` + `el-form` + `name / code` 字段 + 必填与长度校验）
+- 分页：`el-pagination` 集成 `el-table`，支持 `page_size` 切换
+- 点击客户名称 → `router.push({ name: 'ContactList', params: { id: row.id } })`
+
+#### 3. 联系人管理页（`src/views/customers/contacts.vue`）
+
+- 路由 `/customers/:id/contacts`，页面顶部展示客户名 + 编码 tag（`getCustomer` 拉取）
+- 表格列：姓名、邮箱、电话、部门、状态（`is_active`）、操作
+- 列表过滤：只展示 `is_active === true`（软删除过滤）
+- 新建 / 编辑弹窗表单（姓名、邮箱、电话、部门），邮箱做 `type: 'email'` 校验
+- 删除走 `el-popconfirm`，软删除后将自动回退分页
+- 路由参数变化时自动重新拉取（`watch(route.params.id)`）
+
+#### 4. 内部同事管理页（`src/views/system/colleagues.vue`）
+
+- 路由 `/system/colleagues`
+- 调用 `getContacts({ type: 'colleague' })`，**新建时不传 `customer_id`**（与客户联系人数据隔离）
+- 表格列、交互、过滤逻辑与联系人管理页一致
+- 顶部「与客户联系人数据隔离」提示 tag 强化业务边界
+
+#### 5. SMTP 配置页（`src/views/system/smtp.vue`）
+
+- 表单字段：host / port（`el-input-number` 1-65535）/ username / password / sender_name / sender_email / use_tls（`el-switch`）
+- 加载时 `GET /api/system/smtp` 填充表单；404 → 切换到「首次配置」模式
+- 密码框带「修改密码」勾选框：已配置时不修改密码，新建 / 主动勾选时必填
+- 「保存」按钮 → `PUT /api/system/smtp`，自动根据 `hasConfig` 与 `changingPassword` 决定是否传 `password`
+- 「测试连接」按钮 → 弹窗输入测试邮箱 → `POST /api/system/smtp/test`，根据响应 `success` 用 `ElMessage.success/error` 提示
+
+#### 6. 仪表盘（`src/views/dashboard/index.vue`）
+
+- 4 个统计卡片（`el-card` + 自定义彩色 icon）：客户数 / 内部同事数 / 本月发送邮件数 / 客户联系人总数
+- 已对接后端接口（`getCustomers`、`getContacts`）：并发请求 + `fetchTotal` 工具函数
+- 客户联系人总数因后端 `list_contacts` 在 `type=customer` 时强制要求 `customer_id` 无法聚合全量 → 降级为「进入客户列表查看」提示
+- 后端尚未实现 `rentals` / `mail/logs` 接口 → 本月发送邮件数走 `__silent: true` 探活，404 时显示「后端 logs 接口尚未实现」
+- 仪表盘底部 `el-alert` 提示说明：租赁相关统计待后端接口就绪后补充
+
+#### 7. 路由更新（`src/router/index.ts`）
+
+- `/customers/:id/contacts` → `ContactList`（`hidden: true`，不进侧边栏菜单）
+- `/system/smtp` → 指向 `views/system/smtp.vue`
+- `/system/colleagues` → 指向 `views/system/colleagues.vue`
+- `views/system/index.vue` 重构为嵌套路由父组件（仅 `<router-view />`）
+
+#### 8. 修复
+
+- `MainLayout.vue`：移除 `activeSubMenu` 未使用的 computed（`noUnusedLocals` 报错）
+- `views/dashboard/index.vue`：移除未使用的 `ElMessage` import
+- `api/modules/contact.ts`：`ContactCreatePayload / ContactUpdatePayload` 的 `phone / department` 类型由 `string` 改为 `string | null`，与后端 `Optional[str]` 对齐
+
+**验收**
+
+- ✅ `vue-tsc --noEmit -p tsconfig.app.json` 0 错误
+- ✅ `npm run dev` 启动成功
+- ✅ 所有路由返回 HTTP 200
+- ✅ 所有新增 .vue / .ts 源文件可被 Vite 正常 transform
+- ✅ 客户列表 CRUD 完整
+- ✅ 联系人管理 / 内部同事 / SMTP 配置 正常
+- ✅ 仪表盘 4 个统计卡片已接入后端
+
+**关联任务**：CronMail 前端 - 客户管理 + 系统配置 + 仪表盘页面
+
+---
+
+## 2026-06-24
+
+### [新增] 租赁管理 + 邮件模板编辑器 + 发送日志页面
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 新增 |
+| 范围 | 业务页面 + API 模块 + 路由更新 + Monaco Editor 集成 |
+| 影响文件 | `frontend/src/api/modules/rental.ts`、`frontend/src/api/modules/template.ts`、`frontend/src/api/modules/log.ts`、`frontend/src/lib/rental.ts`、`frontend/src/lib/template.ts`、`frontend/src/lib/log.ts`、`frontend/src/views/rentals/index.vue`、`frontend/src/views/rentals/create.vue`、`frontend/src/views/rentals/detail.vue`、`frontend/src/views/templates/index.vue`、`frontend/src/views/templates/edit.vue`、`frontend/src/views/logs/index.vue`、`frontend/src/router/index.ts`、`frontend/package.json` |
+
+**主要内容**
+
+#### 1. API 模块层（`src/api/modules/`）
+
+- `rental.ts`：导出 `getRentals / createRental / getRental / updateRental / deleteRental / sendProvisionEmail / sendExpiryReminder / reclaimRental`
+- `template.ts`：导出 `getTemplates / createTemplate / getTemplate / updateTemplate / deleteTemplate / previewTemplate`
+- `log.ts`：导出 `getLogs / getLog / resendLog`
+
+#### 2. 共享常量与工具（`src/lib/`）
+
+- `lib/rental.ts`：`RENTAL_STATUS_LABEL` + `RENTAL_STATUS_TAG` + `BILLING_MODEL_LABEL`
+- `lib/template.ts`：`TRIGGER_TYPE_LABEL` + `TRIGGER_TYPE_TAG` + `DEFAULT_TEMPLATE_SAMPLE`
+- `lib/log.ts`：`LOG_TRIGGER_LABEL` + `LOG_RECIPIENT_TYPE_LABEL` + `LOG_STATUS_LABEL` + `LOG_STATUS_TAG`
+
+#### 3. 租赁记录列表页（`src/views/rentals/index.vue`）
+
+- 表格列：客户 / 机器型号 / 内网IP / 状态 / 到期时间 / 创建时间 / 操作
+- 筛选：状态下拉 + 客户下拉 + 关键词搜索
+- 整行可点击进入详情
+- 「删除」走 `el-popconfirm` 二次确认
+
+#### 4. 租赁记录 - 创建/编辑页（`src/views/rentals/create.vue`）
+
+- 复用策略：`/rentals/create` → 新建模式；`/rentals/:id/edit` → 编辑模式
+- 步骤条分 3 步：选择客户&收件人 / 服务器信息 / 服务周期&保存
+- 服务器信息 6 个分区：基础信息 / 存储 / 网络 / 系统 / 凭证
+- 收件人 to/cc radio 切换（已修复废弃警告）
+
+#### 5. 租赁记录 - 详情页（`src/views/rentals/detail.vue`）
+
+- 顶部状态 tag
+- 操作区 4 个按钮：发送开通邮件 / 发送临期提醒 / 标记回收 / 编辑
+- 三段 el-descriptions + 收件人 + 发送日志
+- 4 个按钮在 reclaimed 状态下统一禁用（已修复）
+
+#### 6. 邮件模板列表页（`src/views/templates/index.vue`）
+
+- 表格列：模板名称 / 触发类型 / 主题模板 / 是否启用 / 版本 / 更新时间
+- 筛选：触发类型 / 启用状态 / 关键词搜索
+
+#### 7. 邮件模板 - 编辑/新建页（`src/views/templates/edit.vue`）⭐
+
+**左右分栏布局**：
+- 顶部元数据：模板名称 / 触发类型 / 启用状态 / 主题模板
+- 左栏：Monaco Editor (HTML 模式) + 示例数据 JSON
+- 右栏：实时预览（iframe srcdoc 防抖 800ms）
+
+**Monaco Editor 集成**：
+- 通过 Vite `?worker` 语法引入 5 种语言 worker
+- `suppressChange` 标志位避免 setValue 触发循环
+- 组件销毁时 dispose editor + clearTimeout
+
+#### 8. 发送日志列表页（`src/views/logs/index.vue`）
+
+- 表格列：收件人 / 类型 / 触发类型 / 主题 / 状态 / 错误信息 / 发送时间 / 操作
+- 行内操作：查看详情（iframe 渲染邮件正文）/ 重发（仅 failed）
+
+**验收**
+
+- ✅ `vue-tsc --noEmit -p tsconfig.app.json` 0 错误
+- ✅ `vite build` 成功
+- ✅ `npm run dev` 启动成功
+- ✅ 所有路由返回 HTTP 200
+- ✅ Monaco Editor 加载正常，预览 API 调用正常
+- ✅ 列表页 CRUD + 分页正常
+
+**关联任务**：CronMail 前端 - 租赁管理 + 邮件模板编辑器 + 发送日志页面
+
+---
+
+## 2026-06-27 (仪表盘 + 合同列表筛选调整)
+
+### [修改] 仪表盘「已到期」→「已回收」+ 合同列表状态筛选 + 已回收合同操作限制
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 修改 |
+| 范围 | 仪表盘 + 合同列表页 + 合同详情页 |
+| 影响文件 | `frontend/src/views/dashboard/index.vue`、`frontend/src/views/contracts/index.vue`、`frontend/src/views/contracts/detail.vue` |
+| 关联任务 | 仪表盘「已到期」→「已回收」+ 合同列表筛选调整 |
+
+**改动**
+
+#### 1. 仪表盘（`dashboard/index.vue`）
+
+- 统计卡片「已到期」（`expired`）改为「已回收」（`reclaimed`）
+- 图标从 `WarningFilled` 改为 `Checked`
+- 颜色从红色 `#F56C6C` 改为灰色 `#909399`
+- `stats` 内部字段 `expired` → `reclaimed`，取值从 `data.reclaimed`（后端暂未提供则 fallback 0）
+
+#### 2. 合同列表状态筛选（`contracts/index.vue`）
+
+- 状态筛选项改为硬编码三个选项：
+  - 运行中（`active`）
+  - 即将到期（`expiring`）
+  - 已回收（`reclaimed`）
+- 去掉 `expired`（已到期）选项
+- 移除不再使用的 `CONTRACT_STATUS_OPTIONS` 导入
+
+#### 3. 合同详情页已回收合同处理（`contracts/detail.vue`）
+
+- `record.status === 'reclaimed'` 时隐藏以下操作按钮：
+  - 编辑
+  - 删除
+  - 发送开通邮件
+  - 发送临期提醒
+  - 标记回收
+  - 关联设备
+  - 取消关联
+- 仅保留「变更记录」和「删除」按钮可用
+
+**验收**
+
+- ✅ `vue-tsc --noEmit` 0 错误
+
+**关联任务**：仪表盘「已到期」→「已回收」+ 合同列表筛选调整
+
+**备注**
+
+- 后端 Dashboard stats 接口目前返回 `expired` 字段，`reclaimed` 字段待后端新增；前端已用 `(data as any).reclaimed ?? 0` 做兼容

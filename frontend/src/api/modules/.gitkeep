@@ -1,0 +1,11 @@
+/**
+ * API 模块占位
+ *
+ * 后续按业务模块拆分：
+ * - customer.ts    客户管理
+ * - rental.ts      租赁管理
+ * - template.ts    邮件模板
+ * - mail.ts        发送日志
+ * - system.ts      系统配置（SMTP / 同事）
+ */
+export {}

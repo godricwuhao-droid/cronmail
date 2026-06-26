@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cronmail-backend-beat
+  namespace: cronmail
+  labels:
+    app: cronmail-backend
+    component: beat
+spec:
+  # Celery Beat 必须单副本，多副本会导致定时任务重复执行
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cronmail-backend
+      component: beat
+  template:
+    metadata:
+      labels:
+        app: cronmail-backend
+        component: beat
+    spec:
+      containers:
+        - name: beat
+          image: harbor.xhwltech.com/xhcloud/cronmail-backend:latest
+          imagePullPolicy: Always
+          command: ["celery", "-A", "src.scheduler.celery_app", "beat", "--loglevel=info", "--schedule=/tmp/celerybeat-schedule"]
+          envFrom:
+            - configMapRef:
+                name: cronmail-config
+            - secretRef:
+                name: cronmail-secret
+          # Beat 进程存活检查
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - "pidof python > /dev/null"
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+      restartPolicy: Always

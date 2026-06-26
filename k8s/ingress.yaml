@@ -1,0 +1,32 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: cronmail-ingress
+  namespace: cronmail
+  labels:
+    app: cronmail
+  annotations:
+    # 根据实际 Ingress Controller 调整
+    # nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+spec:
+  rules:
+    - host: cronmail.example.com  # 替换为实际域名
+      http:
+        paths:
+          # API 请求路由到后端
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: cronmail-backend
+                port:
+                  number: 8000
+          # 前端 SPA（兜底路由）
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: cronmail-frontend
+                port:
+                  number: 80

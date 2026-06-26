@@ -1,0 +1,13 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+pymysql
+pydantic-settings
+cryptography
+alembic
+jinja2
+aiosmtplib
+celery[redis]
+blinker
+python-multipart
+requests

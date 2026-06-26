@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cronmail-config
+  namespace: cronmail
+data:
+  # 数据库连接 - MySQL Master
+  DATABASE_URL: "mysql+pymysql://root:Qwert7891@mysql-master.cronmail.svc.cluster.local:3306/cronmail"
+  # Celery Broker - Redis
+  CELERY_BROKER_URL: "redis://:Qwert7891@redis.cronmail.svc.cluster.local:6379/0"
+  # 应用元信息
+  APP_TITLE: "CronMail API"
+  APP_VERSION: "0.1.0"
+  DEBUG: "false"

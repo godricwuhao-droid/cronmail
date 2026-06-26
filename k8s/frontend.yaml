@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cronmail-frontend
+  namespace: cronmail
+  labels:
+    app: cronmail-frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cronmail-frontend
+  template:
+    metadata:
+      labels:
+        app: cronmail-frontend
+    spec:
+      containers:
+        - name: nginx
+          image: harbor.xhwltech.com/xhcloud/cronmail-frontend:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 80
+              name: http
+              protocol: TCP
+          # Nginx 存活检查
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 3
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      restartPolicy: Always
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cronmail-frontend
+  namespace: cronmail
+  labels:
+    app: cronmail-frontend
+spec:
+  type: ClusterIP
+  selector:
+    app: cronmail-frontend
+  ports:
+    - port: 80
+      targetPort: 80
+      protocol: TCP
+      name: http
