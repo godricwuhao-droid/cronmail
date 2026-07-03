@@ -50,13 +50,8 @@ def _rental_to_list_item(rental: RentalRecord) -> schemas.RentalRecordListRespon
             name=rental.customer.name,
         )
 
-    # 处理 data_disks
-    data_disks = None
-    if rental.data_disks:
-        data_disks = [
-            schemas.DataDiskSchema(size_gb=d["size_gb"], type=d["type"])
-            for d in rental.data_disks
-        ]
+    # data_disks 直接赋值（已经是字符串数组）
+    data_disks = rental.data_disks
 
     contract_id = rental.contracts[0].id if rental.contracts else None
 
@@ -68,7 +63,7 @@ def _rental_to_list_item(rental: RentalRecord) -> schemas.RentalRecordListRespon
         cpu_model=rental.cpu_model,
         memory_gb=rental.memory_gb,
         gpu_info=rental.gpu_info,
-        system_disk_gb=rental.system_disk_gb,
+        system_disk=rental.system_disk,
         data_disks=data_disks,
         os_version=rental.os_version,
         bandwidth_mbps=rental.bandwidth_mbps,
@@ -148,13 +143,8 @@ def _rental_to_detail(rental: RentalRecord, db: Session) -> schemas.RentalRecord
     # 解密密码
     root_password = decrypt_password(rental.root_password_enc or "") if rental.root_password_enc else None
 
-    # 处理 data_disks
-    data_disks = None
-    if rental.data_disks:
-        data_disks = [
-            schemas.DataDiskSchema(size_gb=d["size_gb"], type=d["type"])
-            for d in rental.data_disks
-        ]
+    # data_disks 直接赋值（已经是字符串数组）
+    data_disks = rental.data_disks
 
     return schemas.RentalRecordDetailResponse(
         id=rental.id,
@@ -165,7 +155,7 @@ def _rental_to_detail(rental: RentalRecord, db: Session) -> schemas.RentalRecord
         cpu_model=rental.cpu_model,
         memory_gb=rental.memory_gb,
         gpu_info=rental.gpu_info,
-        system_disk_gb=rental.system_disk_gb,
+        system_disk=rental.system_disk,
         data_disks=data_disks,
         os_version=rental.os_version,
         bandwidth_mbps=rental.bandwidth_mbps,
@@ -196,6 +186,8 @@ def list_rentals(
     public_ip: Optional[str] = Query(None, description="按公网IP模糊搜索"),
     rack_location: Optional[str] = Query(None, description="按机架位置模糊搜索"),
     unlinked_only: bool = Query(False, description="只返回未关联合同的设备"),
+    sort_field: Optional[str] = Query(None, description="排序字段: machine_model/memory_gb/bandwidth_mbps/rack_location/created_at"),
+    sort_order: Optional[str] = Query("asc", description="排序方向: asc/desc"),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=200, description="每页条数"),
     db: Session = Depends(get_db),
@@ -212,6 +204,8 @@ def list_rentals(
         page=page,
         page_size=page_size,
         unlinked_only=unlinked_only,
+        sort_field=sort_field,
+        sort_order=sort_order,
     )
     result_items = [_rental_to_list_item(item) for item in items]
     return schemas.RentalRecordListWrap(
@@ -268,6 +262,21 @@ def delete_rental(
     rental = services.get_rental(db, rental_id)
     if not rental:
         raise HTTPException(status_code=404, detail="租赁记录不存在")
+
+    # 删除前检查：该设备是否关联了合同（通过 contract_rental 中间表）
+    from src.contract.models import contract_rental
+    from sqlalchemy import select
+
+    linked = db.execute(
+        select(contract_rental).where(contract_rental.c.rental_id == rental_id)
+    ).first()
+
+    if linked:
+        raise HTTPException(
+            status_code=400,
+            detail="设备已关联合同，请先在合同中解绑该设备后再删除"
+        )
+
     services.delete_rental(db, rental)
     return {"detail": "租赁记录已删除"}
 
@@ -358,6 +367,10 @@ def reclaim_rental(
         raise HTTPException(status_code=400, detail="该设备未关联任何合同，请先创建合同并关联设备")
 
     contract = contracts[0]
+
+    # 回收前检查合同状态必须为 expired
+    if contract.status != 'expired':
+        raise HTTPException(status_code=400, detail="仅已到期合同可执行回收")
 
     # 异步发送（状态更新移到 Celery 任务里）
     from src.scheduler.tasks import send_manual_email

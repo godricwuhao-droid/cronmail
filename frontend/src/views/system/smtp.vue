@@ -112,11 +112,14 @@ async function fetchConfig() {
     hasConfig.value = true
     changingPassword.value = false
   } catch (e: any) {
-    // 404 表示尚未配置：保持空表单即可
+    // 404 表示尚未配置：保持空表单即可（__silent 已阻止全局错误提示）
     if (e?.response?.status === 404) {
       hasConfig.value = false
       changingPassword.value = true
+      return
     }
+    // 非 404 错误（如网络断开）：手动提示
+    ElMessage.error('加载 SMTP 配置失败，请检查网络连接')
   } finally {
     loading.value = false
   }

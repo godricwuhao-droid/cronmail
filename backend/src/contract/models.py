@@ -65,10 +65,11 @@ contract_contact = Table(
         "recipient_type",
         String(10),
         nullable=False,
+        primary_key=True,
         default="to",
         comment="收件人类型: to / cc",
     ),
-    UniqueConstraint("contract_id", "contact_id", name="uq_contract_contact"),
+    UniqueConstraint("contract_id", "contact_id", "recipient_type", name="uq_contract_contact"),
     comment="合同-联系人关联中间表",
 )
 

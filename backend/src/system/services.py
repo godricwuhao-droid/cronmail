@@ -190,6 +190,65 @@ def test_dingtalk(
     return send_dingtalk_markdown(webhook_url, secret, title, text)
 
 
+def upsert_system_config(db: Session, key: str, value: str, description: str = ""):
+    """创建或更新系统配置键值对"""
+    from src.system.models import SystemConfig
+    config = db.query(SystemConfig).filter(SystemConfig.key == key).first()
+    if config:
+        config.value = value
+        if description:
+            config.description = description
+    else:
+        config = SystemConfig(key=key, value=value, description=description)
+        db.add(config)
+    db.commit()
+    return config
+
+
+def restart_beat() -> str:
+    """通过 K8s API 重启 Beat Deployment"""
+    import os, ssl
+    import urllib.request, urllib.error
+    import json
+
+    namespace = os.environ.get("CRONMAIL_NAMESPACE", "cronmail")
+    token_path = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+    ca_path = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+
+    if not os.path.exists(token_path):
+        return "未检测到 K8s 环境，请手动重启 Beat"
+
+    with open(token_path) as f:
+        token = f.read().strip()
+
+    ctx = ssl.create_default_context(cafile=ca_path)
+    url = f"https://kubernetes.default.svc/apis/apps/v1/namespaces/{namespace}/deployments/cronmail-backend-beat"
+
+    # 获取当前 deployment
+    req = urllib.request.Request(url)
+    req.add_header("Authorization", f"Bearer {token}")
+    req.add_header("Accept", "application/json")
+    resp = urllib.request.urlopen(req, context=ctx)
+    dep = json.loads(resp.read().decode())
+
+    # 修改 annotations 触发 rollout restart
+    if "spec" in dep and "template" in dep["spec"] and "metadata" in dep["spec"]["template"]:
+        annotations = dep["spec"]["template"]["metadata"].get("annotations", {})
+        from datetime import datetime
+        annotations["kubectl.kubernetes.io/restartedAt"] = datetime.utcnow().isoformat() + "Z"
+
+    # PATCH 回去
+    body = json.dumps(dep).encode()
+    req2 = urllib.request.Request(url, data=body, method="PATCH")
+    req2.add_header("Authorization", f"Bearer {token}")
+    req2.add_header("Content-Type", "application/merge-patch+json")
+    try:
+        urllib.request.urlopen(req2, context=ctx)
+        return "Beat 已触发重启"
+    except urllib.error.HTTPError as e:
+        return f"Beat 重启失败: HTTP {e.code}"
+
+
 def _extract_error(e: Exception) -> str:
     """提取异常信息"""
     return str(e) if str(e) else type(e).__name__

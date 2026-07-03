@@ -1,13 +1,12 @@
 """
 邮件日志模块业务逻辑层
 """
-from datetime import date
 from typing import Optional
 
 from sqlalchemy.orm import Session
 
 from src.core.crypto import decrypt_password
-from src.core.timezone import local_now
+from src.core.timezone import local_now, local_today
 from src.customer.models import Contact
 from src.mail.models import EmailLog
 from src.mail.renderer import render_template
@@ -111,7 +110,7 @@ def send_merged_email(
         db: 数据库会话
         records: 该客户下本次需要发送的 RentalRecord 列表
         customer: 客户 ORM 实例
-        trigger_type: 触发类型 (provision / expiry_warning / reclaim)
+        trigger_type: 触发类型 (provision / expiry_warning / expiry_notice / reclaim)
 
     Returns:
         dict: {"log_ids": [...], "recipient_count": n}
@@ -152,7 +151,7 @@ def send_merged_email(
     cc_emails = list(cc_emails_set)
 
     # 4. 构建合并上下文
-    today = date.today()
+    today = local_today()
     rental_contexts = []
     for r in records:
         ctx = {
@@ -160,7 +159,7 @@ def send_merged_email(
             'cpu_model': r.cpu_model or '',
             'memory_gb': r.memory_gb or '',
             'gpu_info': r.gpu_info or '',
-            'system_disk_gb': r.system_disk_gb or '',
+            'system_disk': r.system_disk or '',
             'data_disks': r.data_disks or [],
             'os_version': r.os_version or '',
             'bandwidth_mbps': r.bandwidth_mbps or '',
@@ -265,26 +264,44 @@ def send_merged_email_by_contract(db: Session, contract, trigger_type: str) -> d
     Args:
         db: 数据库会话
         contract: Contract ORM 实例（需已 eager load customer）
-        trigger_type: provision / expiry_warning / reclaim
+        trigger_type: provision / expiry_warning / expiry_notice / reclaim
 
     Returns:
         {"log_ids": [...], "recipient_count": n}
     """
     from src.contract.services import get_contract_rentals, get_contract_contacts
 
-    # 1. 获取活跃模板
+    # 1. reclaim / expiry_notice 类型幂等检查：今天是否已发送成功（按合同ID过滤）
+    if trigger_type in ('reclaim', 'expiry_notice'):
+        from datetime import datetime as _dt
+        from sqlalchemy import func
+        today_start = _dt.combine(local_today(), _dt.min.time())
+        existing = db.query(EmailLog).filter(
+            EmailLog.trigger_type == trigger_type,
+            EmailLog.status == 'sent',
+            EmailLog.created_at >= today_start,
+            func.json_unquote(func.json_extract(EmailLog.extra_data, '$.contract_id')) == contract.id,
+        ).first()
+        if existing:
+            print(
+                f"[send_merged_email_by_contract] 跳过: 合同 {contract.id[:8]} "
+                f"今日已发送 {trigger_type} 通知 (log={existing.id[:8]})"
+            )
+            return {"log_ids": [], "recipient_count": 0}
+
+    # 2. 获取活跃模板
     template = get_active_template_by_trigger(db, trigger_type)
     if not template:
         print(f"[send_merged_email_by_contract] 跳过: 未找到 trigger_type='{trigger_type}' 的活跃模板")
         return {"log_ids": [], "recipient_count": 0}
 
-    # 2. 获取 SMTP 配置
+    # 3. 获取 SMTP 配置
     smtp_config = get_smtp_config(db)
     if not smtp_config:
         print(f"[send_merged_email_by_contract] 跳过: SMTP 配置不存在")
         return {"log_ids": [], "recipient_count": 0}
 
-    # 3. 获取合同关联的设备和联系人
+    # 4. 获取合同关联的设备和联系人
     rentals = get_contract_rentals(db, contract.id)
     contacts = get_contract_contacts(db, contract.id)
 
@@ -300,8 +317,8 @@ def send_merged_email_by_contract(db: Session, contract, trigger_type: str) -> d
         print(f"[send_merged_email_by_contract] 跳过: 合同 {contract.id[:8]} 没有 TO 收件人")
         return {"log_ids": [], "recipient_count": 0}
 
-    # 4. 构建 rental contexts（从 rental 实际字段构建）
-    today = date.today()
+    # 5. 构建 rental contexts（从 rental 实际字段构建）
+    today = local_today()
     rental_contexts = []
     rental_ids = []
     for r_dict in rentals:
@@ -314,7 +331,7 @@ def send_merged_email_by_contract(db: Session, contract, trigger_type: str) -> d
             'cpu_model': rental.cpu_model or '',
             'memory_gb': rental.memory_gb or '',
             'gpu_info': rental.gpu_info or '',
-            'system_disk_gb': rental.system_disk_gb or '',
+            'system_disk': rental.system_disk or '',
             'data_disks': rental.data_disks or [],
             'os_version': rental.os_version or '',
             'bandwidth_mbps': rental.bandwidth_mbps or '',
@@ -341,22 +358,22 @@ def send_merged_email_by_contract(db: Session, contract, trigger_type: str) -> d
         'rentals': rental_contexts,
     }
 
-    # reclaim 类型附加回收时间
-    if trigger_type == 'reclaim':
+    # reclaim / expiry_notice 类型附加回收时间
+    if trigger_type in ('reclaim', 'expiry_notice'):
         config = db.query(SystemConfig).filter(SystemConfig.key == 'reclaim_time').first()
         context['reclaim_time'] = config.value if config else '22:00'
 
-    # 5. 渲染模板
+    # 6. 渲染模板
     rendered_subject = render_template(template.subject_tpl, context)
     rendered_body = render_template(
         template.body_html, context,
         signature_html=template.signature_html,
     )
 
-    # 6. 解密 SMTP 密码
+    # 7. 解密 SMTP 密码
     smtp_password = decrypt_password(smtp_config.password_enc or '')
 
-    # 7. 发送邮件
+    # 8. 发送邮件
     success, error_msg = send_email(
         host=smtp_config.host,
         port=smtp_config.port,
@@ -374,7 +391,7 @@ def send_merged_email_by_contract(db: Session, contract, trigger_type: str) -> d
     status = 'sent' if success else 'failed'
     log_ids = []
 
-    # 8. 写 1 条日志代替 N×M 条
+    # 9. 写 1 条日志代替 N×M 条
     log = EmailLog(
         rental_id=rental_ids[0] if rental_ids else None,
         template_id=template.id,
@@ -387,6 +404,7 @@ def send_merged_email_by_contract(db: Session, contract, trigger_type: str) -> d
         error_msg=error_msg if not success else None,
         sent_at=local_now() if success else None,
         extra_data={
+            "contract_id": contract.id,
             "rental_ids": rental_ids,
             "to_emails": to_emails,
             "cc_emails": cc_emails,
@@ -400,7 +418,7 @@ def send_merged_email_by_contract(db: Session, contract, trigger_type: str) -> d
 
     if success:
         print(f"[send_merged_email_by_contract] 成功: contract={contract.id[:8]}, rentals={len(rental_ids)}")
-        # 9. 钉钉通知（邮件发送成功后推送）
+        # 11. 钉钉通知（邮件发送成功后推送）
         try:
             from src.system.services import get_dingtalk_config as _get_dingtalk
             from src.system.dingtalk import send_dingtalk_markdown, build_notification_markdown
@@ -421,5 +439,22 @@ def send_merged_email_by_contract(db: Session, contract, trigger_type: str) -> d
             print(f"[dingtalk] 通知发送异常: {e}")
     else:
         print(f"[send_merged_email_by_contract] 失败: contract={contract.id[:8]}, error={error_msg}")
+        # 12. 邮件发送失败时，钉钉告警
+        try:
+            from src.system.services import get_dingtalk_config as _gdc
+            from src.system.dingtalk import send_dingtalk_markdown
+            dt = _gdc(db)
+            if dt and dt.is_active and dt.webhook_url:
+                title = f"⚠️ 邮件发送失败 - {contract.customer.name if contract.customer else ''}"
+                text = f"""## ⚠️ 邮件发送失败
+---
+- **合同编号**：{contract.contract_no or '-'}
+- **客户名称**：{contract.customer.name if contract.customer else '-'}
+- **通知类型**：{trigger_type}
+- **收件人**：{', '.join(to_emails[:3])}
+- **失败原因**：{error_msg}"""
+                send_dingtalk_markdown(dt.webhook_url, dt.secret, title, text)
+        except Exception:
+            pass
 
     return {"log_ids": log_ids, "recipient_count": len(to_emails)}

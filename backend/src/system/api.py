@@ -1,7 +1,8 @@
 """
 系统配置模块 API 路由
 """
-from datetime import datetime
+import os
+from datetime import date, datetime
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -120,6 +121,54 @@ def get_configs(db: Session = Depends(get_db)):
     return [{"key": c.key, "value": c.value, "description": c.description} for c in configs]
 
 
+@system_router.get("/config/schedules", response_model=dict)
+def get_schedules(db: Session = Depends(get_db)):
+    """获取所有通知调度时间配置"""
+    defaults = {
+        'check-expiring-rentals': '08:00',
+        'check-expired-rentals': '00:00',
+        'check-reclaim-expired': '01:00',
+    }
+    result = {}
+    for key in defaults:
+        config = db.query(SystemConfig).filter(SystemConfig.key == key).first()
+        result[key] = config.value if config else defaults[key]
+    return result
+
+
+@system_router.put("/config/schedules", response_model=dict)
+def update_schedules(data: dict, db: Session = Depends(get_db)):
+    """
+    批量更新通知调度时间，并触发 Beat 重启使配置生效
+    请求体: {"check-expiring-rentals": "08:00", "check-expired-rentals": "00:00", "check-reclaim-expired": "01:00"}
+    """
+    ALLOWED_KEYS = {'check-expiring-rentals', 'check-expired-rentals', 'check-reclaim-expired'}
+    import re
+    time_ptn = re.compile(r'^\d{1,2}:\d{2}$')
+
+    for key in ALLOWED_KEYS:
+        if key not in data:
+            raise HTTPException(status_code=400, detail=f"缺少必填字段: {key}")
+        val = str(data[key]).strip()
+        if not time_ptn.match(val):
+            raise HTTPException(status_code=400, detail=f"{key} 格式错误: 需要 HH:MM 格式, 实际 {val}")
+        h, m = val.split(':')
+        if not (0 <= int(h) <= 23 and 0 <= int(m) <= 59):
+            raise HTTPException(status_code=400, detail=f"{key} 时间超出范围: {val}")
+
+    for key in ALLOWED_KEYS:
+        services.upsert_system_config(db, key, str(data[key]).strip(), f"通知调度时间 - {key}")
+
+    # 触发 Beat 重启
+    restart_msg = ""
+    try:
+        restart_msg = services.restart_beat()
+    except Exception as e:
+        restart_msg = f"(Beat 重启失败: {e}，请手动执行 kubectl rollout restart deployment/cronmail-backend-beat -n cronmail)"
+
+    return {"detail": "通知时间配置已保存", "restart": restart_msg}
+
+
 @system_router.get("/config/{key}")
 def get_config(key: str, db: Session = Depends(get_db)):
     """获取单个系统配置"""
@@ -143,3 +192,34 @@ def update_config(key: str, data: dict, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(config)
     return {"key": config.key, "value": config.value, "description": config.description}
+
+
+# ============================================================
+# 调试触发端点
+# ============================================================
+
+@system_router.post("/trigger/{task_name}")
+def debug_trigger(task_name: str, body: dict = {}, db: Session = Depends(get_db)):
+    """调试：手动触发定时任务，支持 simulate_date 模拟日期"""
+    ALLOWED = {'check_expiring_rentals', 'check_expired_rentals', 'check_reclaim_expired'}
+    if task_name not in ALLOWED:
+        raise HTTPException(400, f"无效任务名，可选: {', '.join(ALLOWED)}")
+
+    sim_date = body.get('simulate_date') if body else None
+    if sim_date:
+        os.environ['CRONMAIL_SIM_DATE'] = sim_date
+
+    try:
+        if task_name == 'check_expiring_rentals':
+            from src.scheduler.tasks import check_expiring_rentals
+            result = check_expiring_rentals()
+        elif task_name == 'check_expired_rentals':
+            from src.scheduler.tasks import check_expired_rentals
+            result = check_expired_rentals()
+        else:
+            from src.scheduler.tasks import check_reclaim_expired
+            result = check_reclaim_expired()
+        return {"task": task_name, "simulated_date": sim_date, "result": str(result)}
+    finally:
+        if sim_date:
+            os.environ.pop('CRONMAIL_SIM_DATE', None)

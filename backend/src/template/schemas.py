@@ -18,8 +18,8 @@ class EmailTemplateCreate(BaseModel):
         ...,
         min_length=1,
         max_length=32,
-        pattern="^(provision|expiry_warning|reclaim)$",
-        description="触发类型: provision / expiry_warning / reclaim",
+        pattern="^(provision|expiry_warning|expiry_notice|reclaim)$",
+        description="触发类型: provision / expiry_warning / expiry_notice / reclaim",
     )
     subject_tpl: str = Field(..., min_length=1, description="邮件主题模板(Jinja2)")
     body_html: str = Field(..., min_length=1, description="邮件正文模板(Jinja2, HTML)")
@@ -42,7 +42,7 @@ class EmailTemplateUpdate(BaseModel):
         None,
         min_length=1,
         max_length=32,
-        pattern="^(provision|expiry_warning|reclaim)$",
+        pattern="^(provision|expiry_warning|expiry_notice|reclaim)$",
     )
     subject_tpl: Optional[str] = Field(None, min_length=1)
     body_html: Optional[str] = Field(None, min_length=1)

@@ -1,7 +1,7 @@
 """
 租赁记录模块业务逻辑层
 """
-from datetime import datetime, date
+from datetime import datetime
 from typing import Optional
 
 from fastapi import HTTPException
@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_, String
 
 from src.core.crypto import encrypt_password, decrypt_password
+from src.core.timezone import local_today
 from src.rental.models import RentalRecord, rental_contact
 from src.rental.schemas import (
     RentalRecordCreate,
@@ -27,6 +28,8 @@ def list_rentals(
     page: int = 1,
     page_size: int = 20,
     unlinked_only: bool = False,
+    sort_field: Optional[str] = None,
+    sort_order: Optional[str] = None,
 ) -> tuple[list[RentalRecord], int]:
     """查询租赁记录列表"""
     query = db.query(RentalRecord)
@@ -62,7 +65,21 @@ def list_rentals(
 
     total = query.count()
     offset = (page - 1) * page_size
-    items = query.order_by(RentalRecord.created_at.desc()).offset(offset).limit(page_size).all()
+
+    SORT_WHITELIST = {
+        'machine_model': RentalRecord.machine_model,
+        'memory_gb': RentalRecord.memory_gb,
+        'bandwidth_mbps': RentalRecord.bandwidth_mbps,
+        'rack_location': RentalRecord.rack_location,
+        'created_at': RentalRecord.created_at,
+    }
+    if sort_field and sort_field in SORT_WHITELIST:
+        col = SORT_WHITELIST[sort_field]
+        query = query.order_by(col.desc() if sort_order == 'desc' else col.asc())
+    else:
+        query = query.order_by(RentalRecord.created_at.desc())
+
+    items = query.offset(offset).limit(page_size).all()
     return items, total
 
 
@@ -78,10 +95,8 @@ def create_rental(db: Session, data: RentalRecordCreate) -> RentalRecord:
     if data.root_password:
         root_password_enc = encrypt_password(data.root_password)
 
-    # 处理 data_disks
-    data_disks_json = None
-    if data.data_disks:
-        data_disks_json = [disk.model_dump() for disk in data.data_disks]
+    # data_disks 直接是字符串数组
+    data_disks_json = data.data_disks
 
     rental = RentalRecord(
         customer_id=None,  # 关联合同后自动设置
@@ -89,7 +104,7 @@ def create_rental(db: Session, data: RentalRecordCreate) -> RentalRecord:
         cpu_model=data.cpu_model,
         memory_gb=data.memory_gb,
         gpu_info=data.gpu_info,
-        system_disk_gb=data.system_disk_gb,
+        system_disk=data.system_disk,
         data_disks=data_disks_json,
         os_version=data.os_version,
         bandwidth_mbps=data.bandwidth_mbps,
@@ -127,16 +142,9 @@ def update_rental(db: Session, rental: RentalRecord, data: RentalRecordUpdate) -
         if plain_password:
             update_data["root_password_enc"] = encrypt_password(plain_password)
 
-    # 处理 data_disks
+    # data_disks 直接是字符串数组
     if "data_disks" in update_data:
-        disks = update_data["data_disks"]
-        if disks:
-            update_data["data_disks"] = [
-                disk if isinstance(disk, dict) else disk.model_dump()
-                for disk in disks
-            ]
-        else:
-            update_data["data_disks"] = None
+        update_data["data_disks"] = update_data["data_disks"] or None
 
     # 更新字段
     for field, value in update_data.items():
@@ -241,7 +249,7 @@ def build_rental_context(db: Session, rental: RentalRecord) -> dict:
     # 距到期天数
     days_until_expiry = 0
     if rental.end_date:
-        today = date.today()
+        today = local_today()
         delta = rental.end_date - today
         days_until_expiry = delta.days
 
@@ -254,7 +262,7 @@ def build_rental_context(db: Session, rental: RentalRecord) -> dict:
         "cpu_model": rental.cpu_model or "",
         "memory_gb": rental.memory_gb or "",
         "gpu_info": rental.gpu_info or "",
-        "system_disk_gb": rental.system_disk_gb or "",
+        "system_disk": rental.system_disk or "",
         "data_disks": rental.data_disks or [],
         "os_version": rental.os_version or "",
         "bandwidth_mbps": rental.bandwidth_mbps or "",

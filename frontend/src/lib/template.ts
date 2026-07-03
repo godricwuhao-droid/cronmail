@@ -7,6 +7,7 @@ import type { TriggerType } from '@/api/modules/template'
 export const TRIGGER_TYPE_LABEL: Record<TriggerType, string> = {
   provision: '开通通知',
   expiry_warning: '临期提醒',
+  expiry_notice: '到期提醒',
   reclaim: '回收通知',
 }
 
@@ -14,6 +15,7 @@ export const TRIGGER_TYPE_LABEL: Record<TriggerType, string> = {
 export const TRIGGER_TYPE_TAG: Record<TriggerType, 'success' | 'warning' | 'danger'> = {
   provision: 'success',
   expiry_warning: 'warning',
+  expiry_notice: 'danger',
   reclaim: 'danger',
 }
 
@@ -24,11 +26,8 @@ export const DEFAULT_TEMPLATE_SAMPLE: Record<string, unknown> = {
   cpu_model: '2×Intel Xeon Gold 6248R 48C',
   memory_gb: 256,
   gpu_info: '8×NVIDIA A100 80GB',
-  system_disk_gb: 480,
-  data_disks: [
-    { size_gb: 2000, type: 'NVMe SSD' },
-    { size_gb: 4000, type: 'SATA SSD' },
-  ],
+  system_disk: '480GB SATA SSD',
+  data_disks: ['2000GB NVMe SSD', '4000GB SATA SSD'],
   os_version: 'Ubuntu 22.04 LTS',
   bandwidth_mbps: 1000,
   rack_location: 'A01-05-U12',

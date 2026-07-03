@@ -123,8 +123,8 @@ def update_contract(contract_id: str, data: schemas.ContractUpdate, db: Session 
     contract = services.get_contract(db, contract_id)
     if not contract:
         raise HTTPException(status_code=404, detail="合同不存在")
-    if contract.status in ('expired', 'reclaimed'):
-        raise HTTPException(status_code=422, detail="已过期或已回收的合同不允许修改")
+    if contract.status == 'reclaimed':
+        raise HTTPException(status_code=422, detail="已回收的合同不允许修改")
     contract = services.update_contract(db, contract, data)
     return _to_detail(contract, db)
 
@@ -165,18 +165,25 @@ def unlink_rentals(contract_id: str, data: schemas.UnlinkRentalRequest, db: Sess
 
 def _to_detail(contract: Contract, db: Session) -> schemas.ContractDetailResponse:
     """将 Contract ORM 对象转为 ContractDetailResponse"""
-    # 获取设备列表（已兼容回收后从历史快照反查）
-    rentals = services.get_contract_rentals(db, contract.id)
+    try:
+        # 获取设备列表（已兼容回收后从历史快照反查）
+        rentals = services.get_contract_rentals(db, contract.id)
 
-    # rental_count: 优先实时关联，若已清理则用历史快照
-    live_count = len(contract.rentals) if contract.rentals else 0
-    history_count = len(contract.history_rental_ids) if contract.history_rental_ids else 0
-    rental_count = live_count if live_count > 0 else history_count
+        # rental_count: 优先实时关联，若已清理则用历史快照
+        live_count = len(rentals) if rentals else 0
+        history_count = len(contract.history_rental_ids) if contract.history_rental_ids else 0
+        rental_count = max(live_count, history_count)
+
+        customer_name = contract.customer.name if contract.customer else None
+        contact_count = len(contract.contacts) if contract.contacts else 0
+        contacts = services.get_contract_contacts(db, contract.id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取合同详情失败: {e}")
 
     return schemas.ContractDetailResponse(
         id=contract.id,
         customer_id=contract.customer_id,
-        customer_name=contract.customer.name if contract.customer else None,
+        customer_name=customer_name,
         name=contract.name,
         contract_no=contract.contract_no,
         start_date=contract.start_date,
@@ -185,9 +192,9 @@ def _to_detail(contract: Contract, db: Session) -> schemas.ContractDetailRespons
         status=contract.status,
         remark=contract.remark,
         rental_count=rental_count,
-        contact_count=len(contract.contacts) if contract.contacts else 0,
+        contact_count=contact_count,
         rentals=rentals,
-        contacts=services.get_contract_contacts(db, contract.id),
+        contacts=contacts,
         created_at=contract.created_at,
         updated_at=contract.updated_at,
     )

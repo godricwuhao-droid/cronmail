@@ -7,6 +7,7 @@ import type { LogStatus, LogTriggerType, LogRecipientType } from '@/api/modules/
 export const LOG_TRIGGER_LABEL: Record<LogTriggerType, string> = {
   provision: '开通通知',
   expiry_warning: '临期提醒',
+  expiry_notice: '到期提醒',
   reclaim: '回收通知',
 }
 

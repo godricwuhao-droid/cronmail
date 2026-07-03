@@ -44,9 +44,9 @@ export interface SmtpTestResponse {
 // 接口函数
 // ============================================================
 
-/** 获取 SMTP 配置（不含密码） */
+/** 获取 SMTP 配置（不含密码）；404 不弹错误提示，由调用方处理 */
 export function getSmtpConfig(): Promise<SmtpConfig> {
-  return request.get('/system/smtp')
+  return request.get('/system/smtp', { __silent: true })
 }
 
 /** 更新 SMTP 配置（首次不存在则创建） */
@@ -78,6 +78,27 @@ export function getConfig(key: string): Promise<SystemConfigItem> {
 /** 更新或创建系统配置 */
 export function updateConfig(key: string, value: string): Promise<SystemConfigItem> {
   return request.put(`/system/config/${key}`, { value })
+}
+
+// ============================================================
+// 通知时间配置（Celery Beat Schedules）
+// ============================================================
+
+/** 通知时间配置 */
+export interface ScheduleConfig {
+  'check-expiring-rentals': string
+  'check-expired-rentals': string
+  'check-reclaim-expired': string
+}
+
+/** 获取通知时间配置 */
+export function getSchedules(): Promise<ScheduleConfig> {
+  return request.get('/system/config/schedules')
+}
+
+/** 更新通知时间配置；返回 detail 和 restart 信息 */
+export function updateSchedules(data: ScheduleConfig): Promise<{ detail: string; restart: string }> {
+  return request.put('/system/config/schedules', data)
 }
 
 // ============================================================
@@ -116,9 +137,9 @@ export interface DingTalkTestResponse {
   message: string
 }
 
-/** 获取钉钉机器人配置（secret 为脱敏值） */
+/** 获取钉钉机器人配置（secret 为脱敏值）；404 不弹错误提示，由调用方处理 */
 export function getDingTalkConfig(): Promise<DingTalkConfig> {
-  return request.get('/system/dingtalk')
+  return request.get('/system/dingtalk', { __silent: true })
 }
 
 /** 更新钉钉机器人配置 */

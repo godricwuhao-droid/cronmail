@@ -362,79 +362,63 @@ onMounted(async () => {
           <el-icon><Document /></el-icon>
           基础信息
         </div>
-        <el-row :gutter="16">
-          <el-col :span="12">
-            <el-form-item label="客户" prop="customer_id">
-              <el-select
-                v-model="form.customer_id"
-                placeholder="请选择客户"
-                filterable
-                style="width: 100%"
-                :disabled="isEdit"
-              >
-                <el-option
-                  v-for="c in customerOptions"
-                  :key="c.id"
-                  :label="`${c.name} (${c.code})`"
-                  :value="c.id"
-                />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="合同名称" prop="name">
-              <el-input v-model="form.name" placeholder="如 主合同-2026" maxlength="255" show-word-limit />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="合同编号" prop="contract_no">
-              <el-input v-model="form.contract_no" placeholder="可选，如 CT-2026-001" maxlength="100" show-word-limit />
-            </el-form-item>
-          </el-col>
-        </el-row>
+        <el-form-item label="客户" prop="customer_id">
+          <el-select
+            v-model="form.customer_id"
+            placeholder="请选择客户"
+            filterable
+            style="width: 100%"
+            :disabled="isEdit"
+          >
+            <el-option
+              v-for="c in customerOptions"
+              :key="c.id"
+              :label="c.name"
+              :value="c.id"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="合同名称" prop="name">
+          <el-input v-model="form.name" placeholder="如 主合同-2026" maxlength="255" show-word-limit />
+        </el-form-item>
+        <el-form-item label="合同编号" prop="contract_no">
+          <el-input v-model="form.contract_no" placeholder="可选，如 CT-2026-001" maxlength="100" show-word-limit />
+        </el-form-item>
 
         <!-- 服务周期 -->
         <div class="section-title">
           <el-icon><Calendar /></el-icon>
           服务周期
         </div>
-        <el-row :gutter="16">
-          <el-col :span="12">
-            <el-form-item label="开始日期" prop="start_date">
-              <el-date-picker
-                v-model="form.start_date"
-                type="date"
-                value-format="YYYY-MM-DD"
-                placeholder="选择开始日期"
-                style="width: 100%"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="到期日期" prop="end_date">
-              <el-date-picker
-                v-model="form.end_date"
-                type="date"
-                value-format="YYYY-MM-DD"
-                placeholder="选择到期日期"
-                style="width: 100%"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="计费方式">
-              <el-radio-group v-model="form.billing_model">
-                <el-radio-button
-                  v-for="opt in CONTRACT_BILLING_MODEL_OPTIONS"
-                  :key="opt.value"
-                  :value="opt.value"
-                >
-                  {{ opt.label }}
-                </el-radio-button>
-              </el-radio-group>
-            </el-form-item>
-          </el-col>
-        </el-row>
+        <el-form-item label="开始日期" prop="start_date">
+          <el-date-picker
+            v-model="form.start_date"
+            type="date"
+            value-format="YYYY-MM-DD"
+            placeholder="选择开始日期"
+            style="width: 100%"
+          />
+        </el-form-item>
+        <el-form-item label="到期日期" prop="end_date">
+          <el-date-picker
+            v-model="form.end_date"
+            type="date"
+            value-format="YYYY-MM-DD"
+            placeholder="选择到期日期"
+            style="width: 100%"
+          />
+        </el-form-item>
+        <el-form-item label="计费方式">
+          <el-radio-group v-model="form.billing_model">
+            <el-radio-button
+              v-for="opt in CONTRACT_BILLING_MODEL_OPTIONS"
+              :key="opt.value"
+              :value="opt.value"
+            >
+              {{ opt.label }}
+            </el-radio-button>
+          </el-radio-group>
+        </el-form-item>
 
         <!-- 关联设备 -->
         <div class="section-title">
@@ -473,60 +457,54 @@ onMounted(async () => {
           <el-icon><User /></el-icon>
           关联联系人
         </div>
-        <el-row :gutter="16">
-          <el-col :span="12">
-            <el-form-item label="收件人 (TO)">
-              <div v-if="!form.customer_id" class="hint">请先选择客户</div>
-              <div v-else-if="allContactOptions.length === 0" class="hint">
-                暂无可用联系人，请先到【客户管理 → 联系人】或【系统配置 → 内部同事】添加
-              </div>
-              <el-select
-                v-else
-                v-model="toContactIds"
-                multiple
-                collapse-tags
-                collapse-tags-tooltip
-                filterable
-                clearable
-                placeholder="选择收件人（含内部同事）"
-                style="width: 100%"
-              >
-                <el-option
-                  v-for="c in allContactOptions"
-                  :key="c.id"
-                  :label="`${c.name} (${c.email})${c.customer_id ? '' : ' · 内部'}`"
-                  :value="c.id"
-                />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="抄送人 (CC)">
-              <div v-if="!form.customer_id" class="hint">请先选择客户</div>
-              <div v-else-if="allContactOptions.length === 0" class="hint">
-                暂无可用联系人
-              </div>
-              <el-select
-                v-else
-                v-model="ccContactIds"
-                multiple
-                collapse-tags
-                collapse-tags-tooltip
-                filterable
-                clearable
-                placeholder="选择抄送人（含内部同事）"
-                style="width: 100%"
-              >
-                <el-option
-                  v-for="c in allContactOptions"
-                  :key="c.id"
-                  :label="`${c.name} (${c.email})${c.customer_id ? '' : ' · 内部'}`"
-                  :value="c.id"
-                />
-              </el-select>
-            </el-form-item>
-          </el-col>
-        </el-row>
+        <el-form-item label="收件人 (TO)">
+          <div v-if="!form.customer_id" class="hint">请先选择客户</div>
+          <div v-else-if="allContactOptions.length === 0" class="hint">
+            暂无可用联系人，请先到【客户管理 → 联系人】或【系统配置 → 内部同事】添加
+          </div>
+          <el-select
+            v-else
+            v-model="toContactIds"
+            multiple
+            collapse-tags
+            collapse-tags-tooltip
+            filterable
+            clearable
+            placeholder="选择收件人（含内部同事）"
+            style="width: 100%"
+          >
+            <el-option
+              v-for="c in allContactOptions"
+              :key="c.id"
+              :label="`${c.name} (${c.email})${c.customer_id ? '' : ' · 内部'}`"
+              :value="c.id"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="抄送人 (CC)">
+          <div v-if="!form.customer_id" class="hint">请先选择客户</div>
+          <div v-else-if="allContactOptions.length === 0" class="hint">
+            暂无可用联系人
+          </div>
+          <el-select
+            v-else
+            v-model="ccContactIds"
+            multiple
+            collapse-tags
+            collapse-tags-tooltip
+            filterable
+            clearable
+            placeholder="选择抄送人（含内部同事）"
+            style="width: 100%"
+          >
+            <el-option
+              v-for="c in allContactOptions"
+              :key="c.id"
+              :label="`${c.name} (${c.email})${c.customer_id ? '' : ' · 内部'}`"
+              :value="c.id"
+            />
+          </el-select>
+        </el-form-item>
 
         <!-- 备注 -->
         <el-form-item label="备注" style="margin-top: 8px;">

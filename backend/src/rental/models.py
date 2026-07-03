@@ -70,8 +70,8 @@ class RentalRecord(Base):
     cpu_model = Column(String(256), nullable=True, comment="CPU 型号")
     memory_gb = Column(Integer, nullable=True, comment="内存(GB)")
     gpu_info = Column(Text, nullable=True, comment="GPU 信息")
-    system_disk_gb = Column(Integer, nullable=True, comment="系统盘(GB)")
-    data_disks = Column(JSON, nullable=True, comment="数据盘列表(JSON)")
+    system_disk = Column(String(256), nullable=True, comment="系统盘，如 480GB SATA SSD")
+    data_disks = Column(JSON, nullable=True, comment="数据盘列表，每项为字符串如 '1000GB NVMe SSD'")
 
     # 系统信息
     os_version = Column(String(128), nullable=True, comment="操作系统版本")

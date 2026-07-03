@@ -8,22 +8,22 @@
  *
  * 表单仅保留硬件信息，客户/日期/计费/联系人由合同管理。
  * 编辑模式下展示从合同继承的信息（el-descriptions 只读）。
+ *
+ * UI 参考 device-input-temp.html 风格：
+ *  - 分区标题：16px / 600 字重 / 左侧蓝色竖条装饰
+ *  - 表单控件：统一圆角、边框、focus 蓝色阴影
+ *  - 标签：14px / #595959 / 500 字重，必填红色星号
+ *  - 数据盘：列表式展示，字符串输入
+ *  - 底部按钮：右对齐，顶部分割线
  */
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
-import {
-  Box,
-  Coin,
-  Connection,
-  Monitor,
-  Lock,
-} from '@element-plus/icons-vue'
+import { Document, FolderOpened, Connection, Monitor, Lock, EditPen } from '@element-plus/icons-vue'
 import {
   createRental,
   getRental,
   updateRental,
-  type DataDisk,
   type RentalCreatePayload,
   type RentalDetail,
   type RentalUpdatePayload,
@@ -43,8 +43,8 @@ interface RentalForm {
   cpu_model: string
   memory_gb: number
   gpu_info: string
-  system_disk_gb: number
-  data_disks: DataDisk[]
+  system_disk: string
+  data_disks: string[]
   os_version: string
   bandwidth_mbps: number
   rack_location: string
@@ -62,8 +62,8 @@ const form = reactive<RentalForm>({
   cpu_model: '',
   memory_gb: 64,
   gpu_info: '',
-  system_disk_gb: 480,
-  data_disks: [{ size_gb: 1000, type: 'NVMe SSD' }],
+  system_disk: '480GB SATA SSD',
+  data_disks: ['2000GB NVMe SSD'],
   os_version: '',
   bandwidth_mbps: 1000,
   rack_location: '',
@@ -79,14 +79,19 @@ const form = reactive<RentalForm>({
 // ============================================================
 // 数据盘动态行
 // ============================================================
+const newDiskText = ref('')
+
 function addDisk() {
-  form.data_disks.push({ size_gb: 1000, type: 'SATA SSD' })
-}
-function removeDisk(idx: number) {
-  if (form.data_disks.length <= 1) {
-    ElMessage.warning('至少保留一块数据盘')
+  const text = newDiskText.value.trim()
+  if (!text) {
+    ElMessage.warning('请输入数据盘信息')
     return
   }
+  form.data_disks.push(text)
+  newDiskText.value = ''
+}
+
+function removeDisk(idx: number) {
   form.data_disks.splice(idx, 1)
 }
 
@@ -106,10 +111,8 @@ async function loadDetail() {
     form.cpu_model = data.cpu_model ?? ''
     form.memory_gb = data.memory_gb ?? 0
     form.gpu_info = data.gpu_info ?? ''
-    form.system_disk_gb = data.system_disk_gb ?? 0
-    form.data_disks = data.data_disks && data.data_disks.length
-      ? data.data_disks
-      : [{ size_gb: 1000, type: 'NVMe SSD' }]
+    form.system_disk = data.system_disk ?? ''
+    form.data_disks = data.data_disks ?? []
     form.os_version = data.os_version ?? ''
     form.bandwidth_mbps = data.bandwidth_mbps ?? 1000
     form.rack_location = data.rack_location ?? ''
@@ -135,7 +138,7 @@ const rules: FormRules = {
   machine_model: [{ required: true, message: '请输入机器型号', trigger: 'blur' }],
   cpu_model: [{ required: true, message: '请输入 CPU 型号', trigger: 'blur' }],
   memory_gb: [{ required: true, message: '请输入内存大小', trigger: 'blur' }],
-  system_disk_gb: [{ required: true, message: '请输入系统盘大小', trigger: 'blur' }],
+  system_disk: [{ required: true, message: '请输入系统盘信息', trigger: 'blur' }],
   os_version: [{ required: true, message: '请输入操作系统', trigger: 'blur' }],
   private_ip: [{ required: true, message: '请输入内网IP', trigger: 'blur' }],
   ssh_port: [{ required: true, message: '请输入 SSH 端口', trigger: 'blur' }],
@@ -158,7 +161,7 @@ function buildPayload(): RentalCreatePayload | RentalUpdatePayload {
     cpu_model: form.cpu_model,
     memory_gb: form.memory_gb,
     gpu_info: form.gpu_info,
-    system_disk_gb: form.system_disk_gb,
+    system_disk: form.system_disk,
     data_disks: form.data_disks,
     os_version: form.os_version,
     bandwidth_mbps: form.bandwidth_mbps,
@@ -218,10 +221,8 @@ async function loadCopyFrom(copyId: string) {
     form.cpu_model = d.cpu_model ?? ''
     form.memory_gb = d.memory_gb ?? 0
     form.gpu_info = d.gpu_info ?? ''
-    form.system_disk_gb = d.system_disk_gb ?? 0
-    form.data_disks = d.data_disks && d.data_disks.length
-      ? d.data_disks.map((x) => ({ size_gb: x.size_gb, type: x.type }))
-      : [{ size_gb: 1000, type: 'NVMe SSD' }]
+    form.system_disk = d.system_disk ?? ''
+    form.data_disks = d.data_disks ?? []
     form.os_version = d.os_version ?? ''
     form.bandwidth_mbps = d.bandwidth_mbps ?? 1000
     form.rack_location = d.rack_location ?? ''
@@ -316,84 +317,68 @@ onMounted(async () => {
       >
         <!-- 1. 基础信息 -->
         <div class="section-title">
-          <el-icon><Box /></el-icon>
+          <el-icon><Document /></el-icon>
           基础信息
         </div>
-        <el-row :gutter="16">
-          <el-col :span="12">
-            <el-form-item label="机器型号" prop="machine_model">
-              <el-input v-model="form.machine_model" placeholder="如 Dell PowerEdge R740" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="CPU 型号" prop="cpu_model">
-              <el-input v-model="form.cpu_model" placeholder="如 2×Intel Xeon Gold 6248R 48C" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="内存 (GB)" prop="memory_gb">
-              <el-input-number
-                v-model="form.memory_gb"
-                :min="1"
-                :max="65536"
-                style="width: 100%"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="GPU">
-              <el-input v-model="form.gpu_info" placeholder="如 8×NVIDIA A100 80GB" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="设备状态">
-              <el-select v-model="form.status" placeholder="选择状态" style="width: 100%">
-                <el-option label="空闲中" value="空闲中" />
-                <el-option label="已断电" value="已断电" />
-                <el-option label="租赁中" value="租赁中" />
-              </el-select>
-            </el-form-item>
-          </el-col>
-        </el-row>
+        <el-form-item label="机器型号" prop="machine_model">
+          <el-input v-model="form.machine_model" placeholder="如 8卡4090" />
+        </el-form-item>
+        <el-form-item label="CPU 型号" prop="cpu_model">
+          <el-input v-model="form.cpu_model" placeholder="如 AMD EPYC 7K62 48C 2.60GHz * 2" />
+        </el-form-item>
+        <el-form-item label="内存 (GB)" prop="memory_gb">
+          <el-input-number
+            v-model="form.memory_gb"
+            :min="1"
+            :max="65536"
+          />
+        </el-form-item>
+        <el-form-item label="GPU">
+          <el-input v-model="form.gpu_info" placeholder="如 8×NVIDIA 4090 24G" />
+        </el-form-item>
+        <el-form-item label="设备状态">
+          <el-select v-model="form.status" placeholder="选择状态" style="width: 100%">
+            <el-option label="空闲中" value="空闲中" />
+            <el-option label="已断电" value="已断电" />
+            <el-option label="租赁中" value="租赁中" />
+          </el-select>
+        </el-form-item>
 
         <!-- 2. 存储 -->
         <div class="section-title">
-          <el-icon><Coin /></el-icon>
+          <el-icon><FolderOpened /></el-icon>
           存储
         </div>
-        <el-form-item label="系统盘 (GB)" prop="system_disk_gb">
-          <el-input-number
-            v-model="form.system_disk_gb"
-            :min="0"
-            :max="1000000"
-            style="width: 240px"
-          />
+
+        <el-form-item label="系统盘" prop="system_disk">
+          <el-input v-model="form.system_disk" placeholder="如 480GB SATA SSD" />
         </el-form-item>
+
         <el-form-item label="数据盘">
-          <div class="disk-list">
-            <div v-for="(d, idx) in form.data_disks" :key="idx" class="disk-row">
-              <el-input-number
-                v-model="d.size_gb"
-                :min="0"
-                :max="1000000"
-                style="width: 180px"
-              />
-              <span style="margin: 0 8px">GB ·</span>
-              <el-input
-                v-model="d.type"
-                placeholder="类型，如 NVMe SSD"
-                style="width: 220px"
-              />
+          <div class="storage-list">
+            <div
+              v-for="(disk, idx) in form.data_disks"
+              :key="idx"
+              class="storage-item"
+            >
+              <span class="storage-text">{{ disk }}</span>
               <el-button
                 link
                 type="danger"
-                style="margin-left: 8px"
+                class="btn-link-small"
                 @click="removeDisk(idx)"
               >
                 删除
               </el-button>
             </div>
-            <el-button @click="addDisk" style="margin-top: 4px">+ 添加数据盘</el-button>
+          </div>
+          <div class="storage-add-row">
+            <el-input
+              v-model="newDiskText"
+              placeholder="如 2000GB NVMe SSD"
+              @keyup.enter="addDisk"
+            />
+            <el-button type="primary" size="small" @click="addDisk">+ 添加</el-button>
           </div>
         </el-form-item>
 
@@ -402,84 +387,64 @@ onMounted(async () => {
           <el-icon><Connection /></el-icon>
           网络
         </div>
-        <el-row :gutter="16">
-          <el-col :span="12">
-            <el-form-item label="内网IP" prop="private_ip">
-              <el-input v-model="form.private_ip" placeholder="如 10.0.0.1" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="公网IP">
-              <el-input
-                v-model="form.public_ips_text"
-                placeholder="多个用逗号分隔，如 1.2.3.4,1.2.3.5"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="SSH 端口" prop="ssh_port">
-              <el-input-number
-                v-model="form.ssh_port"
-                :min="1"
-                :max="65535"
-                style="width: 100%"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="带宽 (Mbps)">
-              <el-input-number
-                v-model="form.bandwidth_mbps"
-                :min="1"
-                :max="100000"
-                style="width: 100%"
-              />
-            </el-form-item>
-          </el-col>
-        </el-row>
+        <el-form-item label="内网IP" prop="private_ip">
+          <el-input v-model="form.private_ip" placeholder="如 192.168.100.124" />
+        </el-form-item>
+        <el-form-item label="公网IP">
+          <el-input
+            v-model="form.public_ips_text"
+            placeholder="多个用逗号分隔，如 1.2.3.4,1.2.3.5"
+          />
+        </el-form-item>
+        <el-form-item label="SSH 端口" prop="ssh_port">
+          <el-input-number
+            v-model="form.ssh_port"
+            :min="1"
+            :max="65535"
+          />
+        </el-form-item>
+        <el-form-item label="带宽 (Mbps)">
+          <el-input-number
+            v-model="form.bandwidth_mbps"
+            :min="1"
+            :max="100000"
+          />
+        </el-form-item>
 
         <!-- 4. 系统 -->
         <div class="section-title">
           <el-icon><Monitor /></el-icon>
           系统
         </div>
-        <el-row :gutter="16">
-          <el-col :span="12">
-            <el-form-item label="操作系统" prop="os_version">
-              <el-input v-model="form.os_version" placeholder="如 Ubuntu 22.04 LTS" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="机架位置">
-              <el-input v-model="form.rack_location" placeholder="如 A01-05-U12" />
-            </el-form-item>
-          </el-col>
-        </el-row>
+        <el-form-item label="操作系统" prop="os_version">
+          <el-input v-model="form.os_version" placeholder="如 ubuntu22.04 server TLS" />
+        </el-form-item>
+        <el-form-item label="机架位置">
+          <el-input v-model="form.rack_location" placeholder="如 E09-18U" />
+        </el-form-item>
 
         <!-- 5. 凭证 -->
         <div class="section-title">
           <el-icon><Lock /></el-icon>
           凭证
         </div>
-        <el-row :gutter="16">
-          <el-col :span="12">
-            <el-form-item label="root 账号" prop="root_username">
-              <el-input v-model="form.root_username" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="root 密码" prop="root_password">
-              <el-input
-                v-model="form.root_password"
-                type="password"
-                show-password
-                placeholder="保存时会加密存储"
-              />
-            </el-form-item>
-          </el-col>
-        </el-row>
+        <el-form-item label="root 账号" prop="root_username">
+          <el-input v-model="form.root_username" />
+        </el-form-item>
+        <el-form-item label="root 密码" prop="root_password">
+          <el-input
+            v-model="form.root_password"
+            type="password"
+            show-password
+            placeholder="保存时会加密存储"
+          />
+        </el-form-item>
 
         <!-- 备注 -->
+        <div class="section-title">
+          <el-icon><EditPen /></el-icon>
+          备注
+        </div>
         <el-form-item label="备注">
           <el-input
             v-model="form.remark"
@@ -493,9 +458,8 @@ onMounted(async () => {
       </el-form>
 
       <!-- 操作按钮 -->
-      <div class="step-actions">
+      <div class="footer-actions">
         <el-button @click="cancel">取消</el-button>
-        <div class="spacer" />
         <el-button
           type="primary"
           :loading="submitting"
@@ -509,11 +473,15 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+/* ============================================================
+   页面级样式
+   ============================================================ */
 .page {
   display: flex;
   flex-direction: column;
   gap: 16px;
 }
+
 .card-header {
   display: flex;
   align-items: center;
@@ -523,9 +491,10 @@ onMounted(async () => {
   font-size: 16px;
   font-weight: 600;
 }
-.rental-form {
-  max-width: 1100px;
-}
+
+/* ============================================================
+   分区标题 — 对齐合同编辑页风格
+   ============================================================ */
 .section-title {
   font-size: 14px;
   font-weight: 600;
@@ -541,24 +510,45 @@ onMounted(async () => {
   color: var(--primary-color);
   font-size: 16px;
 }
-.disk-list {
+
+/* ============================================================
+   数据盘列表
+   ============================================================ */
+.storage-list {
   width: 100%;
 }
-.disk-row {
+.storage-item {
   display: flex;
   align-items: center;
-  margin-bottom: 8px;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: #f8f9fa;
+  border-radius: 6px;
+  font-size: 14px;
+  color: #333;
 }
-.step-actions {
+.storage-item + .storage-item {
+  margin-top: 6px;
+}
+.storage-add-row {
   display: flex;
+  gap: 8px;
   align-items: center;
+  margin-top: 8px;
+}
+
+/* ============================================================
+   底部操作栏 — 参考模板 .footer-actions
+   ============================================================ */
+.footer-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
   margin-top: 24px;
   padding-top: 16px;
-  border-top: 1px solid #ebeef5;
+  border-top: 1px solid #e8eaf0;
 }
-.spacer {
-  flex: 1;
-}
+
 .contract-info-card {
   margin-bottom: 20px;
 }

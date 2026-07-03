@@ -546,6 +546,65 @@ HTTP 状态码：200
 
 ---
 
+### GET /api/system/config/schedules
+
+获取所有通知调度时间配置。
+
+请求：`GET /api/system/config/schedules`
+
+响应：
+```json
+{
+  "check-expiring-rentals": "08:00",
+  "check-expired-rentals": "00:00",
+  "check-reclaim-expired": "01:00"
+}
+```
+
+HTTP 状态码：200
+
+关键字段：
+- `check-expiring-rentals`（string）：临期提醒调度时间（HH:MM）
+- `check-expired-rentals`（string）：到期通知调度时间（HH:MM）
+- `check-reclaim-expired`（string）：回收执行调度时间（HH:MM）
+
+---
+
+### PUT /api/system/config/schedules
+
+批量更新通知调度时间，并触发 Beat 重启使配置生效。
+
+请求：`PUT /api/system/config/schedules`
+```json
+{
+  "check-expiring-rentals": "09:30",
+  "check-expired-rentals": "00:30",
+  "check-reclaim-expired": "02:00"
+}
+```
+
+响应：
+```json
+{
+  "detail": "通知时间配置已保存",
+  "restart": "Beat 已触发重启"
+}
+```
+
+HTTP 状态码：200
+
+错误：
+- 400：缺少必填字段 `{"detail": "缺少必填字段: check-reclaim-expired"}`
+- 400：格式错误 `{"detail": "check-expiring-rentals 格式错误: 需要 HH:MM 格式, 实际 9:3"}`
+- 400：时间超出范围 `{"detail": "check-expiring-rentals 时间超出范围: 25:00"}`
+
+关键字段：
+- 请求体三个字段均为必填，格式 HH:MM，范围 00:00~23:59
+- `detail`（string）：操作结果描述
+- `restart`（string）：Beat 重启结果（K8s 环境下自动触发，非 K8s 环境提示手动重启）
+
+---
+
 ### GET /api/system/config/{key}
 
 获取单个系统配置。
@@ -591,6 +650,36 @@ HTTP 状态码：200
 关键字段：
 - `value`（string，必填）：配置值
 - `description`（string，可选）：配置说明，不传则保持旧值
+
+---
+
+### POST /api/system/trigger/{task_name}
+
+调试端点：手动触发定时任务，支持模拟日期。
+
+请求：`POST /api/system/trigger/check_expired_rentals`
+```json
+{"simulate_date": "2026-06-30"}
+```
+
+响应：
+```json
+{
+  "task": "check_expired_rentals",
+  "simulated_date": "2026-06-30",
+  "result": "None"
+}
+```
+
+HTTP 状态码：200
+
+关键字段：
+- `task_name`（path，必填）：任务名，可选值：`check_expiring_rentals` / `check_expired_rentals` / `check_reclaim_expired`
+- `simulate_date`（body，可选）：模拟日期，格式 `YYYY-MM-DD`。不传则使用当前日期
+- `result`（string）：任务执行结果（`None` 表示正常完成，含异常信息则返回错误描述）
+
+错误：
+- 400：`{"detail": "无效任务名，可选: check_expiring_rentals, check_expired_rentals, check_reclaim_expired"}`
 
 ---
 
@@ -917,7 +1006,7 @@ HTTP 状态码：200
 1. 验证锚点租赁记录存在
 2. 找到该 rental 关联的合同（取第一个）
 3. 提交 Celery 异步任务 `send_manual_email(contract_id, "reclaim")`
-4. 异步任务中：发送回收邮件 → 更新合同状态为 `reclaimed` → 更新所有关联设备状态为 `已下架`
+4. 异步任务中：先执行回收（更新合同状态为 `reclaimed`、更新所有关联设备状态为 `空闲中`）→ 再发送回收通知邮件
 
 错误：
 - 404：`{"detail": "租赁记录不存在"}`
@@ -1050,7 +1139,7 @@ HTTP 状态码：200
 响应（201）：同 GET 列表项。
 
 关键字段：
-- `trigger_type`（string，必填）：`provision | expiry_warning | reclaim`
+- `trigger_type`（string，必填）：`provision | expiry_warning | expiry_notice | reclaim`
 - `subject_tpl` / `body_html`（string，必填）：Jinja2 模板
 - `variables_desc`（object，可选）：变量说明
 - `signature_html`（string，可选）：邮件签名（HTML），渲染时自动拼接在正文末尾
@@ -1328,7 +1417,7 @@ HTTP 状态码：201
 - `contract_no`（string，可选，最长 100）
 - `remark`（string，可选）
 - `rental_ids`（array，可选）：创建时关联的设备 ID 列表
-- `contacts`（array，可选）：创建时关联的联系人列表，每项含 `contact_id` 和 `recipient_type`（"to"/"cc"）
+- `contacts`（array，可选）：创建时关联的联系人列表，每项含 `contact_id` 和 `recipient_type`（"to"/"cc"）。后端自动按 `(contact_id, recipient_type)` 去重，重复项只保留第一条
 
 错误：
 - 404：`{"detail": "客户不存在"}`
@@ -1443,25 +1532,35 @@ HTTP 状态码：200
 响应：
 ```json
 {
-  "total_contracts": 10,
-  "expiring": 3,
+  "total_contracts": 3,
+  "expiring": 1,
   "reclaimed": 2,
   "expiring_contracts": [
     {
-      "contract_id": "abc-123",
-      "contract_name": "主合同A",
-      "customer_name": "星辰科技",
+      "contract_id": "0f94afd6-a801-4712-9121-96c0e95e41d3",
+      "contract_name": "4090算力租赁",
+      "customer_name": "江苏东蓝信息技术有限公司",
       "end_date": "2026-07-06",
       "status": "active",
       "rental_count": 2,
       "rentals": [
         {
-          "id": "r-1",
-          "machine_model": "Dell R740",
-          "private_ip": "10.0.0.1",
-          "public_ips": ["1.2.3.4"],
-          "os_version": "Ubuntu 22.04",
-          "status": "运行中"
+          "id": "44dc99cb-de64-4156-bb84-6e45b450cd5f",
+          "machine_model": "R8428A12",
+          "private_ip": "192.168.100.125",
+          "public_ips": ["116.169.215.245"],
+          "os_version": "Ubuntu 22.04 TLS",
+          "status": "租赁中",
+          "rack_location": "E09-18U"
+        },
+        {
+          "id": "e8fa71bd-82bd-4e2f-b6dd-b459d80e18b0",
+          "machine_model": "R8428A12",
+          "private_ip": "192.168.100.124",
+          "public_ips": ["116.169.215.244"],
+          "os_version": "Ubuntu 22.04 TLS",
+          "status": "租赁中",
+          "rack_location": "E09-24U"
         }
       ]
     }
@@ -1473,7 +1572,7 @@ HTTP 状态码：200
 
 关键字段：
 - `total_contracts`（int）：合同总数
-- `expiring`（int）：临期数量（end_date <= today+3 且 > today，状态为 active/expiring）
+- `expiring`（int）：临期数量（end_date <= today+max_days 且 >= today，max_days 从 system_config.expiry_warning_days 读取，默认 7）
 - `reclaimed`（int）：已回收数量（status == 'reclaimed'）
 - `expiring_contracts`（array）：临期合同详情列表（最多 10 条），含关联设备
 
@@ -1554,7 +1653,7 @@ HTTP 状态码：201
 
 查询参数：
 - `rental_id`（string，可选）
-- `trigger_type`（string，可选）：`provision | expiry_warning | reclaim`
+- `trigger_type`（string，可选）：`provision | expiry_warning | expiry_notice | reclaim`
 - `status`（string，可选）：`sent | failed`
 - `page`（int，默认 1）
 - `page_size`（int，默认 20，最大 100）
@@ -1642,3 +1741,69 @@ HTTP 状态码：200
 - 404：`{"detail": "日志不存在"}`
 - 422：`{"detail": "该邮件已发送成功，无需重发"}`
 - 400：`{"detail": "SMTP 配置不存在，请先配置 SMTP"}`
+
+---
+
+## 合同管理 (Contract)
+
+### POST /api/contracts
+
+创建合同，可同时关联设备和联系人。
+
+请求：`POST /api/contracts`
+```json
+{
+  "customer_id": "1b995881-437b-4295-a4d3-0084c70dbf5c",
+  "name": "4090算力租赁",
+  "contract_no": "GYJY-001",
+  "start_date": "2026-06-29",
+  "end_date": "2026-07-06",
+  "billing_model": "monthly",
+  "rental_ids": ["e8fa71bd-82bd-4e2f-b6dd-b459d80e18b0", "44dc99cb-de64-4156-bb84-6e45b450cd5f"],
+  "contacts": [
+    {"contact_id": "3ce064c5-5d08-4d19-999f-aadffe99b335", "recipient_type": "to"},
+    {"contact_id": "3ce064c5-5d08-4d19-999f-aadffe99b335", "recipient_type": "cc"}
+  ]
+}
+```
+
+响应（201 Created）：
+```json
+{
+  "id": "0f94afd6-a801-4712-9121-96c0e95e41d3",
+  "customer_id": "1b995881-437b-4295-a4d3-0084c70dbf5c",
+  "customer_name": "江苏东蓝信息技术有限公司",
+  "name": "4090算力租赁",
+  "contract_no": "GYJY-001",
+  "start_date": "2026-06-29",
+  "end_date": "2026-07-06",
+  "billing_model": "monthly",
+  "status": "active",
+  "remark": null,
+  "rental_count": 2,
+  "contact_count": 1,
+  "created_at": "2026-06-29T20:10:46",
+  "updated_at": "2026-06-29T20:10:46",
+  "rentals": [
+    {"id": "44dc99cb-de64-4156-bb84-6e45b450cd5f", "machine_model": "R8428A12", "private_ip": "192.168.100.125", "public_ips": ["116.169.215.245"], "os_version": "Ubuntu 22.04 TLS", "status": "租赁中", "rack_location": "E09-18U"},
+    {"id": "e8fa71bd-82bd-4e2f-b6dd-b459d80e18b0", "machine_model": "R8428A12", "private_ip": "192.168.100.124", "public_ips": ["116.169.215.244"], "os_version": "Ubuntu 22.04 TLS", "status": "租赁中", "rack_location": "E09-24U"}
+  ],
+  "contacts": [
+    {"contact_id": "3ce064c5-5d08-4d19-999f-aadffe99b335", "name": "吴浩", "email": "wuhao@xhwltech.com", "recipient_type": "cc"},
+    {"contact_id": "3ce064c5-5d08-4d19-999f-aadffe99b335", "name": "吴浩", "email": "wuhao@xhwltech.com", "recipient_type": "to"}
+  ]
+}
+```
+
+HTTP 状态码：201
+
+关键字段：
+- `rental_ids`（array, optional）：关联设备 ID 列表，创建后设备状态自动变为"租赁中"
+- `contacts`（array, optional）：联系人列表，支持同一联系人在同一合同中同时作为 to 和 cc（`recipient_type` 区分）
+- `billing_model`（string）：计费方式，枚举 `monthly | quarterly | yearly`
+- 设备关联去重：同一设备只能关联一个合同（`contract_rental.rental_id` 有唯一约束），重复关联会跳过
+- 联系人去重：按 `(contact_id, recipient_type)` 去重，同一联系人 + 同一角色只存一条
+
+错误：
+- 409：`{"detail": "设备 xxx 已被其他合同关联"}`
+- 422：`{"detail": "..."}`（参数校验失败）

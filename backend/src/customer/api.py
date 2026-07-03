@@ -54,10 +54,11 @@ def create_customer(
     db: Session = Depends(get_db),
 ):
     """创建客户"""
-    # code 唯一性校验
-    existing = services.get_customer_by_code(db, data.code)
-    if existing:
-        raise HTTPException(status_code=400, detail=f"客户编码 '{data.code}' 已存在")
+    # code 唯一性校验（仅当用户手动指定 code 时）
+    if data.code:
+        existing = services.get_customer_by_code(db, data.code)
+        if existing:
+            raise HTTPException(status_code=400, detail=f"客户编码 '{data.code}' 已存在")
     customer = services.create_customer(db, data)
     return schemas.CustomerResponse(
         id=customer.id,
@@ -128,6 +129,20 @@ def delete_customer(
     customer = services.get_customer(db, customer_id)
     if not customer:
         raise HTTPException(status_code=404, detail="客户不存在")
+
+    # 删除前检查：该客户是否有活跃/临期合同
+    from src.contract.models import Contract
+    active_contracts = db.query(Contract).filter(
+        Contract.customer_id == customer_id,
+        Contract.status.in_(['active', 'expiring'])
+    ).count()
+
+    if active_contracts > 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"该客户有 {active_contracts} 个活跃合同，请先处理合同后再删除"
+        )
+
     services.delete_customer(db, customer)
     return {"detail": "客户已删除（状态设为 inactive）"}
 

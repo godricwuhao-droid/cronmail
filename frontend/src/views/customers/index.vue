@@ -96,7 +96,6 @@ const submitting = ref(false)
 
 const form = reactive<CustomerCreatePayload>({
   name: '',
-  code: '',
 })
 
 const rules: FormRules = {
@@ -104,17 +103,12 @@ const rules: FormRules = {
     { required: true, message: '请输入客户名称', trigger: 'blur' },
     { max: 128, message: '长度不能超过 128 个字符', trigger: 'blur' },
   ],
-  code: [
-    { required: true, message: '请输入客户编码', trigger: 'blur' },
-    { max: 64, message: '长度不能超过 64 个字符', trigger: 'blur' },
-  ],
 }
 
 function openCreateDialog() {
   dialogMode.value = 'create'
   editingId.value = null
   form.name = ''
-  form.code = ''
   dialogVisible.value = true
   // 重置校验状态
   setTimeout(() => formRef.value?.clearValidate(), 0)
@@ -125,7 +119,6 @@ function openEditDialog(row: Customer) {
   dialogMode.value = 'edit'
   editingId.value = row.id
   form.name = row.name
-  form.code = row.code
   dialogVisible.value = true
   setTimeout(() => formRef.value?.clearValidate(), 0)
 }
@@ -143,14 +136,12 @@ async function handleSubmit() {
     if (dialogMode.value === 'create') {
       const payload: CustomerCreatePayload = {
         name: form.name.trim(),
-        code: form.code.trim(),
       }
       await createCustomer(payload)
       ElMessage.success('客户创建成功')
     } else if (editingId.value) {
       const payload: CustomerUpdatePayload = {
         name: form.name.trim(),
-        code: form.code.trim(),
       }
       await updateCustomer(editingId.value, payload)
       ElMessage.success('客户更新成功')
@@ -287,7 +278,6 @@ onMounted(() => {
             </el-link>
           </template>
         </el-table-column>
-        <el-table-column prop="code" label="客户编码" min-width="120" />
         <el-table-column label="状态" width="100">
           <template #default="{ row }">
             <el-tag
@@ -301,10 +291,7 @@ onMounted(() => {
         </el-table-column>
         <el-table-column prop="contact_count" label="联系人数量" width="120" align="center">
           <template #default="{ row }">
-            <el-tag v-if="row.contact_count" type="info" effect="plain" size="small">
-              {{ row.contact_count }}
-            </el-tag>
-            <span v-else class="muted">0</span>
+            <span>{{ row.contact_count ?? 0 }}</span>
           </template>
         </el-table-column>
         <el-table-column label="创建时间" width="180">
@@ -365,9 +352,6 @@ onMounted(() => {
       >
         <el-form-item label="客户名称" prop="name">
           <el-input v-model="form.name" placeholder="请输入客户名称" maxlength="128" show-word-limit />
-        </el-form-item>
-        <el-form-item label="客户编码" prop="code">
-          <el-input v-model="form.code" placeholder="请输入客户编码（唯一标识）" maxlength="64" show-word-limit />
         </el-form-item>
       </el-form>
       <template #footer>

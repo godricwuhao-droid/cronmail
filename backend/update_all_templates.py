@@ -60,14 +60,14 @@ PROVISION_HTML = """<!DOCTYPE html>
 </tr>
 {% for r in rentals %}
 <tr>
-<td style="padding:10px 12px;font-size:12px;color:#333;border-bottom:1px solid #f0f0f0;"><b>{{ r.machine_model }}</b>{{ "（" + r.cpu_model + "）" if r.cpu_model else "" }}</td>
+<td style="padding:10px 12px;font-size:12px;color:#333;border-bottom:1px solid #f0f0f0;"><b>{{ r.machine_model }}</b></td>
 <td style="padding:10px 12px;font-size:12px;color:#333;border-bottom:1px solid #f0f0f0;">
 内网: {{ r.private_ip }}{% for ip in r.public_ips %}<br>公网: {{ ip }}{% endfor %}
 </td>
 <td style="padding:10px 12px;font-size:12px;color:#333;border-bottom:1px solid #f0f0f0;">{{ r.os_version }}</td>
-<td style="padding:10px 12px;font-size:12px;color:#333;border-bottom:1px solid #f0f0f0;">{{ r.system_disk_gb }}GB</td>
+<td style="padding:10px 12px;font-size:12px;color:#333;border-bottom:1px solid #f0f0f0;">{{ r.system_disk }}</td>
 <td style="padding:10px 12px;font-size:12px;color:#333;border-bottom:1px solid #f0f0f0;">
-{% for disk in r.data_disks %}{{ disk.size_gb }}GB {{ disk.type }}{% if not loop.last %}, {% endif %}{% endfor %}{% if not r.data_disks %}-{% endif %}
+{% for disk in r.data_disks %}{{ disk }}{% if not loop.last %}, {% endif %}{% endfor %}{% if not r.data_disks %}-{% endif %}
 </td>
 <td style="padding:10px 12px;font-size:12px;color:#333;border-bottom:1px solid #f0f0f0;">{{ r.bandwidth_mbps }}Mbps</td>
 <td style="padding:10px 12px;font-size:12px;color:#2e7d32;border-bottom:1px solid #f0f0f0;"><b>{{ r.end_date }}</b></td>
@@ -145,14 +145,14 @@ EXPIRY_WARNING_HTML = """<!DOCTYPE html>
 </tr>
 {% for r in rentals %}
 <tr>
-<td style="padding:10px 12px;font-size:12px;color:#333;border-bottom:1px solid #f0f0f0;"><b>{{ r.machine_model }}</b>{{ "（" + r.cpu_model + "）" if r.cpu_model else "" }}</td>
+<td style="padding:10px 12px;font-size:12px;color:#333;border-bottom:1px solid #f0f0f0;"><b>{{ r.machine_model }}</b></td>
 <td style="padding:10px 12px;font-size:12px;color:#333;border-bottom:1px solid #f0f0f0;">
 内网: {{ r.private_ip }}{% for ip in r.public_ips %}<br>公网: {{ ip }}{% endfor %}
 </td>
 <td style="padding:10px 12px;font-size:12px;color:#333;border-bottom:1px solid #f0f0f0;">{{ r.os_version }}</td>
-<td style="padding:10px 12px;font-size:12px;color:#333;border-bottom:1px solid #f0f0f0;">{{ r.system_disk_gb }}GB</td>
+<td style="padding:10px 12px;font-size:12px;color:#333;border-bottom:1px solid #f0f0f0;">{{ r.system_disk }}</td>
 <td style="padding:10px 12px;font-size:12px;color:#333;border-bottom:1px solid #f0f0f0;">
-{% for disk in r.data_disks %}{{ disk.size_gb }}GB {{ disk.type }}{% if not loop.last %}, {% endif %}{% endfor %}{% if not r.data_disks %}-{% endif %}
+{% for disk in r.data_disks %}{{ disk }}{% if not loop.last %}, {% endif %}{% endfor %}{% if not r.data_disks %}-{% endif %}
 </td>
 <td style="padding:10px 12px;font-size:12px;color:#333;border-bottom:1px solid #f0f0f0;">{{ r.bandwidth_mbps }}Mbps</td>
 <td style="padding:10px 12px;font-size:12px;color:#e53935;border-bottom:1px solid #f0f0f0;"><b>{{ r.end_date }}</b></td>
@@ -214,14 +214,14 @@ RECLAIM_HTML = """<!DOCTYPE html>
 </tr>
 {% for r in rentals %}
 <tr>
-<td style="padding:10px 12px;font-size:12px;color:#333;border-bottom:1px solid #f0f0f0;"><b>{{ r.machine_model }}</b>{{ "（" + r.cpu_model + "）" if r.cpu_model else "" }}</td>
+<td style="padding:10px 12px;font-size:12px;color:#333;border-bottom:1px solid #f0f0f0;"><b>{{ r.machine_model }}</b></td>
 <td style="padding:10px 12px;font-size:12px;color:#333;border-bottom:1px solid #f0f0f0;">
 内网: {{ r.private_ip }}{% for ip in r.public_ips %}<br>公网: {{ ip }}{% endfor %}
 </td>
 <td style="padding:10px 12px;font-size:12px;color:#333;border-bottom:1px solid #f0f0f0;">{{ r.os_version }}</td>
-<td style="padding:10px 12px;font-size:12px;color:#333;border-bottom:1px solid #f0f0f0;">{{ r.system_disk_gb }}GB</td>
+<td style="padding:10px 12px;font-size:12px;color:#333;border-bottom:1px solid #f0f0f0;">{{ r.system_disk }}</td>
 <td style="padding:10px 12px;font-size:12px;color:#333;border-bottom:1px solid #f0f0f0;">
-{% for disk in r.data_disks %}{{ disk.size_gb }}GB {{ disk.type }}{% if not loop.last %}, {% endif %}{% endfor %}{% if not r.data_disks %}-{% endif %}
+{% for disk in r.data_disks %}{{ disk }}{% if not loop.last %}, {% endif %}{% endfor %}{% if not r.data_disks %}-{% endif %}
 </td>
 <td style="padding:10px 12px;font-size:12px;color:#333;border-bottom:1px solid #f0f0f0;">{{ r.bandwidth_mbps }}Mbps</td>
 <td style="padding:10px 12px;font-size:12px;color:#e53935;border-bottom:1px solid #f0f0f0;"><b>{{ r.end_date }}</b></td>

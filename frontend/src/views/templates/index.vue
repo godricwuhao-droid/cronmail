@@ -41,6 +41,7 @@ const pagination = reactive({
 const TRIGGER_OPTIONS: Array<{ label: string; value: TriggerType }> = [
   { label: '开通通知', value: 'provision' },
   { label: '临期提醒', value: 'expiry_warning' },
+  { label: '到期提醒', value: 'expiry_notice' },
   { label: '回收通知', value: 'reclaim' },
 ]
 

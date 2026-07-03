@@ -11,11 +11,6 @@ from pydantic import BaseModel, Field, field_validator
 # 辅助 Schema
 # ============================================================
 
-class DataDiskSchema(BaseModel):
-    """数据盘信息"""
-    size_gb: int = Field(..., description="容量(GB)")
-    type: str = Field(..., description="磁盘类型，如 NVMe SSD / SATA SSD")
-
 
 class RentalContactCreate(BaseModel):
     """创建租赁记录时的联系人关联"""
@@ -72,8 +67,8 @@ class RentalRecordCreate(BaseModel):
     cpu_model: Optional[str] = Field(None, max_length=256)
     memory_gb: Optional[int] = Field(None, ge=0)
     gpu_info: Optional[str] = None
-    system_disk_gb: Optional[int] = Field(None, ge=0)
-    data_disks: Optional[list[DataDiskSchema]] = None
+    system_disk: Optional[str] = Field(None, max_length=256)
+    data_disks: Optional[list[str]] = None
     os_version: Optional[str] = Field(None, max_length=128)
     bandwidth_mbps: Optional[int] = Field(None, ge=0)
     rack_location: Optional[str] = Field(None, max_length=256)
@@ -98,8 +93,8 @@ class RentalRecordUpdate(BaseModel):
     cpu_model: Optional[str] = Field(None, max_length=256)
     memory_gb: Optional[int] = Field(None, ge=0)
     gpu_info: Optional[str] = None
-    system_disk_gb: Optional[int] = Field(None, ge=0)
-    data_disks: Optional[list[DataDiskSchema]] = None
+    system_disk: Optional[str] = Field(None, max_length=256)
+    data_disks: Optional[list[str]] = None
     os_version: Optional[str] = Field(None, max_length=128)
     bandwidth_mbps: Optional[int] = Field(None, ge=0)
     rack_location: Optional[str] = Field(None, max_length=256)
@@ -128,8 +123,8 @@ class RentalRecordListResponse(BaseModel):
     cpu_model: Optional[str] = None
     memory_gb: Optional[int] = None
     gpu_info: Optional[str] = None
-    system_disk_gb: Optional[int] = None
-    data_disks: Optional[list[DataDiskSchema]] = None
+    system_disk: Optional[str] = None
+    data_disks: Optional[list[str]] = None
     os_version: Optional[str] = None
     bandwidth_mbps: Optional[int] = None
     rack_location: Optional[str] = None
@@ -159,8 +154,8 @@ class RentalRecordDetailResponse(BaseModel):
     cpu_model: Optional[str] = None
     memory_gb: Optional[int] = None
     gpu_info: Optional[str] = None
-    system_disk_gb: Optional[int] = None
-    data_disks: Optional[list[DataDiskSchema]] = None
+    system_disk: Optional[str] = None
+    data_disks: Optional[list[str]] = None
     os_version: Optional[str] = None
     bandwidth_mbps: Optional[int] = None
     rack_location: Optional[str] = None

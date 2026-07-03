@@ -9,6 +9,400 @@
 
 ---
 
+## 2026-07-04 (设备编辑页布局对齐 + 列表排序 + 列置顶)
+
+### [修改] 租赁编辑页布局对齐合同编辑页风格
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 修改 |
+| 范围 | 租赁创建/编辑页 |
+| 影响文件 | `frontend/src/views/rentals/create.vue` |
+| 关联任务 | 任务A |
+
+**改动**
+- 删除 `.form-grid` 双列网格布局，`el-form-item` 改为纵向排列（对齐合同编辑页）
+- Section title 改为带 `el-icon` 风格：`<el-icon><Document /></el-icon> 基础信息`
+- 图标映射：基础信息→Document, 存储→FolderOpened, 网络→Connection, 系统→Monitor, 凭证→Lock, 备注→EditPen
+- 删除 `.form-grid`、`.form-item-custom`、`.form-input-custom` 等旧 CSS
+- 存储区移除 `max-width: 600px` 限制
+
+### [新增] 设备列表排序功能
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 新增 |
+| 范围 | 后端 + 前端全链路 |
+| 影响文件 | `backend/src/rental/services.py`、`backend/src/rental/api.py`、`frontend/src/api/modules/rental.ts`、`frontend/src/views/rentals/index.vue` |
+| 关联任务 | 任务B |
+
+**改动**
+- 后端 `list_rentals` 新增 `sort_field` / `sort_order` 参数，白名单校验后动态 order_by
+- 排序白名单：machine_model、memory_gb、bandwidth_mbps、rack_location、created_at
+- 前端 `RentalListParams` 新增 `sort_field` / `sort_order`
+- el-table 加 `@sort-change="handleSort"`，对应列设 `sortable: 'custom'`
+- 默认按创建时间倒序
+
+### [新增] 列设置面板置顶按钮
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 新增 |
+| 范围 | 设备列表列设置 |
+| 影响文件 | `frontend/src/views/rentals/index.vue` |
+| 关联任务 | 任务C |
+
+**改动**
+- 列设置 popover 每个 column-item 新增置顶图钉按钮（Top 图标）
+- 默认置顶列：machine_model、private_ip、status
+- 置顶列在面板中排在前面
+- 新增 `.pin-btn` CSS：默认半透明，hover 显示主色
+
+---
+
+## 2026-07-03 (磁盘字段改 String + 创建设备页 UI 优化)
+
+### [修改] 系统盘/数据盘改为字符串类型，创建设备页 UI 优化
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 修改 |
+| 范围 | 设备 CRUD 全链路 + 模板 mock 数据 |
+| 影响文件 | `frontend/src/api/modules/rental.ts`、`frontend/src/views/rentals/index.vue`、`frontend/src/views/rentals/detail.vue`、`frontend/src/views/rentals/create.vue`、`frontend/src/views/templates/edit.vue`、`frontend/src/lib/template.ts` |
+| 关联任务 | 磁盘字段+UI |
+
+**改动**
+
+#### 1. API 类型（`rental.ts`）
+
+- **删除** `DataDisk` 接口（含 `size_gb` / `type`）
+- `RentalDetail.system_disk_gb: number | null` → `system_disk: string | null`
+- `RentalDetail.data_disks: DataDisk[] | null` → `data_disks: string[] | null`
+- `RentalCreatePayload.system_disk_gb?: number` → `system_disk?: string`
+- `RentalCreatePayload.data_disks?: DataDisk[]` → `data_disks?: string[]`
+- `RentalUpdatePayload` 同理
+
+#### 2. 设备列表页（`index.vue`）
+
+- 列 key `system_disk_gb` → `system_disk`，渲染去掉 `GB` 后缀直接显示字符串
+- 数据盘列：`d.size_gb` → `d`，直接显示字符串数组元素
+
+#### 3. 设备详情页（`detail.vue`）
+
+- `record.system_disk_gb` → `record.system_disk`，去掉 `+ ' GB'` 拼接
+- 数据盘渲染：`disk.size_gb` / `disk.type` → `disk`（直接字符串）
+
+#### 4. 创建设备页 UI 大改（`create.vue`）
+
+参考 `device-input-temp.html` 风格重写 UI：
+
+- **分区标题**：16px / 600 字重 / 左侧蓝色竖条 (`::before` 4px × 20px `#1890ff`) / 浅灰底 `#f8f9fa`
+- **表单网格**：`grid-template-columns: repeat(auto-fill, minmax(380px, 1fr))`，间距 16px
+- **标签样式**：14px / `#595959` / 500 字重；必填字段红色 `★` 星号
+- **系统盘字段**：`el-input-number` → `el-input`（字符串类型）
+- **数据盘字段**：按模板 `.storage-list` 风格重构
+  - 每项显示 `● 2000GB NVMe SSD [删除]` 列表式布局
+  - 虚线分隔 `border-bottom: 1px dashed #e8eaf0`
+  - 输入框 + 「+ 添加数据盘」按钮在列表下方
+  - 支持 Enter 快速添加
+- **底部按钮**：`.footer-actions` 右对齐，顶部分割线 `border-top: 1px solid #e8eaf0`
+
+#### 5. 模板编辑页（`edit.vue`）
+
+- `sampleData` 映射中 `system_disk_gb` → `system_disk`
+- 默认模板 HTML 中 `{{ system_disk_gb }} GB` → `{{ system_disk }}`
+
+#### 6. Mock 数据（`lib/template.ts`）
+
+```typescript
+system_disk: '480GB SATA SSD',
+data_disks: ['2000GB NVMe SSD', '4000GB SATA SSD'],
+```
+
+**验收**
+
+- ✅ `vue-tsc --noEmit` 0 错误
+- ✅ 全项目 `DataDisk` / `system_disk_gb` 搜索 0 命中
+- ✅ 创建设备页 UI 与 `device-input-temp.html` 风格一致
+
+**备注**
+
+- 磁盘字段从结构化（`{size_gb, type}`）改为自由字符串，用户可直接输入如 `480GB SATA SSD` 或 `76800GB NVMe SSD`，更灵活
+
+---
+
+## 2026-07-01 (模板测试发送改为选择合同)
+
+### [修改] 模板测试发送改为选择合同代替单设备
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 修改 |
+| 范围 | 模板编辑页测试发送弹窗 |
+| 影响文件 | `frontend/src/views/templates/edit.vue` |
+| 关联任务 | 测试体验优化 |
+
+**改动**
+
+1. **API 引入**：删除 `import { getRental, getRentals } from '@/api/modules/rental'`，改为 `import { listContracts, getContract } from '@/api/modules/contract'`
+2. **变量改名**：`rentalId` → `contractId`、`rentalOptions` → `contractOptions`、`rentalDetailLoading` → `contractDetailLoading`
+3. **下拉框改合同列表**：label 改为「选择合同」，placeholder 改为「选择一份合同作为测试数据（不选则用模板默认变量）」，选项 label 格式为「合同名称 - 客户名称」
+4. **`loadRentalOptions` → `loadContractOptions`**：调用 `listContracts({ page: 1, page_size: 100 })` 获取合同列表
+5. **`onRentalChange` → `onContractChange`**：选择合同后调用 `getContract(id)` 获取详情，将合同下所有设备映射为 `sample_data.rentals` 数组（`customer_name` + `rentals` 数组），模拟真实邮件发送场景（合同粒度合并发送）
+6. **`openTestSendDialog`**：`loadRentalOptions()` → `loadContractOptions()`
+
+**验收**
+
+- ✅ `vue-tsc --noEmit` 0 错误
+- ✅ 无残留 `rentalId` / `rentalOptions` / `rentalDetailLoading` 引用
+
+**备注**
+
+- 后端 `test_send` 接口已支持 `sample_data.rentals` 数组：有则直接用，无则包装为单设备列表
+- 测试发送现在以合同为粒度，与真实邮件发送逻辑一致
+
+---
+
+## 2026-07-01 (数据盘展示 + 表单布局优化)
+
+### [修改] 合同创建/编辑表单改为单列靠左布局
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 修改 |
+| 范围 | 合同创建/编辑页 |
+| 影响文件 | `frontend/src/views/contracts/create.vue` |
+| 关联任务 | 样式优化 |
+
+**改动**
+
+去掉基础信息区、服务周期区、关联联系人区的 `el-row`/`el-col` 两列布局，`el-form-item` 直接单列纵向排列。
+
+**备注**
+
+- 只删除布局标签，不改任何表单字段的内容、校验、逻辑
+- label-width 保持 120px 不变
+
+---
+
+## 2026-07-01 (数据盘展示 + 创建设备表单布局优化)
+
+### [修改] 数据盘展示去掉 el-tag 底色
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 修改 |
+| 范围 | 设备列表页 + 设备详情页 |
+| 影响文件 | `frontend/src/views/rentals/index.vue`、`frontend/src/views/rentals/detail.vue` |
+| 关联任务 | 样式优化 |
+
+**改动**
+
+1. **设备列表页**（`index.vue`）：数据盘列从 `el-tag` 包裹改为纯文本 `<span>` 展示（`{{ d.size_gb }}GB`）
+2. **设备详情页**（`detail.vue`）：数据盘字段从 `el-tag` 包裹改为纯文本 `<span>` 展示（`{{ disk.size_gb }}GB {{ disk.type }}`）
+
+**备注**
+
+- 数据盘信息不需要 el-tag 方框视觉强调，改为普通文本更简洁
+
+---
+
+### [修改] 创建设备表单改为单列靠左排列
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 修改 |
+| 范围 | 设备创建/编辑页 |
+| 影响文件 | `frontend/src/views/rentals/create.vue` |
+| 关联任务 | 样式优化 |
+
+**改动**
+
+- 去掉表单中所有 `el-row` + `el-col` 两列布局包裹（基础信息、网络、系统、凭证 4 个分区）
+- `el-form-item` 改为直接纵向单列排列，`label-width="120px"` 保持一致
+- `el-input-number` 和 `el-select` 宽度统一为 `240px`（原两列时用的 `width: 100%` 不再合适）
+- 数据盘部分、备注、提交按钮区域保持不变
+
+---
+
+## 2026-07-01 (设备详情页移除收件人和发送日志)
+
+### [删除] 设备详情页移除收件人和发送日志模块
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 删除 |
+| 范围 | 设备详情页 |
+| 影响文件 | `frontend/src/views/rentals/detail.vue` |
+| 关联任务 | 数据源不一致，移至合同维度 |
+
+**改动**
+
+1. 删除「收件人」section（含 `el-table` 展示 `contacts` 数据）
+2. 删除「发送日志」section（含 `el-table` 展示 `email_logs` 数据）
+3. 移除模板顶部注释中对收件人和发送日志的提及
+
+**备注**
+
+- 收件人和发送日志的数据源不一致，后续移至合同维度管理
+
+---
+
+## 2026-07-01 (数字计数字段样式优化)
+
+### [修改] 数字计数字段去掉 el-tag 方框包裹
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 修改 |
+| 范围 | 合同列表 + 客户列表 |
+| 影响文件 | `frontend/src/views/contracts/index.vue`、`frontend/src/views/customers/index.vue` |
+| 关联任务 | 样式优化 |
+
+**改动**
+
+1. **合同列表 - 设备数列**（`contracts/index.vue`）：`el-tag` 包裹的 `rental_count` 改为普通 `<span>{{ row.rental_count ?? 0 }}</span>`，0 值时统一用 `??` 运算符而非 `v-if/v-else` 分支
+2. **客户列表 - 联系人数量列**（`customers/index.vue`）：同理，`el-tag` 包裹的 `contact_count` 改为普通 `<span>{{ row.contact_count ?? 0 }}</span>`
+
+**验收**
+
+- ✅ `vue-tsc --noEmit` 0 错误
+
+**备注**
+
+- 数字计数字段不需要 el-tag 方框视觉强调，改为普通文本更简洁
+
+---
+
+## 2026-07-01 (回收按钮错误提示修复)
+
+### [修复] 回收按钮错误提示被吞掉
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 修复 |
+| 范围 | 合同详情页回收按钮 |
+| 影响文件 | `frontend/src/views/contracts/detail.vue` |
+| 关联任务 | BUG-回收提示 |
+
+**问题**
+
+`handleReclaim` 函数的 catch 块为空（`catch { /* 忽略 */ }`），回收失败时用户看不到任何错误提示。
+
+**修复**
+
+catch 块改为显示后端返回的错误信息：
+- 优先显示 `err.response.data.detail`（后端 FastAPI 的标准错误格式）
+- 降级显示「回收失败，请检查合同状态」
+
+```typescript
+} catch (err: any) {
+  ElMessage.error(err?.response?.data?.detail || '回收失败，请检查合同状态')
+}
+```
+
+**验收**
+
+- ✅ `vue-tsc --noEmit` 0 错误
+
+**关联任务**：BUG-回收提示
+
+**备注**
+
+- 使用 `any` 类型访问 axios 错误响应链（`err.response.data.detail`），项目中其他 catch 块也采用同样方式
+
+---
+
+## 2026-06-27 (新增 expiry_notice 触发类型)
+
+### [修改] 前端支持新 trigger_type `expiry_notice`（到期提醒）
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 修改 |
+| 范围 | 模板/日志 API 类型 + 共享常量 + 模板/日志视图 |
+| 影响文件 | `frontend/src/api/modules/template.ts`、`frontend/src/api/modules/log.ts`、`frontend/src/lib/template.ts`、`frontend/src/lib/log.ts`、`frontend/src/views/templates/index.vue`、`frontend/src/views/templates/edit.vue`、`frontend/src/views/logs/index.vue` |
+| 关联任务 | 前端支持新 trigger_type expiry_notice |
+
+**改动**
+
+1. **API 类型扩展**：
+   - `template.ts`：`TriggerType` 联合类型新增 `'expiry_notice'`
+   - `log.ts`：`LogTriggerType` 联合类型新增 `'expiry_notice'`
+
+2. **共享常量扩展**：
+   - `lib/template.ts`：`TRIGGER_TYPE_LABEL` 新增 `expiry_notice: '到期提醒'`；`TRIGGER_TYPE_TAG` 新增 `expiry_notice: 'danger'`（红色），`reclaim` 也改为 `'danger'`
+   - `lib/log.ts`：`LOG_TRIGGER_LABEL` 新增 `expiry_notice: '到期提醒'`
+
+3. **视图层筛选选项**：
+   - `templates/index.vue`：触发类型筛选下拉新增「到期提醒」
+   - `templates/edit.vue`：触发类型选择下拉新增「到期提醒」
+   - `logs/index.vue`：触发类型筛选下拉新增「到期提醒」
+
+**验收**
+
+- ✅ `vue-tsc --noEmit` 0 错误
+- ✅ `vite build` 成功
+- ✅ Docker 镜像构建 + 推送成功
+- ✅ K8s deployment rollout 成功
+
+**关联任务**：前端支持新 trigger_type expiry_notice
+
+**备注**
+
+- 后端 API 文档中 `trigger_type` 已包含 `expiry_notice`（`POST /api/templates` 和 `GET /api/logs`）
+- `expiry_notice` tag 颜色为 `danger`（红色），表示到期提醒的紧迫性
+
+---
+
+## 2026-06-27 (通知时间配置页面)
+
+### [新增] 系统配置页新增通知时间配置模块
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 新增 |
+| 范围 | 系统配置页面 + API 模块 |
+| 影响文件 | `frontend/src/views/system/config.vue`（修改）、`frontend/src/api/modules/system.ts`（修改） |
+| 关联任务 | 前端通知时间配置页面 |
+
+#### 1. API 模块扩展（`src/api/modules/system.ts`）
+
+新增类型与函数：
+- `ScheduleConfig` — 通知时间配置接口（三个 key：`check-expiring-rentals` / `check-expired-rentals` / `check-reclaim-expired`）
+- `getSchedules()` — `GET /api/system/config/schedules`
+- `updateSchedules(data)` — `PUT /api/system/config/schedules`，返回 `{ detail, restart }`
+
+#### 2. 系统配置页（`src/views/system/config.vue`）
+
+- 页面重构为两个区域：临期提醒天数（原有）+ 通知时间配置（新增），用 `el-divider` 分隔
+- 通知时间区域包含三个 `el-time-picker`（`format="HH:mm"` `value-format="HH:mm"`）：
+  - 临期提醒通知 → `check-expiring-rentals`
+  - 到期回收通知 → `check-expired-rentals`
+  - 回收执行时间 → `check-reclaim-expired`
+- `onMounted` 并行加载 `fetchConfig()` + `fetchSchedules()`
+- 保存按钮统一保存两个区域：
+  - 临期提醒：校验格式后调用 `updateConfig`
+  - 通知时间：组装 `ScheduleConfig` 调用 `updateSchedules`，成功提示「通知时间配置已保存，Beat 正在重启...」，restart 含 error 时 `ElMessage.warning`
+- 加载 404 时保持默认值（`08:00` / `00:00` / `01:00`）
+- 风格与现有配置卡片一致（`schedule-section` / `schedule-item` 布局）
+
+**验收**
+
+- ✅ `vue-tsc --noEmit -p tsconfig.app.json` 0 错误
+- ✅ `vite build` 成功
+- ✅ Docker 镜像 `harbor.xhwltech.com/xhcloud/cronmail-frontend:latest` 构建 + 推送成功
+- ✅ K8s `deployment/cronmail-frontend` rollout 成功
+
+**关联任务**：前端通知时间配置页面
+
+**备注**
+
+- 后端 `/api/system/config/schedules` 端点待实现（当前 404，前端以默认值兜底）
+- 三个 time-picker 使用 Element Plus 自带时间格式校验，无需额外 rules
+
+---
+
 ## 2026-06-27 (钉钉加签密钥保存 Bug 修复)
 
 ### [修复] 钉钉配置保存时加签密钥被篡改
@@ -1374,3 +1768,77 @@ K8s Ingress 未代理 `/api/*` 到后端，前端 `POST http://192.168.180.171:3
 **备注**
 
 - 后端 Dashboard stats 接口目前返回 `expired` 字段，`reclaimed` 字段待后端新增；前端已用 `(data as any).reclaimed ?? 0` 做兼容
+
+---
+
+## 2026-06-27 (审计报告前端问题修复)
+
+### [修复] H-2：设备状态枚举重复定义消除
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 修复 |
+| 范围 | 租赁模块共享常量 |
+| 影响文件 | `frontend/src/lib/rental.ts` |
+| 关联任务 | 审计报告 H-2 |
+
+**改动**
+
+- `lib/rental.ts` 中移除重复的 `RENTAL_STATUS_FALLBACK` 常量定义
+- 改为从 `@/api/modules/rental` 导入并重新导出（`export { RENTAL_STATUS_FALLBACK }`）
+- 后端 `rental_record.status` 使用中文值 `空闲中 / 已断电 / 租赁中`，前端 `RentalStatus` 类型与此一致，无需修改
+
+### [修复] H-3：合同列表添加「已到期」筛选 + 修正标签
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 修复 |
+| 范围 | 合同列表页 |
+| 影响文件 | `frontend/src/views/contracts/index.vue` |
+| 关联任务 | 审计报告 H-3 |
+
+**改动**
+
+- 状态筛选下拉框新增 `{ label: '已到期', value: 'expired' }` 选项
+- 「运行中」label 修正为「生效中」（与 `CONTRACT_STATUS_LABEL` 保持一致）
+- 「即将到期」label 修正为「临期」
+
+### [修复] H-4：同事管理分页 total 修复
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 修复 |
+| 范围 | 内部同事管理页 |
+| 影响文件 | `frontend/src/views/system/colleagues.vue` |
+| 关联任务 | 审计报告 H-4 |
+
+**改动**
+
+- `total.value = list.value.length` → `total.value = res.total`
+- 后端 `list_contacts` 不支持 `is_active` 参数，total 包含已停用的，前端仍做 `filter(c => c.is_active)` 过滤展示
+
+### [修复] M-5：SMTP/钉钉配置 404 误判
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 修复 |
+| 范围 | SMTP 配置页 + 钉钉配置页 + 系统 API 模块 |
+| 影响文件 | `frontend/src/views/system/smtp.vue`、`frontend/src/views/system/dingtalk.vue`、`frontend/src/api/modules/system.ts` |
+| 关联任务 | 审计报告 M-5 |
+
+**改动**
+
+1. **API 层**（`system.ts`）：`getSmtpConfig()` 和 `getDingTalkConfig()` 调用时传入 `{ __silent: true }`，阻止 axios 拦截器对 404 弹出全局错误提示
+2. **smtp.vue `fetchConfig()`**：catch 中 404 时判定为「尚未配置」（保持空表单），非 404 错误手动 `ElMessage.error` 提示网络异常
+3. **dingtalk.vue `fetchConfig()`**：同上逻辑
+
+**验收**
+
+- ✅ `vue-tsc --noEmit` 0 错误
+- ✅ 所有修改文件 lint 0 错误
+
+**关联任务**：审计报告前端问题修复（H-2 / H-3 / H-4 / M-5）
+
+**备注**
+
+- 网络断开时不再被误判为「未配置」，用户能看到明确的错误提示

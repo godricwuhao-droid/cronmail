@@ -3,11 +3,24 @@
 """
 import json
 from typing import Optional
+
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
+from sqlalchemy.exc import IntegrityError
 
 from src.contract.models import Contract, contract_rental, contract_contact
 from src.contract.schemas import ContractCreate, ContractUpdate
+from src.core.timezone import local_today
+from src.core.crypto import decrypt_password
+
+
+def _safe_decrypt(value):
+    """安全解密：失败时返回空字符串，不抛异常"""
+    try:
+        return decrypt_password(value or "") if value else ""
+    except Exception:
+        return ""
 
 
 def list_contracts(
@@ -89,13 +102,44 @@ def update_contract(db: Session, contract: Contract, data: ContractUpdate) -> Co
     if contacts_data is not None:
         _replace_contract_contacts(db, contract.id, contacts_data)
 
+    # expired 状态合同编辑后，根据 end_date 自动判定状态
+    if contract.status == 'expired':
+        today = local_today()
+        if contract.end_date and contract.end_date > today:
+            contract.status = 'active'
+
     db.commit()
     db.refresh(contract)
     return contract
 
 
 def delete_contract(db: Session, contract: Contract):
-    """删除合同（CASCADE 会删除中间表关联）"""
+    """删除合同
+    
+    删除前：
+    1. 遍历关联设备，将 status 设为 '空闲中'，customer_id 设为 None
+    2. 手动清理 contract_contact 和 contract_rental 中间表行，
+       避免 SQLAlchemy secondary relationship 的 CASCADE 行为因
+       contract_contact 复合主键 (contract_id, contact_id, recipient_type)
+       产生 StaleDataError
+    """
+    from src.rental.models import RentalRecord
+    for rental in contract.rentals:
+        rental.status = '空闲中'
+        rental.customer_id = None
+
+    # 手动清理中间表，绕过 secondary relationship 的 cascade 缺陷
+    db.execute(
+        contract_contact.delete().where(
+            contract_contact.c.contract_id == contract.id
+        )
+    )
+    db.execute(
+        contract_rental.delete().where(
+            contract_rental.c.contract_id == contract.id
+        )
+    )
+
     db.delete(contract)
     db.commit()
 
@@ -111,12 +155,13 @@ def link_rentals(db: Session, contract_id: str, rental_ids: list[str]):
 
 
 def unlink_rentals(db: Session, contract_id: str, rental_ids: list[str]):
-    """取消关联设备，并将设备状态恢复为「空闲中」"""
+    """取消关联设备，并将设备状态恢复为「空闲中」并清空客户关联"""
     from src.rental.models import RentalRecord
     for rid in rental_ids:
         rental = db.query(RentalRecord).filter(RentalRecord.id == rid).first()
         if rental:
             rental.status = '空闲中'
+            rental.customer_id = None
     db.execute(
         contract_rental.delete().where(
             and_(
@@ -161,12 +206,16 @@ def _link_rentals(db: Session, contract_id: str, rental_ids: list[str]):
                 f"设备 {rid} 已关联到合同 {occupied[rid]}，跳过关联到合同 {contract_id}"
             )
             continue
-        db.execute(
-            contract_rental.insert().values(
-                contract_id=contract_id,
-                rental_id=rid,
+        try:
+            db.execute(
+                contract_rental.insert().values(
+                    contract_id=contract_id,
+                    rental_id=rid,
+                )
             )
-        )
+        except IntegrityError:
+            # TOCTOU 竞态：在检查和插入之间，设备已被其他合同关联
+            raise HTTPException(status_code=409, detail=f"设备 {rid} 已被其他合同关联")
         # 同步设备字段：从合同继承
         if contract:
             rental = db.query(RentalRecord).filter(RentalRecord.id == rid).first()
@@ -208,13 +257,15 @@ def get_contract_contacts(db: Session, contract_id: str) -> list[dict]:
 def _replace_contract_contacts(db: Session, contract_id: str, contacts: list):
     """全量替换合同联系人
 
-    contacts 可以是 ContractContactPayload 对象列表或 dict 列表
+    contacts 可以是 ContractContactPayload 对象列表或 dict 列表。
+    自动按 (contact_id, recipient_type) 去重，避免前端传入重复联系人导致 IntegrityError。
     """
     db.execute(
         contract_contact.delete().where(
             contract_contact.c.contract_id == contract_id
         )
     )
+    seen: set[tuple[str, str]] = set()
     for c in contacts:
         if hasattr(c, 'contact_id'):
             cid = c.contact_id
@@ -222,6 +273,10 @@ def _replace_contract_contacts(db: Session, contract_id: str, contacts: list):
         else:
             cid = c['contact_id']
             rtype = c.get('recipient_type', 'to')
+        key = (cid, rtype)
+        if key in seen:
+            continue
+        seen.add(key)
         db.execute(
             contract_contact.insert().values(
                 contract_id=contract_id,
@@ -241,7 +296,9 @@ def get_contract_rentals(db: Session, contract_id: str) -> list[dict]:
 
     rows = db.execute(
         text(
-            "SELECT r.id, r.machine_model, r.private_ip, r.public_ips, r.os_version, r.status, r.rack_location "
+            "SELECT r.id, r.machine_model, r.private_ip, r.public_ips, r.os_version, r.status, r.rack_location, "
+            "r.system_disk, r.data_disks, r.bandwidth_mbps, r.cpu_model, r.memory_gb, r.gpu_info, "
+            "r.ssh_port, r.root_username, r.root_password_enc, r.end_date "
             "FROM rental_record r "
             "JOIN contract_rental cr ON r.id = cr.rental_id "
             "WHERE cr.contract_id = :contract_id"
@@ -262,31 +319,57 @@ def get_contract_rentals(db: Session, contract_id: str) -> list[dict]:
             result = []
             for r in history_rentals:
                 public_ips = r.public_ips
+                data_disks_val = r.data_disks
                 if isinstance(public_ips, str):
                     try:
                         public_ips = json.loads(public_ips)
                     except (json.JSONDecodeError, TypeError):
                         public_ips = []
+                if isinstance(data_disks_val, str):
+                    try:
+                        data_disks_val = json.loads(data_disks_val)
+                    except (json.JSONDecodeError, TypeError):
+                        data_disks_val = []
                 result.append({
                     "id": r.id, "machine_model": r.machine_model,
                     "private_ip": r.private_ip, "public_ips": public_ips,
                     "os_version": r.os_version, "status": r.status,
                     "rack_location": r.rack_location or "",
-                })
+                    "system_disk": r.system_disk or "", "data_disks": data_disks_val or [],
+                    "bandwidth_mbps": r.bandwidth_mbps or 0, "cpu_model": r.cpu_model or "",
+                    "memory_gb": r.memory_gb or 0, "gpu_info": r.gpu_info or "",
+                "ssh_port": r.ssh_port or 22, "root_username": r.root_username or "",
+                "root_password_enc": r.root_password_enc or "",
+                "root_password": _safe_decrypt(r.root_password_enc),
+                "end_date": str(r.end_date) if r.end_date else "",
+            })
             return result
         return []
 
     result = []
     for row in rows:
         public_ips_raw = row[3]
+        data_disks_raw = row[8]
         if isinstance(public_ips_raw, str):
             try:
                 public_ips_raw = json.loads(public_ips_raw)
             except (json.JSONDecodeError, TypeError):
                 public_ips_raw = []
+        if isinstance(data_disks_raw, str):
+            try:
+                data_disks_raw = json.loads(data_disks_raw)
+            except (json.JSONDecodeError, TypeError):
+                data_disks_raw = []
         result.append({
             "id": row[0], "machine_model": row[1], "private_ip": row[2],
             "public_ips": public_ips_raw, "os_version": row[4], "status": row[5],
             "rack_location": row[6] or "",
+            "system_disk": row[7] or "", "data_disks": data_disks_raw or [],
+            "bandwidth_mbps": row[9] or 0, "cpu_model": row[10] or "",
+            "memory_gb": row[11] or 0, "gpu_info": row[12] or "",
+            "ssh_port": row[13] or 22, "root_username": row[14] or "",
+            "root_password_enc": row[15] or "",
+            "root_password": _safe_decrypt(row[15]),
+            "end_date": str(row[16]) if row[16] else "",
         })
     return result

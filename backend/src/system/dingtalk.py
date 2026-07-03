@@ -11,7 +11,7 @@ import hashlib
 import hmac
 import time
 import urllib.parse
-from datetime import datetime
+from datetime import datetime, date
 from typing import Optional
 
 import requests
@@ -125,15 +125,24 @@ def build_notification_markdown(
     type_map = {
         "provision": ("开通通知", "#2e7d32"),
         "expiry_warning": ("临期提醒", "#ef6c00"),
+        "expiry_notice": ("到期提醒", "#e65100"),
         "reclaim": ("回收通知", "#e53935"),
     }
     type_name, color = type_map.get(trigger_type, (trigger_type, "#333333"))
     customer = contract.customer
     customer_name = customer.name if customer else ""
-    customer_code = customer.code if customer else ""
     contract_no = contract.contract_no or "-"
     billing_model_map = {"monthly": "月付", "quarterly": "季付", "yearly": "年付"}
     billing_label = billing_model_map.get(contract.billing_model, contract.billing_model or "-")
+
+    # 服务时间 & 剩余天数
+    start_date = str(contract.start_date) if contract.start_date else "-"
+    end_date = str(contract.end_date) if contract.end_date else "-"
+    if contract.end_date:
+        remaining = (contract.end_date - date.today()).days
+        remaining_str = f"{remaining} 天" if remaining > 0 else ("今天到期" if remaining == 0 else f"已过期 {-remaining} 天")
+    else:
+        remaining_str = "-"
 
     # 设备列表
     device_lines = []
@@ -155,16 +164,17 @@ def build_notification_markdown(
 
     # 客户信息行
     customer_info = f"**客户名称**：{customer_name}"
-    if customer_code:
-        customer_info += f"（{customer_code}）"
 
     markdown_text = (
-        f"## 📧 邮件通知已发送\n"
+        f"## 邮件通知已发送\n"
         f"---\n"
         f"- **通知类型**：<font color={color}>{type_name}</font>\n"
         f"- {customer_info}\n"
         f"- **合同编号**：{contract_no}\n"
         f"- **计费方式**：{billing_label}\n"
+        f"- **服务开始**：{start_date}\n"
+        f"- **服务结束**：{end_date}\n"
+        f"- **剩余时间**：{remaining_str}\n"
         f"- **设备数量**：{len(rental_contexts)} 台\n"
         f"- **收件人**：{to_display}\n"
         f"- **发送时间**：{now_str}\n"

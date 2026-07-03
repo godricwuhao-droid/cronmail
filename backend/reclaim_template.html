@@ -32,7 +32,7 @@
 </tr>
 {% for r in rentals %}
 <tr>
-<td style="padding:10px 16px;font-size:13px;color:#333;border-bottom:1px solid #f0f0f0;"><b>{{ r.machine_model }}</b>{{ "（" + r.cpu_model + "）" if r.cpu_model else "" }}</td>
+<td style="padding:10px 16px;font-size:13px;color:#333;border-bottom:1px solid #f0f0f0;"><b>{{ r.machine_model }}</b></td>
 <td style="padding:10px 16px;font-size:13px;color:#333;border-bottom:1px solid #f0f0f0;">
 内网: {{ r.private_ip }}<br>
 {% for ip in r.public_ips %}公网: {{ ip }}{% if not loop.last %}<br>{% endif %}{% endfor %}

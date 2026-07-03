@@ -14,9 +14,9 @@ from pydantic import BaseModel, Field, field_validator
 class CustomerCreate(BaseModel):
     """创建客户请求"""
     name: str = Field(..., min_length=1, max_length=128, description="客户名称")
-    code: str = Field(..., min_length=1, max_length=64, description="客户编码（唯一）")
+    code: Optional[str] = Field(None, max_length=64, description="客户编码（留空自动生成）")
 
-    @field_validator("name", "code")
+    @field_validator("name")
     @classmethod
     def strip_whitespace(cls, v: str) -> str:
         return v.strip()

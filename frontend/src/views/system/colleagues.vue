@@ -44,8 +44,8 @@ async function fetchList() {
     })
     // 软删除过滤：只展示启用的
     list.value = res.items.filter((c) => c.is_active)
-    // 注：后端 list_contacts 不过滤 is_active，使用 list.length 作为分页总数避免错误翻页
-    total.value = list.value.length
+    // 注：后端 list_contacts 不过滤 is_active，total 包含已停用的，前端过滤后展示
+    total.value = res.total
   } catch (e) {
     // 错误已统一处理
   } finally {

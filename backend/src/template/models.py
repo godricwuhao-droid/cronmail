@@ -19,7 +19,7 @@ class EmailTemplate(Base):
     trigger_type = Column(
         String(32),
         nullable=False,
-        comment="触发类型: provision / expiry_warning / reclaim",
+        comment="触发类型: provision / expiry_warning / expiry_notice / reclaim",
     )
     subject_tpl = Column(Text, nullable=False, comment="邮件主题模板(Jinja2)")
     body_html = Column(Text, nullable=False, comment="邮件正文模板(Jinja2, HTML)")

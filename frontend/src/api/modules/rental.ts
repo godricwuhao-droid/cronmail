@@ -30,12 +30,6 @@ export const RENTAL_STATUS_FALLBACK: Record<string, string> = {
 /** 计费方式 */
 export type BillingModel = 'monthly' | 'yearly'
 
-/** 数据盘条目 */
-export interface DataDisk {
-  size_gb: number
-  type: string
-}
-
 /** 租赁联系人收件人条目 */
 export interface RentalContactLink {
   contact_id: string
@@ -85,8 +79,8 @@ export interface RentalDetail {
   cpu_model: string | null
   memory_gb: number | null
   gpu_info: string | null
-  system_disk_gb: number | null
-  data_disks: DataDisk[] | null
+  system_disk: string | null
+  data_disks: string[] | null
   os_version: string | null
   bandwidth_mbps: number | null
   rack_location: string | null
@@ -122,8 +116,8 @@ export interface RentalCreatePayload {
   cpu_model?: string
   memory_gb?: number
   gpu_info?: string
-  system_disk_gb?: number
-  data_disks?: DataDisk[]
+  system_disk?: string
+  data_disks?: string[]
   os_version?: string
   bandwidth_mbps?: number
   rack_location?: string
@@ -142,8 +136,8 @@ export interface RentalUpdatePayload {
   cpu_model?: string
   memory_gb?: number
   gpu_info?: string
-  system_disk_gb?: number
-  data_disks?: DataDisk[]
+  system_disk?: string
+  data_disks?: string[]
   os_version?: string
   bandwidth_mbps?: number
   rack_location?: string
@@ -175,6 +169,10 @@ export interface RentalListParams {
   rack_location?: string
   /** 仅返回未关联合同的设备 */
   unlinked_only?: boolean
+  /** 排序字段 */
+  sort_field?: string
+  /** 排序方向 */
+  sort_order?: 'asc' | 'desc'
   page?: number
   page_size?: number
 }

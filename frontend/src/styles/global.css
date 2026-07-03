@@ -8,8 +8,8 @@
   --primary-hover: #1557b0;
   --bg-color: #f0f2f5;
   --card-bg: #ffffff;
-  --sidebar-bg: #001529;
-  --sidebar-hover: #002140;
+  --sidebar-bg: linear-gradient(180deg, #0d1b3e 0%, #1a3270 40%, #1a5cb0 100%);
+  --sidebar-hover: rgba(255, 255, 255, 0.08);
   --header-bg: #ffffff;
   --text-primary: #1f2937;
   --text-secondary: #6b7280;
@@ -34,6 +34,17 @@ body {
 /* 侧边栏 */
 .el-menu {
   border-right: none !important;
+}
+
+/* 侧边栏菜单项 hover：半透明白色浮层 */
+.el-aside .el-menu-item:hover,
+.el-aside .el-sub-menu__title:hover {
+  background-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+/* 侧边栏菜单项激活态 */
+.el-aside .el-menu-item.is-active {
+  background-color: rgba(255, 255, 255, 0.12) !important;
 }
 
 /* 卡片 */

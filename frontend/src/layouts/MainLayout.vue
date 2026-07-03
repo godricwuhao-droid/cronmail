@@ -1,9 +1,9 @@
 <template>
   <el-container style="height: 100vh">
     <!-- 侧边栏 -->
-    <el-aside :width="isCollapse ? '64px' : '220px'" style="background: var(--sidebar-bg); transition: width 0.2s; overflow: hidden;">
+    <el-aside :width="isCollapse ? '64px' : '220px'" style="background: linear-gradient(180deg, #0d1b3e 0%, #1a3270 40%, #1a5cb0 100%); transition: width 0.2s; overflow: hidden;">
       <div class="sidebar-logo">
-        <span v-if="!isCollapse" class="logo-text">CronMail</span>
+        <span v-if="!isCollapse" class="logo-text">盖亚纪元</span>
         <span v-else class="logo-icon">
           <el-icon :size="22"><Promotion /></el-icon>
         </span>
@@ -12,9 +12,9 @@
         :default-active="activeMenu"
         router
         :collapse="isCollapse"
-        background-color="#001529"
-        text-color="rgba(255,255,255,0.65)"
-        active-text-color="#fff"
+        background-color="transparent"
+        text-color="rgba(255,255,255,0.72)"
+        active-text-color="#ffffff"
         style="border-right: none;"
       >
         <el-menu-item index="/dashboard">

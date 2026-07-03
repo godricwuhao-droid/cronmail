@@ -21,7 +21,7 @@ class Customer(Base):
 
     id = Column(UUIDColumn(), primary_key=True, default=generate_uuid)
     name = Column(String(128), nullable=False, comment="客户名称")
-    code = Column(String(64), unique=True, nullable=False, comment="客户编码")
+    code = Column(String(64), unique=True, nullable=False, default=generate_uuid, comment="客户编码（自动生成）")
     status = Column(String(16), default="active", comment="状态: active / inactive")
     created_at = Column(DateTime, default=local_now, nullable=False)
     updated_at = Column(DateTime, default=local_now, onupdate=local_now, nullable=False)

@@ -54,7 +54,7 @@ import {
   type Contact,
   type ContactListResponse,
 } from '@/api/modules/contact'
-import { getRental, getRentals } from '@/api/modules/rental'
+import { listContracts, getContract } from '@/api/modules/contract'
 import { DEFAULT_TEMPLATE_SAMPLE, TRIGGER_TYPE_LABEL } from '@/lib/template'
 
 const route = useRoute()
@@ -82,6 +82,7 @@ const sampleDataError = ref<string>('')
 const TRIGGER_OPTIONS: Array<{ label: string; value: TriggerType }> = [
   { label: TRIGGER_TYPE_LABEL.provision, value: 'provision' },
   { label: TRIGGER_TYPE_LABEL.expiry_warning, value: 'expiry_warning' },
+  { label: TRIGGER_TYPE_LABEL.expiry_notice, value: 'expiry_notice' },
   { label: TRIGGER_TYPE_LABEL.reclaim, value: 'reclaim' },
 ]
 
@@ -400,17 +401,16 @@ const contactOptions = ref<ContactOption[]>([])
 const toContactIds = ref<string[]>([])
 const ccContactIds = ref<string[]>([])
 
-/** 测试发送：选中的租赁记录 id（用于生成 sample_data） */
-const rentalId = ref<string>('')
+/** 测试发送：选中的合同 id（用于生成 sample_data） */
+const contractId = ref<string>('')
 
-/** 测试发送：租赁记录下拉选项 */
-interface RentalOption {
+/** 测试发送：合同下拉选项 */
+interface ContractOption {
   id: string
-  customer?: { id: string; name: string } | null
-  machine_model?: string
-  private_ip?: string | null
+  name: string
+  customer_name?: string | null
 }
-const rentalOptions = ref<RentalOption[]>([])
+const contractOptions = ref<ContractOption[]>([])
 
 /** 测试发送：选中的租赁记录映射出来的 sample_data（直接传给后端） */
 const sampleData = reactive<Record<string, unknown>>({})
@@ -419,8 +419,8 @@ const sampleData = reactive<Record<string, unknown>>({})
 const testResult = ref<TemplateTestSendResponse | null>(null)
 const testSubmitting = ref(false)
 
-/** 是否正在拉取租赁详情（loading 状态） */
-const rentalDetailLoading = ref(false)
+/** 是否正在拉取合同详情（loading 状态） */
+const contractDetailLoading = ref(false)
 
 async function fetchAllContacts(): Promise<ContactListResponse[]> {
   // 并行拉取：客户联系人（全部）+ 内部同事（全部）
@@ -451,57 +451,60 @@ function contactLabel(opt: ContactOption): string {
   return `${opt.name} <${opt.email}>`
 }
 
-async function loadRentalOptions() {
+async function loadContractOptions() {
   try {
-    const res = await getRentals({ page: 1, page_size: 100 })
-    // 兼容两种返回形态：直接 items 或包在 data 中
-    rentalOptions.value =
-      ((res as any)?.items as RentalOption[]) ||
-      ((res as any)?.data?.items as RentalOption[]) ||
-      []
+    const res = await listContracts({ page: 1, page_size: 100 })
+    contractOptions.value = (res?.items || []).map((c) => ({
+      id: c.id,
+      name: c.name,
+      customer_name: c.customer_name || '',
+    }))
   } catch {
-    rentalOptions.value = []
+    contractOptions.value = []
   }
 }
 
-async function onRentalChange(val: string | number | undefined) {
-  const rentalIdValue = val == null ? '' : String(val)
-  rentalId.value = rentalIdValue
+async function onContractChange(val: string | number | undefined) {
+  const cid = val == null ? '' : String(val)
+  contractId.value = cid
   // 清空当前 sample_data
   Object.keys(sampleData).forEach((k) => delete sampleData[k])
 
-  if (!rentalIdValue) return
+  if (!cid) return
 
-  rentalDetailLoading.value = true
+  contractDetailLoading.value = true
   try {
-    const res = await getRental(rentalIdValue)
-    const detail: any = (res as any)?.data || res || {}
-    // 把详情字段映射为 sample_data
+    const res = await getContract(cid)
+    const contract: any = (res as any)?.data || res || {}
+
+    // 将合同下所有设备映射为 rentals 数组
+    const rentals = (contract.rentals || []).map((r: any) => ({
+      machine_model: r.machine_model || '',
+      cpu_model: r.cpu_model || '',
+      memory_gb: r.memory_gb || '',
+      gpu_info: r.gpu_info || '',
+      system_disk: r.system_disk || '',
+      data_disks: r.data_disks || [],
+      os_version: r.os_version || '',
+      bandwidth_mbps: r.bandwidth_mbps || '',
+      rack_location: r.rack_location || '',
+      private_ip: r.private_ip || '',
+      public_ips: r.public_ips || [],
+      ssh_port: r.ssh_port || '',
+      root_username: r.root_username || '',
+      root_password: r.root_password || '',
+      start_date: contract.start_date || '',
+      end_date: contract.end_date || '',
+    }))
+
     Object.assign(sampleData, {
-      customer_name: detail.customer?.name || '',
-      machine_model: detail.machine_model || '',
-      cpu_model: detail.cpu_model || '',
-      memory_gb: detail.memory_gb || '',
-      gpu_info: detail.gpu_info || '',
-      system_disk_gb: detail.system_disk_gb || '',
-      data_disks: detail.data_disks || [],
-      os_version: detail.os_version || '',
-      bandwidth_mbps: detail.bandwidth_mbps || '',
-      rack_location: detail.rack_location || '',
-      private_ip: detail.private_ip || '',
-      public_ips: detail.public_ips || [],
-      ssh_port: detail.ssh_port || '',
-      root_username: detail.root_username || '',
-      root_password: detail.root_password || '',
-      billing_model: detail.billing_model || '',
-      start_date: detail.start_date || '',
-      end_date: detail.end_date || '',
-      remark: detail.remark || '',
+      customer_name: contract.customer_name || '',
+      rentals: rentals,
     })
   } catch (e) {
-    ElMessage.error('获取租赁详情失败')
+    ElMessage.error('获取合同详情失败')
   } finally {
-    rentalDetailLoading.value = false
+    contractDetailLoading.value = false
   }
 }
 
@@ -517,14 +520,14 @@ async function openTestSendDialog() {
   testResult.value = null
   toContactIds.value = []
   ccContactIds.value = []
-  rentalId.value = ''
+  contractId.value = ''
   Object.keys(sampleData).forEach((k) => delete sampleData[k])
   testSendVisible.value = true
 
-  // 并行拉取：联系人 + 租赁记录下拉
+  // 并行拉取：联系人 + 合同下拉
   contactsLoading.value = true
   try {
-    const [contactList] = await Promise.all([fetchAllContacts(), loadRentalOptions()])
+    const [contactList] = await Promise.all([fetchAllContacts(), loadContractOptions()])
     contactOptions.value = buildContactOptions(contactList)
   } catch (e) {
     // 错误已统一处理
@@ -579,7 +582,7 @@ onMounted(async () => {
   <tr><th>机器型号</th><td>{{ machine_model }}</td></tr>
   <tr><th>CPU</th><td>{{ cpu_model }}</td></tr>
   <tr><th>内存</th><td>{{ memory_gb }} GB</td></tr>
-  <tr><th>系统盘</th><td>{{ system_disk_gb }} GB</td></tr>
+  <tr><th>系统盘</th><td>{{ system_disk }}</td></tr>
   <tr><th>操作系统</th><td>{{ os_version }}</td></tr>
   <tr><th>内网IP</th><td>{{ private_ip }}</td></tr>
   <tr><th>SSH 端口</th><td>{{ ssh_port }}</td></tr>
@@ -733,7 +736,7 @@ onBeforeUnmount(() => {
           <div class="preview-subject" v-if="renderedSubject">
             <span class="lbl">主题：</span>{{ renderedSubject }}
           </div>
-          <iframe ref="previewFrameRef" class="preview-frame" sandbox="allow-same-origin"></iframe>
+          <iframe ref="previewFrameRef" class="preview-frame" sandbox="allow-same-origin allow-scripts"></iframe>
         </div>
       </div>
 
@@ -851,26 +854,26 @@ onBeforeUnmount(() => {
           </el-select>
         </el-form-item>
 
-        <el-form-item label="选择租赁记录">
+        <el-form-item label="选择合同">
           <el-select
-            v-model="rentalId"
+            v-model="contractId"
             filterable
-            placeholder="选择一条租赁记录作为测试数据（不选则用模板默认变量）"
+            placeholder="选择一份合同作为测试数据（不选则用模板默认变量）"
             style="width: 100%"
-            :loading="rentalDetailLoading"
+            :loading="contractDetailLoading"
             clearable
-            @change="onRentalChange"
+            @change="onContractChange"
           >
             <el-option
-              v-for="r in rentalOptions"
-              :key="r.id"
-              :label="`${r.customer?.name || ''} - ${r.machine_model || ''} (${r.private_ip || ''})`"
-              :value="r.id"
+              v-for="c in contractOptions"
+              :key="c.id"
+              :label="`${c.name} - ${c.customer_name || ''}`"
+              :value="c.id"
             />
           </el-select>
           <div class="form-hint">
-            选中的租赁记录详情会作为模板变量传入。
-            <span v-if="rentalId" style="color: var(--primary-color)">
+            选中的合同下所有设备会作为模板变量传入。
+            <span v-if="contractId" style="color: var(--primary-color)">
               已选 <strong>{{ Object.keys(sampleData).length }}</strong> 个字段
             </span>
           </div>

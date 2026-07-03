@@ -12,7 +12,7 @@ import request from '@/api'
 export interface Customer {
   id: string
   name: string
-  code: string
+  code?: string
   status: 'active' | 'inactive'
   contact_count?: number
   created_at: string
@@ -28,7 +28,7 @@ export interface CustomerListResponse {
 
 export interface CustomerCreatePayload {
   name: string
-  code: string
+  code?: string
 }
 
 export interface CustomerUpdatePayload {

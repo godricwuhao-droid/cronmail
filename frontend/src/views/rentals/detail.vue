@@ -9,7 +9,7 @@
  *  - 存储与网络卡片：el-descriptions :column="3" border
  *  - 登录凭证卡片
  *  - 关联合同信息卡片（已有）
- *  - 收件人表格 + 发送日志表格
+
  *  - 变更记录按钮
  */
 import { ref, onMounted } from 'vue'
@@ -68,14 +68,6 @@ function billingLabel(s?: string) {
     quarterly: '按季',
     yearly: '按年',
     custom: '自定义',
-  }
-  return m[s || ''] || s || '-'
-}
-function triggerLabel(s?: string) {
-  const m: Record<string, string> = {
-    provision: '开通',
-    expiry_warning: '临期',
-    reclaim: '回收',
   }
   return m[s || ''] || s || '-'
 }
@@ -220,16 +212,16 @@ onMounted(() => {
           <span v-else>-</span>
         </el-descriptions-item>
         <el-descriptions-item label="系统盘">
-          {{ record.system_disk_gb ? record.system_disk_gb + ' GB' : '-' }}
+          {{ record.system_disk || '-' }}
         </el-descriptions-item>
         <el-descriptions-item label="数据盘" :span="2">
           <template v-if="record.data_disks && record.data_disks.length">
-            <el-tag
-              v-for="(disk, i) in record.data_disks"
-              :key="i"
-              size="small"
-              style="margin-right: 8px;"
-            >{{ disk.size_gb }}GB {{ disk.type }}</el-tag>
+            <div class="storage-list">
+              <div v-for="(disk, i) in record.data_disks" :key="i" class="storage-item-detail">
+                <span class="storage-dot">●</span>
+                <span class="storage-text">{{ disk }}</span>
+              </div>
+            </div>
           </template>
           <span v-else>-</span>
         </el-descriptions-item>
@@ -304,60 +296,6 @@ onMounted(() => {
           {{ billingLabel(record.contract_info.billing_model) }}
         </el-descriptions-item>
       </el-descriptions>
-    </section>
-
-    <!-- 收件人 -->
-    <section class="detail-section">
-      <h3 class="section-title">收件人</h3>
-      <el-table
-        :data="record.contacts || []"
-        size="small"
-        stripe
-        border
-        empty-text="暂未设置收件人"
-        style="width: 100%;"
-      >
-        <el-table-column prop="name" label="姓名" min-width="120" />
-        <el-table-column prop="email" label="邮箱" min-width="200" />
-        <el-table-column label="类型" width="100">
-          <template #default="{ row }">
-            <el-tag
-              :type="row.recipient_type === 'to' ? 'primary' : 'info'"
-              size="small"
-            >{{ row.recipient_type === 'to' ? '收件人' : '抄送' }}</el-tag>
-          </template>
-        </el-table-column>
-      </el-table>
-    </section>
-
-    <!-- 发送日志 -->
-    <section class="detail-section">
-      <h3 class="section-title">发送日志</h3>
-      <el-table
-        :data="record.email_logs || []"
-        size="small"
-        stripe
-        border
-        empty-text="暂无发送记录"
-        style="width: 100%;"
-      >
-        <el-table-column prop="recipient" label="收件人" min-width="180" />
-        <el-table-column label="类型" width="120">
-          <template #default="{ row }">
-            <el-tag size="small">{{ triggerLabel(row.trigger_type) }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="subject" label="主题" min-width="200" show-overflow-tooltip />
-        <el-table-column label="状态" width="80">
-          <template #default="{ row }">
-            <el-tag
-              :type="row.status === 'sent' ? 'success' : 'danger'"
-              size="small"
-            >{{ row.status === 'sent' ? '成功' : '失败' }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="sent_at" label="发送时间" width="160" />
-      </el-table>
     </section>
 
     <!-- 变更记录（页面底部） -->
@@ -473,4 +411,8 @@ onMounted(() => {
   font-weight: 600;
   color: var(--primary-color);
 }
+.storage-list { display: flex; flex-direction: column; gap: 4px; }
+.storage-item-detail { display: flex; align-items: center; padding: 2px 0; }
+.storage-dot { color: var(--primary-color); margin-right: 6px; font-size: 10px; }
+.storage-text { font-size: 13px; color: var(--text-primary); }
 </style>

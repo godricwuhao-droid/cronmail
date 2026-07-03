@@ -57,17 +57,15 @@
             </div>
             <div class="reminder-body" v-show="expandedMap[row.contract_id]">
               <el-table :data="row.rentals || []" size="small" border>
-                <el-table-column prop="machine_model" label="机器型号" min-width="160" />
+                <el-table-column label="机架位置" min-width="140">
+                  <template #default="{ row: r }">{{ r.rack_location || '-' }}</template>
+                </el-table-column>
+                <el-table-column prop="machine_model" label="设备型号" min-width="160" />
+                <el-table-column label="公网 IP" min-width="140">
+                  <template #default="{ row: r }">{{ formatIpList(r.public_ips) }}</template>
+                </el-table-column>
                 <el-table-column label="内网 IP" min-width="140">
                   <template #default="{ row: r }">{{ r.private_ip || '-' }}</template>
-                </el-table-column>
-                <el-table-column label="操作系统" min-width="160">
-                  <template #default="{ row: r }">{{ r.os_version || '-' }}</template>
-                </el-table-column>
-                <el-table-column label="状态" width="90">
-                  <template #default="{ row: r }">
-                    <el-tag :type="rentalStatusTagType(r.status)" size="small">{{ rentalStatusLabel(r.status) }}</el-tag>
-                  </template>
                 </el-table-column>
               </el-table>
               <div class="reminder-actions">
@@ -217,7 +215,11 @@ import { ElMessage } from 'element-plus'
 import { Odometer, Bell, Document, Clock, Checked, Message, ArrowRightBold } from '@element-plus/icons-vue'
 import { getDashboardStats, type DashboardStats } from '@/api/modules/contract'
 import { sendExpiryReminder } from '@/api/modules/rental'
-import { safeStatusLabel as rentalStatusLabel, safeStatusTagType as rentalStatusTagType } from '@/lib/rental'
+function formatIpList(ips: any): string {
+  if (!ips) return '-'
+  if (Array.isArray(ips)) return ips.join(', ') || '-'
+  return String(ips)
+}
 
 const loading = ref(false)
 const stats = ref({ totalContracts: 0, expiring: 0, reclaimed: 0, emailSent: 0 })

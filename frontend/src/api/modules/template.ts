@@ -15,7 +15,7 @@ import request from '@/api'
 // ============================================================
 
 /** 模板触发类型 */
-export type TriggerType = 'provision' | 'expiry_warning' | 'reclaim'
+export type TriggerType = 'provision' | 'expiry_warning' | 'expiry_notice' | 'reclaim'
 
 /** 模板列表项 */
 export interface TemplateListItem {

@@ -29,13 +29,16 @@ spec:
                 name: cronmail-config
             - secretRef:
                 name: cronmail-secret
+          env:
+            - name: TZ
+              value: "Asia/Shanghai"
           # Beat 进程存活检查
           livenessProbe:
             exec:
               command:
                 - sh
                 - -c
-                - "pidof python > /dev/null"
+                - "pgrep -f 'celery.*beat' > /dev/null"
             initialDelaySeconds: 30
             periodSeconds: 30
             timeoutSeconds: 10

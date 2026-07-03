@@ -16,7 +16,7 @@ import request from '@/api'
 // ============================================================
 
 /** 触发类型 */
-export type LogTriggerType = 'provision' | 'expiry_warning' | 'reclaim'
+export type LogTriggerType = 'provision' | 'expiry_warning' | 'expiry_notice' | 'reclaim'
 
 /** 收件人类型 */
 export type LogRecipientType = 'to' | 'cc'

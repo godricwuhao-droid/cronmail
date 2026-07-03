@@ -45,8 +45,8 @@ def get_available_variables():
         {"field": "cpu_model", "label": "CPU 型号", "type": "string"},
         {"field": "memory_gb", "label": "内存(GB)", "type": "number"},
         {"field": "gpu_info", "label": "GPU 信息", "type": "string"},
-        {"field": "system_disk_gb", "label": "系统盘(GB)", "type": "number"},
-        {"field": "data_disks", "label": "数据盘列表", "type": "array", "note": "遍历: {% for disk in data_disks %}{{ disk.size_gb }}GB {{ disk.type }}{% endfor %}"},
+        {"field": "system_disk", "label": "系统盘", "type": "string", "note": "如 480GB SATA SSD"},
+        {"field": "data_disks", "label": "数据盘列表", "type": "array", "note": "字符串数组，遍历: {% for disk in data_disks %}{{ disk }}{% endfor %}"},
         {"field": "os_version", "label": "操作系统", "type": "string"},
         {"field": "bandwidth_mbps", "label": "带宽(Mbps)", "type": "number"},
         {"field": "rack_location", "label": "机架位置", "type": "string"},
@@ -203,13 +203,16 @@ def test_send(
 
     # 3. 取 sample_data 并包装为统一 rentals 结构
     sample_data = body.sample_data or template.variables_desc or {}
-    # 统一变量结构：rentals 数组 + rental_count + customer_name
-    # 测试发送只有 1 条，包装成单元素数组，与定时合并发送结构一致
-    context = {
-        "customer_name": sample_data.get("customer_name", ""),
-        "rental_count": 1,
-        "rentals": [sample_data],
-    }
+    # 智能包装：已有 rentals 键则直接使用（前端传了合同级数据），否则包装为单元素数组
+    if "rentals" in sample_data and isinstance(sample_data.get("rentals"), list):
+        context = dict(sample_data)
+        context.setdefault("rental_count", len(sample_data["rentals"]))
+    else:
+        context = {
+            "customer_name": sample_data.get("customer_name", ""),
+            "rental_count": 1,
+            "rentals": [sample_data],
+        }
 
     # 渲染 subject
     try:

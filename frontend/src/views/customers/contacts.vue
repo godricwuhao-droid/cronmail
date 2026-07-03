@@ -225,7 +225,7 @@ onMounted(() => {
               联系人管理
             </span>
             <el-tag v-if="customer" type="info" effect="plain">
-              客户：{{ customer.name }}（{{ customer.code }}）
+              客户：{{ customer.name }}
             </el-tag>
             <el-tag v-else-if="!customerLoading" type="danger" effect="plain">客户不存在</el-tag>
           </div>

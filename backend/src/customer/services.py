@@ -6,7 +6,7 @@ from typing import Optional
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from src.customer.models import Customer, Contact
+from src.customer.models import Customer, Contact, generate_uuid
 from src.customer.schemas import (
     CustomerCreate,
     CustomerUpdate,
@@ -49,7 +49,7 @@ def create_customer(db: Session, data: CustomerCreate) -> Customer:
     """创建客户"""
     customer = Customer(
         name=data.name,
-        code=data.code,
+        code=data.code or generate_uuid(),
         status="active",
     )
     db.add(customer)

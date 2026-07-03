@@ -176,8 +176,9 @@ onMounted(() => {
           style="width: 140px"
           @change="handleFilterChange"
         >
-          <el-option label="运行中" value="active" />
-          <el-option label="即将到期" value="expiring" />
+          <el-option label="生效中" value="active" />
+          <el-option label="临期" value="expiring" />
+          <el-option label="已到期" value="expired" />
           <el-option label="已回收" value="reclaimed" />
         </el-select>
         <el-select
@@ -249,13 +250,7 @@ onMounted(() => {
         </el-table-column>
         <el-table-column label="设备数" width="80" align="center">
           <template #default="{ row }">
-            <el-tag
-              v-if="row.rental_count"
-              type="info"
-              effect="plain"
-              size="small"
-            >{{ row.rental_count }}</el-tag>
-            <span v-else class="muted">0</span>
+            <span>{{ row.rental_count ?? 0 }}</span>
           </template>
         </el-table-column>
         <el-table-column label="状态" width="100">

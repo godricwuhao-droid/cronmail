@@ -145,12 +145,12 @@ def _build_rental_context(db: Session, rental: RentalRecord) -> dict:
     单条租赁记录包装为单元素 rentals 数组，与定时合并发送（N条）结构一致。
     模板变量: customer_name, rental_count, rentals (数组，元素字段如下)
     """
-    from datetime import date
+    from src.core.timezone import local_today
 
     # 距到期天数
     days_until_expiry = 0
     if rental.end_date:
-        today = date.today()
+        today = local_today()
         delta = rental.end_date - today
         days_until_expiry = delta.days
 
@@ -163,7 +163,7 @@ def _build_rental_context(db: Session, rental: RentalRecord) -> dict:
         "cpu_model": rental.cpu_model or "",
         "memory_gb": rental.memory_gb or "",
         "gpu_info": rental.gpu_info or "",
-        "system_disk_gb": rental.system_disk_gb or "",
+        "system_disk": rental.system_disk or "",
         "data_disks": rental.data_disks or [],
         "os_version": rental.os_version or "",
         "bandwidth_mbps": rental.bandwidth_mbps or "",

@@ -55,6 +55,21 @@ async def lifespan(app: FastAPI):
             ))
             db.commit()
             print("[CronMail] 已初始化默认系统配置: reclaim_time=22:00")
+        # 初始化默认调度时间
+        # check-expiring-rentals: 临期提醒 (expiry_warning)
+        # check-expired-rentals: 到期提醒 (expiry_notice)
+        # check-reclaim-expired: 回收执行 + 回收通知 (reclaim)
+        _default_schedules = {
+            'check-expiring-rentals': '08:00',
+            'check-expired-rentals': '08:00',
+            'check-reclaim-expired': '00:01',
+        }
+        for key, val in _default_schedules.items():
+            existing = db.query(SystemConfig).filter(SystemConfig.key == key).first()
+            if not existing:
+                db.add(SystemConfig(key=key, value=val, description=f'通知调度时间 - {key}'))
+        db.commit()
+        print("[CronMail] 已初始化默认调度时间配置")
         db.close()
     except Exception as e:
         print(f"[CronMail] 初始化默认配置跳过: {e}")

@@ -150,7 +150,9 @@ async function handleReclaim() {
   try {
     await reclaimRental(rentals[0].id)
     ElMessage.success('已提交回收任务')
-  } catch { /* 忽略 */ }
+  } catch (err: any) {
+    ElMessage.error(err?.response?.data?.detail || '回收失败，请检查合同状态')
+  }
   finally { acting.value = false }
 }
 

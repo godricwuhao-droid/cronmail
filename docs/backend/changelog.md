@@ -1,5 +1,322 @@
 # CronMail 后端变更日志
 
+## 2026-07-03 (新增) — 设备列表支持排序
+
+### 新增
+- **设备列表支持前端排序**
+  - 影响文件：`backend/src/rental/api.py`, `backend/src/rental/services.py`
+  - 变更内容：
+    1. `GET /api/rentals` 新增 `sort_field` 和 `sort_order` 查询参数
+    2. `sort_field` 白名单：`machine_model` / `memory_gb` / `bandwidth_mbps` / `rack_location` / `created_at`
+    3. `sort_order` 支持 `asc`（升序，默认）和 `desc`（降序）
+    4. `services.list_rentals` 使用白名单校验排序字段，不在白名单或未传时回退默认 `created_at DESC`
+  - 关联任务：排序功能
+
+---
+
+## 2026-07-03 (修改) — 系统盘和数据盘字段改为字符串类型 ⚠️
+
+### 修改
+- **system_disk_gb Integer → system_disk String，data_disks 对象数组 → 字符串数组**
+  - 影响文件：`backend/src/rental/models.py`, `schemas.py`, `api.py`, `services.py`, `backend/src/mail/services.py`, `backend/src/mail/api.py`, `backend/src/contract/services.py`, `backend/expiry_notice_template.html`, `backend/update_all_templates.py`, `backend/src/template/api.py`
+  - 变更内容：
+    - 模型：`system_disk_gb` (Integer) → `system_disk` (String(256))，存储如 `480GB SATA SSD`
+    - 模型：`data_disks` 仍然是 JSON 列，但存储格式从 `[{size_gb, type}]` 改为 `["1000GB NVMe SSD"]` 字符串数组
+    - Schema：删除 `DataDiskSchema` 类，所有 `system_disk_gb: Optional[int]` → `system_disk: Optional[str]`，`data_disks: Optional[list[DataDiskSchema]]` → `data_disks: Optional[list[str]]`
+    - API 层：移除 DataDiskSchema 构造逻辑，直接透传原始数据
+    - 服务层：`create_rental`/`update_rental` 中 data_disks 处理简化为直接赋值
+    - 合同服务：SQL 查询和结果 dict 同步更新
+    - 邮件模板：`{{ r.system_disk_gb }}GB` → `{{ r.system_disk }}`，数据盘遍历从 `{{ disk.size_gb }}GB {{ disk.type }}` → `{{ disk }}`
+    - 模板变量 API：字段说明同步更新
+  - 关联任务：磁盘字段优化
+  - 备注：⚠️ Breaking Change — 已有数据库中的 `system_disk_gb` 列需通过 Migration 重命名为 `system_disk` 并转换类型；已有的 `data_disks` JSON 数据格式需从对象数组迁移为字符串数组
+
+---
+
+## 2026-07-01 (新增) — 到期提醒邮件模板入库
+
+### 新增
+- **expiry_notice 邮件模板写入数据库**
+  - 影响文件：数据库 `email_template` 表
+  - 变更内容：将 `backend/expiry_notice_template.html` 作为 `body_html` 插入到 `email_template` 表，`trigger_type='expiry_notice'`，模板名称「到期提醒模板」
+  - 关联任务：到期提醒模板创建
+  - 备注：模板 ID `d6815cc2-b058-454a-a112-4241d67a2d73`，变量包括 `customer_name`、`rental_count`、`rentals`、`reclaim_time`、`end_date`
+
+---
+
+## 2026-07-01 (修复) — 手动取消设备关联时清理 customer_id
+
+### 修复
+- **手动取消设备关联时未清理 customer_id**
+  - 影响文件：`backend/src/contract/services.py`
+  - 变更内容：`unlink_rentals` 函数中，在 `rental.status = '空闲中'` 之后增加 `rental.customer_id = None`，与 `_reclaim_contract` 和 `delete_contract` 行为对齐
+  - 关联任务：BUG
+  - 备注：此前手动取消关联后设备列表仍显示旧的客户信息，现已修复
+
+---
+
+## 2026-07-01 (修复) — 客户/设备删除增加关联检查
+
+### 修复
+- **客户删除增加活跃合同关联检查**
+  - 影响文件：`backend/src/customer/api.py`
+  - 变更内容：`DELETE /api/customers/{customer_id}` 软删除前检查该客户是否有 `status IN ('active', 'expiring')` 的关联合同，如有则返回 400 阻止删除，提示用户先处理合同
+  - 关联任务：删除关联检查
+  - 备注：404 检查（客户是否存在）保留在关联检查之前
+
+- **设备删除增加合同关联检查**
+  - 影响文件：`backend/src/rental/api.py`
+  - 变更内容：`DELETE /api/rentals/{rental_id}` 硬删除前检查该设备是否通过 `contract_rental` 中间表关联了合同，如有则返回 400 阻止删除，提示用户先在合同中解绑设备
+  - 关联任务：删除关联检查
+  - 备注：404 检查（设备是否存在）保留在关联检查之前；此前删除设备时 `contract_rental` 外键 `ondelete=CASCADE` 会静默移除关联，无任何提示
+
+---
+
+## 2026-07-01 (修复) — reclaim/expiry_notice 幂等检查增加合同ID过滤
+
+### 修复
+- **reclaim/expiry_notice 幂等检查增加按合同ID过滤**
+  - 影响文件：`backend/src/mail/services.py`
+  - 变更内容：
+    1. 幂等检查从「按 rental_ids 交集判断」改为「按 contract_id 精确过滤」，使用 `JSON_EXTRACT(extra_data, '$.contract_id')` 在 SQL 层过滤
+    2. EmailLog 写入时 `extra_data` 新增 `contract_id` 字段
+  - 关联任务：BUG-回收幂等
+  - 备注：避免同一合同被自动回收任务发过邮件后，手动回收时幂等检查误跳过
+
+---
+
+## 2026-07-16 (部署) — 后端镜像重新构建部署
+
+### 部署
+- **后端镜像构建 + K8s 滚动更新**
+  - 影响文件：`Dockerfile.backend`
+  - 变更内容：
+    1. Docker 构建 `harbor.xhwltech.com/xhcloud/cronmail-backend:latest`，基于 `python:3.12-slim`
+    2. 推送镜像到 Harbor
+    3. 滚动重启 `cronmail-backend-api`、`cronmail-backend-beat`、`cronmail-backend-worker` 三个 Deployment
+  - 验证：`POST /api/system/trigger/check_expired_rentals` 返回 200，`{"task":"check_expired_rentals","simulated_date":"2026-06-30","result":"None"}`
+  - 关联任务：后端部署
+
+---
+
+## 2026-07-06 (修改) ⚠️ — 通知流程 V2：新增 expiry_notice 类型，回收后发邮件，钉钉失败告警
+
+### 修改
+- **新增 `expiry_notice` 触发类型**
+  - 影响文件：`backend/src/template/models.py`, `backend/src/template/schemas.py`
+  - 变更内容：模板 `trigger_type` 枚举新增 `expiry_notice`（到期提醒），与 `provision` / `expiry_warning` / `reclaim` 并列
+  - 关联任务：通知流程 V2
+
+- **`check_expired_rentals` 任务行为变更 ⚠️**
+  - 影响文件：`backend/src/scheduler/tasks.py`
+  - 变更内容：
+    1. `trigger_type` 从 `'reclaim'` 改为 `'expiry_notice'`
+    2. 邮件发送后（无论成败）都将合同状态改为 `expired`，解除邮件成败与状态耦合
+    3. 调度时间默认从 `00:00` 改为 `08:00`
+  - 关联任务：通知流程 V2
+
+- **`check_reclaim_expired` 任务行为变更 ⚠️**
+  - 影响文件：`backend/src/scheduler/tasks.py`
+  - 变更内容：回收成功后调用 `send_merged_email_by_contract(db, c, 'reclaim')` 发送回收通知邮件；邮件失败不影响回收结果（try-except）
+  - 调度时间默认从 `01:00` 改为 `00:01`
+  - 关联任务：通知流程 V2
+
+- **`send_manual_email` 任务 reclaim 流程调整 ⚠️**
+  - 影响文件：`backend/src/scheduler/tasks.py`
+  - 变更内容：reclaim 类型改为先回收再发邮件（回收通知 = 资源已回收），与定时任务行为一致
+  - 关联任务：通知流程 V2
+
+- **邮件失败钉钉告警**
+  - 影响文件：`backend/src/mail/services.py`
+  - 变更内容：`send_merged_email_by_contract` 中邮件发送失败时（success=False），追加钉钉告警消息（⚠️ 邮件发送失败），包含合同编号、客户名称、通知类型、收件人、失败原因
+  - 关联任务：通知流程 V2
+
+- **`local_today()` 支持模拟日期**
+  - 影响文件：`backend/src/core/timezone.py`
+  - 变更内容：`local_today()` 和 `local_now()` 支持通过环境变量 `CRONMAIL_SIM_DATE` 覆盖日期（如 `CRONMAIL_SIM_DATE=2026-06-30`）
+  - 关联任务：通知流程 V2 调试端点
+
+- **新增调试触发端点 `POST /api/system/trigger/{task_name}`**
+  - 影响文件：`backend/src/system/api.py`
+  - 变更内容：支持手动触发三个定时任务（`check_expiring_rentals` / `check_expired_rentals` / `check_reclaim_expired`），可传入 `simulate_date` 模拟指定日期
+  - 关联任务：通知流程 V2
+
+- **`expiry_notice` 幂等检查**
+  - 影响文件：`backend/src/mail/services.py`
+  - 变更内容：`send_merged_email_by_contract` 幂等检查从仅 `reclaim` 扩展为 `reclaim` 和 `expiry_notice`，同一天不会重复发送同类型通知
+  - 关联任务：通知流程 V2
+
+- **钉钉通知类型映射更新**
+  - 影响文件：`backend/src/system/dingtalk.py`
+  - 变更内容：`build_notification_markdown` 新增 `expiry_notice` 类型映射（到期提醒 / #e65100）
+  - 关联任务：通知流程 V2
+
+- **默认调度时间更新**
+  - 影响文件：`backend/main.py`, `backend/src/scheduler/celery_app.py`
+  - 变更内容：`check-expired-rentals` 默认 `08:00`（原 `00:00`），`check-reclaim-expired` 默认 `00:01`（原 `01:00`），注释同步更新
+  - 关联任务：通知流程 V2
+
+---
+## 2026-07-06 (修改) — Dashboard 临期判断改为读系统配置
+
+### 修改
+- **Dashboard 临期天数从硬编码改为读取 system_config**
+  - 影响文件：`backend/src/contract/dashboard.py`
+  - 变更内容：`get_dashboard_stats` 和 `get_expiring_contracts_with_rentals` 中的 `threshold = today + timedelta(days=3)` 硬编码改为从 `system_config.expiry_warning_days` 读取最大天数，新增 `_get_max_expiry_warning_days()` 辅助函数
+  - 默认值：配置不存在时回退为 `7` 天（默认配置值 `"7,3"` 的最大值）
+  - 关联任务：Dashboard 临期判断配置化
+
+---
+
+## 2026-06-29 (修复) — 合同删除 500：StaleDataError on contract_contact
+
+### 修复
+- **DELETE /api/contracts/{id} 删除合同 500 错误**
+  - 影响文件：`backend/src/contract/services.py`
+  - 根因：`contract_contact` 复合主键为 `(contract_id, contact_id, recipient_type)`，同一联系人可同时有 to 和 cc 两条记录。SQLAlchemy secondary relationship 的 CASCADE 删除按 `(contract_id, contact_id)` 发 DELETE，预期 1 行但实际匹配 2 行，触发 `StaleDataError`
+  - 修复方式：`delete_contract` 中在 `db.delete(contract)` 之前，手动 `DELETE FROM contract_contact WHERE contract_id=X` 和 `DELETE FROM contract_rental WHERE contract_id=X`，绕过 secondary relationship 的 cascade 缺陷
+  - 关联任务：合同删除 500 排查
+
+---
+
+## 2026-06-29 (修复) ⚠️ — 合同创建 500：contract_contact 主键不包含 recipient_type
+
+### 修复
+- **POST /api/contracts 同一联系人 to+cc 导致 IntegrityError 500**
+  - 影响文件：`backend/src/contract/models.py`, `backend/alembic/versions/003_contract_contact_pk_fix.py`（新增）
+  - 根因：`contract_contact` 表主键为 `(contract_id, contact_id)`，不包含 `recipient_type`。当前端传入同一联系人的 to 和 cc 两条记录时，第二条 INSERT 触发 duplicate primary key 错误
+  - 修复方式：
+    1. `models.py`：将 `recipient_type` 加入复合主键 `(contract_id, contact_id, recipient_type)`
+    2. 数据库 DDL：`ALTER TABLE contract_contact DROP PRIMARY KEY; ALTER TABLE contract_contact ADD PRIMARY KEY (contract_id, contact_id, recipient_type);`
+    3. `_replace_contract_contacts` 去重逻辑保持不变（按 `(contact_id, recipient_type)` 去重，与新主键一致）
+  - 关联任务：合同创建 500 排查
+  - 备注：⚠️ 已直接在 MySQL 上执行 DDL 并 stamp alembic 版本为 003；下次构建镜像时 003 migration 文件会随代码部署
+
+---
+
+## 2026-06-29 (新增) — 通知调度时间可配置化
+
+### 新增
+- **`GET /api/system/config/schedules`**：获取所有通知调度时间配置（临期提醒、到期通知、回收执行）
+- **`PUT /api/system/config/schedules`**：批量更新通知调度时间，自动触发 Beat 重启使新配置生效
+- **`services.upsert_system_config()`**：创建或更新 system_config 键值对的通用函数
+- **`services.restart_beat()`**：通过 K8s API PATCH Deployment 触发 Beat 滚动重启
+
+### 修改
+- **`celery_app.py`**：将硬编码的 `crontab(hour=8, minute=0)` 等改为从数据库 `system_config` 表动态读取，通过 `on_after_configure` 信号在 Beat 启动前加载
+- **`main.py`**：lifespan 中增加默认调度时间初始化（`check-expiring-rentals: 08:00`, `check-expired-rentals: 00:00`, `check-reclaim-expired: 01:00`）
+
+### 影响文件
+- `backend/src/scheduler/celery_app.py`
+- `backend/src/system/api.py`
+- `backend/src/system/services.py`
+- `backend/main.py`
+
+### 关联任务
+- 通知时间配置后端
+
+---
+
+## 2026-07-16 (修复) — 定时任务健壮性修复
+
+### 修复
+- **FIX-1（致命）：`check_expired_rentals` 范围查询兜底**
+  - 影响文件：`backend/src/scheduler/tasks.py`
+  - 变更内容：`Contract.end_date == today` 改为 `Contract.end_date <= today`，配合 status 过滤（`active/expiring`）实现天然幂等。Beat 宕机漏处理的到期合同会被后续扫描捕获，已处理（状态已变 expired/reclaimed）的不会被重复命中。增加 WARNING 日志：当 `end_date < today` 时打印漏处理警告
+  - 关联任务：定时任务健壮性修复
+
+- **FIX-2（高危）：`check_expiring_rentals` 范围查询兜底**
+  - 影响文件：`backend/src/scheduler/tasks.py`
+  - 变更内容：`Contract.end_date == threshold` 改为 `Contract.end_date <= threshold`，同上原因。增加 WARNING 日志
+  - 关联任务：定时任务健壮性修复
+
+- **FIX-3（高危）：提取公共回收逻辑 `_reclaim_contract`**
+  - 影响文件：`backend/src/scheduler/tasks.py`
+  - 变更内容：新增 `_reclaim_contract(db, contract)` 辅助函数（改状态、清关联、删中间表），供 `check_reclaim_expired` 和 `send_manual_email` 的 reclaim 分支共用，消除重复代码
+  - 关联任务：定时任务健壮性修复
+
+- **FIX-4（中危）：`send_merged_email_by_contract` reclaim 幂等保护**
+  - 影响文件：`backend/src/mail/services.py`
+  - 变更内容：在函数开头增加 reclaim 类型幂等检查：查询今天是否有同合同的 reclaim 邮件已发送成功（通过 `email_log` 表的 `trigger_type`/`status`/`created_at`/`extra_data.rental_ids` 交集判断），有则跳过
+  - 关联任务：定时任务健壮性修复
+
+---
+
+## 2026-06-28 (修复)
+
+### 修复
+- **创建合同联系人重复导致 IntegrityError 500**
+  - 影响文件：`backend/src/contract/services.py`
+  - 变更内容：`_replace_contract_contacts` 增加按 `(contact_id, recipient_type)` 去重逻辑，防止前端传入重复联系人（同一 contact_id + recipient_type 组合多次出现）导致 MySQL duplicate primary key 错误
+  - 关联任务：合同列表 API 500 排查
+  - 备注：实际报 500 的接口是 `POST /api/contracts`（创建合同），非列表接口 `GET /api/contracts`（列表始终 200 OK）。根因是前端可能传了重复的联系人数据
+
+---
+
+## 2026-06-27 (审计修复)
+
+### 修复
+- **F-1（致命）：错开回收任务时间**
+  - 影响文件：`backend/src/scheduler/celery_app.py`
+  - 变更内容：`check-reclaim-expired` crontab 从 `hour=0, minute=0` 改为 `hour=1, minute=0`，避免与 `check-expired-rentals` 同时 00:00 触发导致竞态
+  - 关联任务：审计修复 F-1
+
+- **F-2（致命）：手动回收加状态检查**
+  - 影响文件：`backend/src/scheduler/tasks.py`, `backend/src/rental/api.py`
+  - 变更内容：
+    1. `send_manual_email` reclaim 分支：执行回收前检查 `contract.status == 'expired'`，不是则打印日志并 return
+    2. `POST /api/rentals/{id}/reclaim` 端点：提交异步任务前检查 `contract.status == 'expired'`，否则返回 400 "仅已到期合同可执行回收"
+  - 关联任务：审计修复 F-2
+
+- **H-1（高危）：删除合同清理设备字段**
+  - 影响文件：`backend/src/contract/services.py`
+  - 变更内容：`delete_contract` 删除前遍历 `contract.rentals`，将每个设备的 `status` 置为 `'空闲中'`、`customer_id` 置 `None`
+  - 关联任务：审计修复 H-1
+
+- **M-1（中危）：临期天数去重**
+  - 影响文件：`backend/src/scheduler/tasks.py`
+  - 变更内容：`check_expiring_rentals` 解析 `expiry_warning_days` 后对 `days_list` 做 `list(set(...))` 去重并排序，防止配置重复值导致重复发邮件
+  - 关联任务：审计修复 M-1
+
+- **M-2（中危）：去掉无效 rollback**
+  - 影响文件：`backend/src/scheduler/tasks.py`
+  - 变更内容：在 `check_expired_rentals` 和 `check_expiring_rentals` 中删除无效的 `db.rollback()` 调用（子函数 `send_merged_email_by_contract` 内部已 commit，外层 rollback 无意义），只保留错误日志
+  - 关联任务：审计修复 M-2
+
+- **M-3（中危）：邮件成功状态更新原子化**
+  - 影响文件：`backend/src/scheduler/tasks.py`, `backend/src/mail/services.py`
+  - 变更内容：将 `c.status = 'expired'` 从 `check_expired_rentals` 移到 `send_merged_email_by_contract` 内部（邮件发送成功且 trigger_type=='reclaim' 时，在 log commit 之前更新），确保邮件发送和状态变更在同一事务内
+  - 关联任务：审计修复 M-3
+
+- **M-4（中危）：合同关联设备 TOCTOU**
+  - 影响文件：`backend/src/contract/services.py`
+  - 变更内容：`_link_rentals` 中 `contract_rental.insert()` 包裹 `try/except IntegrityError`，捕获后 raise `HTTPException(status_code=409, detail="设备已被其他合同关联")` 代替 500
+  - 关联任务：审计修复 M-4
+
+---
+
+## 2026-06-27 (修复)
+
+### 修复
+- ⚠️ **定时任务和 Dashboard 时区 Bug 修复**：Pod 系统时区为 UTC，`date.today()` 返回 UTC 日期，导致北京时间的定时任务查询条件偏移了 8 小时
+  - 影响文件：`backend/src/core/timezone.py`, `backend/src/scheduler/tasks.py`, `backend/src/contract/dashboard.py`, `backend/src/mail/services.py`, `backend/src/mail/api.py`, `backend/src/rental/services.py`
+  - 根因：Pod 系统时区为 UTC（`/etc/localtime → Etc/UTC`），`date.today()` 在北京时间 00:00（UTC 16:00）返回前一天日期。Celery `timezone='Asia/Shanghai'` 只影响 crontab 调度时间解析，不影响 Python 运行时 `date.today()`
+  - 具体影响：
+    1. `check_expired_rentals`（每天 00:00 CST）：`end_date == date.today()` 实际查询的是 UTC 日期，比北京时间晚 8 小时。例如 6月27日 00:00 CST（UTC 6月26日 16:00），`date.today()` 返回 `2026-06-26`，匹配不到 `end_date=2026-06-27` 的合同
+    2. `check_expiring_rentals`（每天 08:00 CST）：同上，`threshold = today + timedelta(days=offset)` 计算偏移
+    3. `check_reclaim_expired`（每天 00:00 CST）：同上
+    4. Dashboard `get_dashboard_stats` / `get_expiring_contracts_with_rentals`：`end_date > today` 条件因 UTC 时区导致当天到期的合同被排除；且 `>` 改为 `>=` 以确保当天到期的合同也显示为"即将到期"
+    5. `send_merged_email` / `send_merged_email_by_contract`：`days_until_expiry` 计算偏差
+    6. `build_rental_context`（`rental/services.py`）：`days_until_expiry` 计算偏差
+    7. `_build_rental_context`（`mail/api.py`）：`days_until_expiry` 计算偏差
+  - 修复方式：
+    1. `timezone.py` 新增 `local_today()` 函数：`(datetime.utcnow() + timedelta(hours=8)).date()`
+    2. 全局替换所有 `date.today()` → `local_today()`
+    3. Dashboard 条件 `end_date > today` → `end_date >= today`（当天到期也显示）
+  - 关联任务：合同到期回收通知 Bug 排查
+
+---
+
 ## 2026-06-26 (部署)
 
 ### 变更

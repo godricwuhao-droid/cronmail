@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+</head>
+<body style="margin:0;padding:0;font-family:'Microsoft YaHei','微软雅黑','Segoe UI',Arial,sans-serif;background:#f5f7fa;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f7fa;padding:20px 0;">
+<tr><td align="center">
+<table width="620" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.08);overflow:hidden;">
+
+<!-- Header -->
+<tr><td style="background:#e6a23c;padding:24px 32px;">
+<table width="100%"><tr>
+<td style="color:#ffffff;font-size:22px;font-weight:bold;letter-spacing:1px;">裸金属服务器资源到期提醒</td>
+</tr></table>
+</td></tr>
+
+<!-- Body -->
+<tr><td style="padding:24px 32px;">
+
+<p style="color:#333;font-size:14px;line-height:1.6;margin:0 0 6px 0;"><b>{{ customer_name }}</b> 您好，</p>
+<p style="color:#555;font-size:14px;line-height:1.6;margin:0 0 20px 0;">以下裸金属服务器资源将于今日 <b style="color:#e6a23c;">{{ rentals[0].end_date }}</b> 到期，今晚 <b style="color:#e53935;">{{ reclaim_time }}</b> 将执行回收，请及时备份重要数据。</p>
+
+<!-- Resource Info Table (7 columns) -->
+<table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:20px;border:1px solid #e0e4e8;border-radius:6px;">
+<tr><td colspan="7" style="background:#fdf6ec;padding:10px 16px;font-size:14px;font-weight:bold;color:#e6a23c;border-bottom:1px solid #e0e4e8;">今日到期资源（共 {{ rental_count }} 台）</td></tr>
+<tr style="background:#f5f7fa;">
+<td style="padding:10px 12px;font-size:12px;color:#666;border-bottom:1px solid #e0e4e8;font-weight:bold;">服务器类型</td>
+<td style="padding:10px 12px;font-size:12px;color:#666;border-bottom:1px solid #e0e4e8;font-weight:bold;">IP 地址</td>
+<td style="padding:10px 12px;font-size:12px;color:#666;border-bottom:1px solid #e0e4e8;font-weight:bold;">操作系统</td>
+<td style="padding:10px 12px;font-size:12px;color:#666;border-bottom:1px solid #e0e4e8;font-weight:bold;">系统盘</td>
+<td style="padding:10px 12px;font-size:12px;color:#666;border-bottom:1px solid #e0e4e8;font-weight:bold;">数据盘</td>
+<td style="padding:10px 12px;font-size:12px;color:#666;border-bottom:1px solid #e0e4e8;font-weight:bold;">带宽</td>
+<td style="padding:10px 12px;font-size:12px;color:#666;border-bottom:1px solid #e0e4e8;font-weight:bold;">到期时间</td>
+</tr>
+{% for r in rentals %}
+<tr>
+<td style="padding:10px 12px;font-size:12px;color:#333;border-bottom:1px solid #f0f0f0;"><b>{{ r.machine_model }}</b></td>
+<td style="padding:10px 12px;font-size:12px;color:#333;border-bottom:1px solid #f0f0f0;">
+内网: {{ r.private_ip }}{% for ip in r.public_ips %}<br>公网: {{ ip }}{% endfor %}
+</td>
+<td style="padding:10px 12px;font-size:12px;color:#333;border-bottom:1px solid #f0f0f0;">{{ r.os_version }}</td>
+<td style="padding:10px 12px;font-size:12px;color:#333;border-bottom:1px solid #f0f0f0;">{{ r.system_disk }}</td>
+<td style="padding:10px 12px;font-size:12px;color:#333;border-bottom:1px solid #f0f0f0;">
+{% for disk in r.data_disks %}{{ disk }}{% if not loop.last %}, {% endif %}{% endfor %}{% if not r.data_disks %}-{% endif %}
+</td>
+<td style="padding:10px 12px;font-size:12px;color:#333;border-bottom:1px solid #f0f0f0;">{{ r.bandwidth_mbps }}Mbps</td>
+<td style="padding:10px 12px;font-size:12px;color:#e53935;border-bottom:1px solid #f0f0f0;"><b>{{ r.end_date }}</b></td>
+</tr>
+{% endfor %}
+</table>
+
+<!-- Expiry Info -->
+<table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:20px;border:1px solid #e0e4e8;border-radius:6px;">
+<tr><td colspan="2" style="background:#f9fafb;padding:10px 16px;font-size:14px;font-weight:bold;color:#333;border-bottom:1px solid #e0e4e8;">到期信息</td></tr>
+<tr><td style="padding:10px 16px;font-size:13px;color:#666;width:120px;border-bottom:1px solid #f0f0f0;">到期日期</td>
+<td style="padding:10px 16px;font-size:13px;color:#e6a23c;border-bottom:1px solid #f0f0f0;"><b>{{ rentals[0].end_date }}</b></td></tr>
+<tr><td style="padding:10px 16px;font-size:13px;color:#666;border-bottom:1px solid #f0f0f0;">计划回收时间</td>
+<td style="padding:10px 16px;font-size:13px;color:#e53935;border-bottom:1px solid #f0f0f0;"><b>今晚 {{ reclaim_time }}</b></td></tr>
+<tr><td style="padding:10px 16px;font-size:13px;color:#666;">回收原因</td>
+<td style="padding:10px 16px;font-size:13px;color:#333;">到期未续</td></tr>
+</table>
+
+<!-- Important Notice -->
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#fdf6ec;border:1px solid #f5dab1;border-radius:6px;margin-bottom:20px;">
+<tr><td style="padding:12px 16px;font-size:13px;color:#b06e0a;line-height:1.6;">
+<b>⚠ 重要提醒：</b><br>
+1. 您的资源将于今日到期，今晚 {{ reclaim_time }} 将执行回收，回收后数据将无法恢复。<br>
+2. 请务必在回收前完成重要数据备份与迁移工作。<br>
+3. 回收后将释放所有关联资源（IP、存储、网络配置等），不做保留。<br>
+4. 如需紧急续租，请立即联系运维团队处理，逾期将无法恢复。
+</td></tr>
+</table>
+
+</td></tr>
+</table>
+</td></tr></table>
+</body>
+</html>

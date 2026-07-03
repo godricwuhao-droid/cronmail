@@ -2,6 +2,7 @@
  * 租赁模块共享常量与工具
  */
 import type { RentalStatus } from '@/api/modules/rental'
+import { RENTAL_STATUS_FALLBACK } from '@/api/modules/rental'
 
 /** 状态 → 中文标签 */
 export const RENTAL_STATUS_LABEL: Record<RentalStatus, string> = {
@@ -17,15 +18,8 @@ export const RENTAL_STATUS_TAG: Record<RentalStatus, 'success' | 'warning' | 'da
   '租赁中': 'warning',
 }
 
-/** 旧状态值 fallback 映射（兼容后端可能返回旧值） */
-export const RENTAL_STATUS_FALLBACK: Record<string, string> = {
-  provisioned: '空闲中',
-  reclaimed: '已断电',
-  '运行中': '空闲中',
-  '维护中': '空闲中',
-  '已下架': '已断电',
-  '故障': '已断电',
-}
+// RENTAL_STATUS_FALLBACK 从 @/api/modules/rental 导入，不在此重复定义
+export { RENTAL_STATUS_FALLBACK }
 
 /**
  * 安全获取状态标签：优先用新状态值，旧值走 fallback，都不匹配则原样返回

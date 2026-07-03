@@ -33,6 +33,8 @@ spec:
             - secretRef:
                 name: cronmail-secret
           env:
+            - name: TZ
+              value: "Asia/Shanghai"
             - name: CORS_ORIGINS
               value: '["*"]'
           # 健康检查

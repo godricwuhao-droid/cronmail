@@ -12,7 +12,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Document, Search, Operation as OperationIcon } from '@element-plus/icons-vue'
+import { Document, Search, Operation as OperationIcon, Top } from '@element-plus/icons-vue'
 import {
   deleteRental,
   getRentals,
@@ -103,6 +103,8 @@ async function fetchList() {
     const params: RentalListParams = {
       page: pagination.page,
       page_size: pagination.page_size,
+      sort_field: sortField.value,
+      sort_order: sortOrder.value,
     }
     if (customerFilter.value) params.customer_id = customerFilter.value
     if (statusFilter.value) params.status = statusFilter.value
@@ -215,6 +217,23 @@ function billingLabel(model?: string | null) {
 }
 
 // ============================================================
+// 排序
+// ============================================================
+const sortField = ref('created_at')
+const sortOrder = ref<'asc' | 'desc'>('desc')
+
+function handleSort({ prop, order }: any) {
+  if (order) {
+    sortField.value = prop
+    sortOrder.value = order === 'ascending' ? 'asc' : 'desc'
+  } else {
+    sortField.value = 'created_at'
+    sortOrder.value = 'desc'
+  }
+  fetchList()
+}
+
+// ============================================================
 // 列自定义
 // ============================================================
 interface ColumnDef {
@@ -230,7 +249,7 @@ const allColumns: ColumnDef[] = [
   { key: 'cpu_model', title: 'CPU 型号' },
   { key: 'memory_gb', title: '内存' },
   { key: 'gpu_info', title: 'GPU 信息' },
-  { key: 'system_disk_gb', title: '系统盘' },
+  { key: 'system_disk', title: '系统盘' },
   { key: 'data_disks', title: '数据盘' },
   { key: 'os_version', title: '操作系统' },
   { key: 'bandwidth_mbps', title: '带宽' },
@@ -304,13 +323,45 @@ const visibleColumns = ref<string[]>(loadVisibleColumns())
 const columnOrder = ref<string[]>(loadColumnOrder())
 const popoverVisible = ref(false)
 
-/** 按当前顺序排列的列（用于列设置面板） */
+/** 置顶列（按 pin 顺序排列，最新的在最前） */
+const PIN_STORAGE_KEY = 'rental_pinned_columns'
+const DEFAULT_PINNED = ['machine_model', 'private_ip', 'status']
+
+function loadPinned(): string[] {
+  try {
+    const raw = localStorage.getItem(PIN_STORAGE_KEY)
+    if (!raw) return [...DEFAULT_PINNED]
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) return [...DEFAULT_PINNED]
+    return parsed.filter((k): k is string => typeof k === 'string' && allColumns.some((c) => c.key === k))
+  } catch { return [...DEFAULT_PINNED] }
+}
+function persistPinned(val: string[]) {
+  localStorage.setItem(PIN_STORAGE_KEY, JSON.stringify(val))
+}
+
+const pinnedColumns = ref<string[]>(loadPinned())
+
+function pinColumn(key: string) {
+  const idx = pinnedColumns.value.indexOf(key)
+  if (idx > -1) {
+    pinnedColumns.value.splice(idx, 1)
+  } else {
+    pinnedColumns.value.unshift(key)
+  }
+  persistPinned(pinnedColumns.value)
+}
+function isPinned(key: string) { return pinnedColumns.value.includes(key) }
+
+/** 按当前顺序排列的列（用于列设置面板），置顶列排在前面，用分割线隔开 */
 const orderedColumns = computed(() => {
-  return columnOrder.value
+  const all = columnOrder.value
     .map((key) => allColumns.find((c) => c.key === key))
     .filter((c): c is ColumnDef => !!c)
+  const pinned = all.filter((c) => isPinned(c.key))
+  const unpinned = all.filter((c) => !isPinned(c.key))
+  return [...pinned, ...unpinned]
 })
-
 /** 拖拽状态 */
 const dragKey = ref<string>('')
 const dragOverKey = ref<string>('')
@@ -370,8 +421,10 @@ function toggleColumn(key: string) {
 function resetColumns() {
   visibleColumns.value = [...DEFAULT_VISIBLE]
   columnOrder.value = [...DEFAULT_ORDER]
+  pinnedColumns.value = [...DEFAULT_PINNED]
   persistColumns(DEFAULT_VISIBLE)
   persistOrder(DEFAULT_ORDER)
+  persistPinned(DEFAULT_PINNED)
   ElMessage.success('已恢复默认列设置')
 }
 
@@ -439,31 +492,33 @@ function getColumnProps(col: ColumnDef): ColumnProps {
   if (key === 'customer_name') {
     base.prop = 'customer.name'
     base.label = '客户'
-    base['min-width'] = 140
+    base['min-width'] = 130
   } else if (key === 'machine_model') {
     base.prop = 'machine_model'
     base.label = '机器型号'
-    base['min-width'] = 140
+    base['min-width'] = 130
+    base.sortable = 'custom'
   } else if (key === 'cpu_model') {
     base.prop = 'cpu_model'
     base.label = 'CPU 型号'
-    base['min-width'] = 180
+    base['min-width'] = 170
     base['show-overflow-tooltip'] = true
   } else if (key === 'gpu_info') {
     base.prop = 'gpu_info'
     base.label = 'GPU 信息'
-    base['min-width'] = 180
+    base['min-width'] = 170
     base['show-overflow-tooltip'] = true
   } else if (key === 'os_version') {
     base.prop = 'os_version'
     base.label = '操作系统'
-    base['min-width'] = 160
+    base['min-width'] = 140
     base['show-overflow-tooltip'] = true
   } else if (key === 'rack_location') {
     base.prop = 'rack_location'
     base.label = '机架位置'
-    base['min-width'] = 130
+    base['min-width'] = 120
     base['show-overflow-tooltip'] = true
+    base.sortable = 'custom'
   } else if (key === 'private_ip') {
     base.prop = 'private_ip'
     base.label = '内网 IP'
@@ -471,35 +526,37 @@ function getColumnProps(col: ColumnDef): ColumnProps {
   } else if (key === 'start_date') {
     base.prop = 'start_date'
     base.label = '开通时间'
-    base.width = 110
+    base.width = 120
   } else if (key === 'created_at') {
     base.prop = 'created_at'
     base.label = '创建时间'
-    base.width = 160
+    base.width = 170
+    base.sortable = 'custom'
   } else if (key === 'updated_at') {
     base.prop = 'updated_at'
     base.label = '更新时间'
-    base.width = 160
+    base.width = 170
   } else if (key === 'remark') {
     base.prop = 'remark'
     base.label = '备注'
-    base['min-width'] = 150
+    base['min-width'] = 140
     base['show-overflow-tooltip'] = true
   }
 
   // 特殊列（带自定义 template，仅设置 label / width 等）
   else if (key === 'status') {
     base.label = '状态'
-    base.width = 90
+    base.width = 100
   } else if (key === 'end_date') {
     base.label = '到期时间'
-    base.width = 110
+    base.width = 120
   } else if (key === 'memory_gb') {
     base.label = '内存'
-    base.width = 80
-  } else if (key === 'system_disk_gb') {
+    base.width = 90
+    base.sortable = 'custom'
+  } else if (key === 'system_disk') {
     base.label = '系统盘'
-    base.width = 80
+    base['min-width'] = 120
   } else if (key === 'data_disks') {
     base.label = '数据盘'
     base['min-width'] = 150
@@ -508,19 +565,20 @@ function getColumnProps(col: ColumnDef): ColumnProps {
     base['min-width'] = 150
   } else if (key === 'ssh_port') {
     base.label = 'SSH 端口'
-    base.width = 90
+    base.width = 100
   } else if (key === 'root_username') {
     base.label = 'SSH 账号'
-    base.width = 90
+    base.width = 100
   } else if (key === 'bandwidth_mbps') {
     base.label = '带宽'
     base.width = 100
+    base.sortable = 'custom'
   } else if (key === 'billing_model') {
     base.label = '计费方式'
-    base.width = 90
+    base.width = 100
   } else if (key === 'auto_renew') {
     base.label = '自动续期'
-    base.width = 80
+    base.width = 90
   } else if (key === 'contacts_count') {
     base.label = '收件人'
     base.width = 80
@@ -604,30 +662,43 @@ onMounted(() => {
                   <el-link type="primary" :underline="false" @click="resetColumns">重置默认</el-link>
                 </div>
                 <div class="column-list">
-                  <div
-                    v-for="col in orderedColumns"
-                    :key="col.key"
-                    class="column-item"
-                    :class="{
-                      'drag-over': dragOverKey === col.key && dragKey !== col.key,
-                      dragging: dragKey === col.key,
-                    }"
-                    draggable="true"
-                    @dragstart="onDragStart($event, col.key)"
-                    @dragover="onDragOver($event, col.key)"
-                    @dragleave="onDragLeave(col.key)"
-                    @drop="onDrop($event, col.key)"
-                    @dragend="onDragEnd"
-                  >
-                    <span class="drag-handle" aria-hidden="true">⠿</span>
-                    <el-checkbox
-                      :model-value="vis(col.key)"
-                      :disabled="col.required"
-                      @change="toggleColumn(col.key)"
+                  <template v-for="(col, idx) in orderedColumns" :key="col.key">
+                    <div
+                      v-if="idx > 0 && isPinned(col.key) !== isPinned(orderedColumns[idx - 1]?.key || '')"
+                      class="column-divider"
+                    />
+                    <div
+                      class="column-item"
+                      :class="{
+                        'drag-over': dragOverKey === col.key && dragKey !== col.key,
+                        dragging: dragKey === col.key,
+                      }"
+                      draggable="true"
+                      @dragstart="onDragStart($event, col.key)"
+                      @dragover="onDragOver($event, col.key)"
+                      @dragleave="onDragLeave(col.key)"
+                      @drop="onDrop($event, col.key)"
+                      @dragend="onDragEnd"
                     >
-                      {{ col.title }}<span v-if="col.required" class="required-tip">（必选）</span>
-                    </el-checkbox>
-                  </div>
+                      <span class="drag-handle" aria-hidden="true">⠿</span>
+                      <el-button
+                        link
+                        class="pin-btn"
+                        :class="{ active: isPinned(col.key) }"
+                        @click="pinColumn(col.key)"
+                        :title="isPinned(col.key) ? '取消置顶' : '置顶到最前'"
+                      >
+                        <el-icon><Top /></el-icon>
+                      </el-button>
+                      <el-checkbox
+                        :model-value="vis(col.key)"
+                        :disabled="col.required"
+                        @change="toggleColumn(col.key)"
+                      >
+                        {{ col.title }}<span v-if="col.required" class="required-tip">（必选）</span>
+                      </el-checkbox>
+                    </div>
+                  </template>
                 </div>
               </div>
             </el-popover>
@@ -706,6 +777,7 @@ onMounted(() => {
         style="width: 100%"
         empty-text="暂无设备"
         @selection-change="handleSelect"
+        @sort-change="handleSort"
       >
         <!-- 勾选列（单选模式：已选行禁止再勾选别的） -->
         <el-table-column
@@ -755,12 +827,9 @@ onMounted(() => {
             </template>
             <template v-else-if="col.key === 'data_disks'" #default="{ row }">
               <template v-if="Array.isArray((row as any).data_disks) && (row as any).data_disks.length">
-                <el-tag
-                  v-for="(d, i) in (row as any).data_disks"
-                  :key="i"
-                  size="small"
-                  style="margin-right: 4px"
-                >{{ d.size_gb }}GB</el-tag>
+                <span v-for="(d, i) in (row as any).data_disks" :key="i" style="margin-right: 4px">
+                  {{ d }}
+                </span>
               </template>
               <span v-else>-</span>
             </template>
@@ -770,8 +839,8 @@ onMounted(() => {
             <template v-else-if="col.key === 'memory_gb'" #default="{ row }">
               {{ (row as any).memory_gb != null ? (row as any).memory_gb + ' GB' : '-' }}
             </template>
-            <template v-else-if="col.key === 'system_disk_gb'" #default="{ row }">
-              {{ (row as any).system_disk_gb != null ? (row as any).system_disk_gb + ' GB' : '-' }}
+            <template v-else-if="col.key === 'system_disk'" #default="{ row }">
+              {{ (row as any).system_disk || '-' }}
             </template>
             <template v-else-if="col.key === 'bandwidth_mbps'" #default="{ row }">
               {{ (row as any).bandwidth_mbps != null ? (row as any).bandwidth_mbps + ' Mbps' : '-' }}
@@ -915,5 +984,21 @@ onMounted(() => {
   color: var(--el-color-info, #909399);
   font-size: 12px;
   margin-left: 4px;
+}
+.rental-column-popover .pin-btn {
+  padding: 2px;
+  margin-right: 4px;
+  font-size: 14px;
+  opacity: 0.3;
+}
+.rental-column-popover .pin-btn:hover,
+.rental-column-popover .pin-btn.active {
+  opacity: 1;
+  color: var(--primary-color);
+}
+.rental-column-popover .column-divider {
+  height: 1px;
+  background: #e5e7eb;
+  margin: 4px 6px;
 }
 </style>
