@@ -43,3 +43,35 @@ export const CONTRACT_BILLING_MODEL_OPTIONS: Array<{ label: string; value: strin
   { label: '按季', value: 'quarterly' },
   { label: '按年', value: 'yearly' },
 ]
+
+// ============================================================
+// 多类型合同常量
+// ============================================================
+
+/** 合同类型 → 中文标签 */
+export const CONTRACT_TYPE_LABEL: Record<string, string> = {
+  compute_leasing: '算力租赁',
+  satellite_data: '卫星数据',
+  compute_service: '算力服务',
+}
+
+/** 合同类型 → 路由前缀 */
+export const CONTRACT_TYPE_ROUTE: Record<string, string> = {
+  compute_leasing: '/contracts/compute-leasing',
+  satellite_data: '/contracts/satellite-data',
+  compute_service: '/contracts/compute-service',
+}
+
+/** 合同类型选项（用于下拉） */
+export const CONTRACT_TYPE_OPTIONS: Array<{ label: string; value: string }> = [
+  { label: '算力租赁', value: 'compute_leasing' },
+  { label: '卫星数据', value: 'satellite_data' },
+  { label: '算力服务', value: 'compute_service' },
+]
+
+/** 附件状态图标颜色映射 */
+export const ATTACHMENT_STATUS_COLORS: Record<string, string> = {
+  confirmed: '#10b981',
+  unconfirmed: '#ef4444',
+  empty: '#c0c4cc',
+}

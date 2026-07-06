@@ -54,3 +54,37 @@ Accepted
 
 ## Reversibility
 高 —— 随时可以换用更受限的模板引擎，模板文件本身改动量可控。
+
+## 实现后补充
+
+当前所有渲染路径已统一使用以下 context：
+
+```python
+{
+    "customer_name": str,       # 客户名称
+    "rental_count": int,        # 设备数量
+    "rentals": [{               # 设备列表（单机场景为单元素数组）
+        "machine_model": str,
+        "cpu_model": str,
+        "memory_gb": int,
+        "gpu_info": str,
+        "system_disk_gb": int,
+        "data_disks": [...],
+        "os_version": str,
+        "bandwidth_mbps": int,
+        "rack_location": str,
+        "private_ip": str,
+        "public_ips": [...],
+        "ssh_port": int,
+        "root_username": str,
+        "root_password": str,
+        "start_date": str,
+        "end_date": str,
+        "billing_model": str,
+    }, ...]
+}
+```
+
+回收/到期提醒场景额外注入 `reclaim_time` 字段（回收执行时间）。
+
+前端模板编辑页的默认示例数据为简化单机结构（预览场景仅需演示变量替换，不需要展示 `{% for %}` 循环）。在模板内容中鼓励使用 `{% for r in rentals %}` 实现多设备列表渲染。

@@ -29,24 +29,39 @@ def get_dashboard_stats(db: Session) -> dict:
         Contract.end_date >= today,
         Contract.status.in_(['active', 'expiring']),
     ).count()
+    expired = db.query(Contract).filter(
+        Contract.status == 'expired'
+    ).count()
     reclaimed = db.query(Contract).filter(
         Contract.status == 'reclaimed'
     ).count()
-    return {"total_contracts": total_contracts, "expiring": expiring, "reclaimed": reclaimed}
+    return {"total_contracts": total_contracts, "expiring": expiring, "expired": expired, "reclaimed": reclaimed}
 
 
 def get_expiring_contracts_with_rentals(db: Session, limit: int = 10) -> list[dict]:
-    """返回临期合同及其关联设备列表"""
+    """返回临期及已到期合同及其关联设备列表（已到期排前面，更紧急）"""
     today = local_today()
     threshold = today + timedelta(days=_get_max_expiry_warning_days(db))
-    contracts = db.query(Contract).filter(
+
+    # 已到期：status='expired'（end_date 已过）
+    expired_contracts = db.query(Contract).filter(
+        Contract.status.in_(['expired']),
+    ).order_by(Contract.end_date).limit(limit).all()
+
+    # 临期：end_date 在未来阈值内且未到期
+    expiring_contracts = db.query(Contract).filter(
         Contract.end_date <= threshold,
         Contract.end_date >= today,
         Contract.status.in_(['active', 'expiring']),
     ).order_by(Contract.end_date).limit(limit).all()
 
-    result = []
-    for c in contracts:
+    # 合并：已到期排前面（更紧急），去重
+    seen: set[str] = set()
+    result: list[dict] = []
+    for c in expired_contracts + expiring_contracts:
+        if c.id in seen:
+            continue
+        seen.add(c.id)
         rentals = get_contract_rentals(db, c.id)
         result.append({
             "contract_id": c.id,
@@ -57,4 +72,6 @@ def get_expiring_contracts_with_rentals(db: Session, limit: int = 10) -> list[di
             "rental_count": len(rentals),
             "rentals": rentals,
         })
+        if len(result) >= limit:
+            break
     return result

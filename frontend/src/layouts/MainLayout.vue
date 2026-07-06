@@ -25,10 +25,24 @@
           <el-icon><UserFilled /></el-icon>
           <template #title><span>客户管理</span></template>
         </el-menu-item>
-        <el-menu-item index="/contracts">
-          <el-icon><Notebook /></el-icon>
-          <template #title><span>合同管理</span></template>
-        </el-menu-item>
+        <el-sub-menu index="contracts">
+          <template #title>
+            <el-icon><Notebook /></el-icon>
+            <span>合同管理</span>
+          </template>
+          <el-menu-item index="/contracts/compute-leasing">
+            <el-icon><Monitor /></el-icon>
+            <span>算力租赁</span>
+          </el-menu-item>
+          <el-menu-item index="/contracts/satellite-data">
+            <el-icon><DataAnalysis /></el-icon>
+            <span>卫星数据</span>
+          </el-menu-item>
+          <el-menu-item index="/contracts/compute-service">
+            <el-icon><Cpu /></el-icon>
+            <span>算力服务</span>
+          </el-menu-item>
+        </el-sub-menu>
         <el-menu-item index="/rentals">
           <el-icon><Document /></el-icon>
           <template #title><span>设备管理</span></template>
@@ -50,6 +64,7 @@
           <el-menu-item index="/system/dingtalk">钉钉通知</el-menu-item>
           <el-menu-item index="/system/colleagues">内部同事</el-menu-item>
           <el-menu-item index="/system/config">系统配置</el-menu-item>
+          <el-menu-item index="/system/attachment-categories">附件分类管理</el-menu-item>
         </el-sub-menu>
       </el-menu>
     </el-aside>
@@ -98,6 +113,9 @@ import {
   CircleCheckFilled,
   Fold,
   Expand,
+  Monitor,
+  DataAnalysis,
+  Cpu,
 } from '@element-plus/icons-vue'
 
 const route = useRoute()
@@ -106,15 +124,18 @@ const isCollapse = ref(false)
 const activeMenu = computed(() => {
   // /system/* 路由时高亮 /system 父菜单
   if (route.path.startsWith('/system')) return 'system'
+  // /contracts/* 路由时高亮 contracts 父菜单
+  if (route.path.startsWith('/contracts')) return 'contracts'
   return route.path
 })
 
 /** 面包屑：父级标题（可点击跳转到列表页） */
 const parentTitle = computed(() => {
   if (route.path.startsWith('/customers/') && route.path.endsWith('contacts')) return '客户管理'
-  if (route.path.startsWith('/contracts/create')) return '合同管理'
-  if (route.path.startsWith('/contracts/') && route.path.endsWith('edit')) return '合同管理'
-  if (route.path.startsWith('/contracts/')) return '合同管理'
+  if (route.path.startsWith('/contracts/compute-leasing')) return '合同管理'
+  if (route.path.startsWith('/contracts/satellite-data')) return '合同管理'
+  if (route.path.startsWith('/contracts/compute-service')) return '合同管理'
+  if (route.path.startsWith('/contracts')) return '合同管理'
   if (route.path.startsWith('/rentals/create')) return '设备管理'
   if (route.path.startsWith('/rentals/') && route.path.endsWith('edit')) return '设备管理'
   if (route.path.startsWith('/rentals/')) return '设备管理'
@@ -127,7 +148,10 @@ const parentTitle = computed(() => {
 /** 面包屑：父级跳转路径 */
 const parentPath = computed(() => {
   if (route.path.startsWith('/customers/')) return '/customers'
-  if (route.path.startsWith('/contracts/')) return '/contracts'
+  if (route.path.startsWith('/contracts/compute-leasing')) return '/contracts/compute-leasing'
+  if (route.path.startsWith('/contracts/satellite-data')) return '/contracts/satellite-data'
+  if (route.path.startsWith('/contracts/compute-service')) return '/contracts/compute-service'
+  if (route.path.startsWith('/contracts')) return '/contracts/compute-leasing'
   if (route.path.startsWith('/rentals/')) return '/rentals'
   if (route.path.startsWith('/templates/')) return '/templates'
   if (route.path.startsWith('/system/')) return '/system/smtp'
@@ -144,7 +168,9 @@ const pageTitle = computed(() => {
   const map: Record<string, string> = {
     '/dashboard': '运营概览',
     '/customers': '客户管理',
-    '/contracts': '合同管理',
+    '/contracts/compute-leasing': '算力租赁',
+    '/contracts/satellite-data': '卫星数据',
+    '/contracts/compute-service': '算力服务',
     '/rentals': '设备管理',
     '/templates': '模板管理',
     '/logs': '发送日志',
@@ -152,11 +178,21 @@ const pageTitle = computed(() => {
     '/system/colleagues': '内部同事',
     '/system/config': '系统配置',
     '/system/dingtalk': '钉钉通知',
+    '/system/attachment-categories': '附件分类管理',
   }
   if (route.path.startsWith('/customers/') && route.path.endsWith('contacts')) return '联系人管理'
-  if (route.path.startsWith('/contracts/create')) return '创建合同'
-  if (route.path.startsWith('/contracts/') && route.path.endsWith('edit')) return '编辑合同'
-  if (route.path.startsWith('/contracts/')) return '合同详情'
+  if (route.path.startsWith('/contracts/compute-leasing/create')) return '新建合同'
+  if (route.path.startsWith('/contracts/compute-leasing/') && route.path.endsWith('edit')) return '编辑合同'
+  if (route.path.startsWith('/contracts/compute-leasing/') && route.path.endsWith('attachments')) return '附件管理'
+  if (route.path.startsWith('/contracts/compute-leasing/')) return '合同详情'
+  if (route.path.startsWith('/contracts/satellite-data/create')) return '新建卫星数据合同'
+  if (route.path.startsWith('/contracts/satellite-data/') && route.path.endsWith('edit')) return '编辑卫星数据合同'
+  if (route.path.startsWith('/contracts/satellite-data/') && route.path.endsWith('attachments')) return '附件管理'
+  if (route.path.startsWith('/contracts/satellite-data/')) return '卫星数据合同详情'
+  if (route.path.startsWith('/contracts/compute-service/create')) return '新建算力服务合同'
+  if (route.path.startsWith('/contracts/compute-service/') && route.path.endsWith('edit')) return '编辑算力服务合同'
+  if (route.path.startsWith('/contracts/compute-service/') && route.path.endsWith('attachments')) return '附件管理'
+  if (route.path.startsWith('/contracts/compute-service/')) return '算力服务合同详情'
   if (route.path.startsWith('/rentals/create')) return '创建设备'
   if (route.path.startsWith('/rentals/') && route.path.endsWith('edit')) return '编辑设备'
   if (route.path.startsWith('/rentals/')) return '设备详情'

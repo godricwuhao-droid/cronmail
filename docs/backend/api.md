@@ -1807,3 +1807,301 @@ HTTP 状态码：201
 错误：
 - 409：`{"detail": "设备 xxx 已被其他合同关联"}`
 - 422：`{"detail": "..."}`（参数校验失败）
+
+---
+
+## 卫星数据合同 (SatelliteDataContract)
+
+### GET /api/satellite-data-contracts
+
+列表，支持 `?search=&customer_id=&page=&page_size=`
+
+请求：`GET /api/satellite-data-contracts?page=1&page_size=20`
+
+响应：
+```json
+{
+  "items": [
+    {"id": "55ddb5f9-343f-40bc-bb05-65887d53ac2d", "customer_id": "b2e9b24d-ed5b-42c9-9fdb-d5b9a358fcc7", "customer_name": "测试客户A", "name": "卫星数据合同-001", "contract_no": "WX-2026-001", "remark": "测试", "created_at": "2026-07-03T17:20:04.572277", "updated_at": null}
+  ],
+  "total": 1,
+  "page": 1,
+  "page_size": 20
+}
+```
+
+HTTP 状态码：200
+
+关键字段：
+- `items`（array）：合同列表，含 `customer_name`（关联查询）
+- `total`（int）：总数
+
+### POST /api/satellite-data-contracts
+
+请求：
+```json
+{"customer_id": "uuid", "name": "卫星数据合同-001", "contract_no": "WX-2026-001", "remark": ""}
+```
+
+响应：
+```json
+{"id": "55ddb5f9-343f-40bc-bb05-65887d53ac2d", "customer_id": "b2e9b24d-ed5b-42c9-9fdb-d5b9a358fcc7", "customer_name": "测试客户A", "name": "卫星数据合同-001", "contract_no": "WX-2026-001", "remark": "测试", "created_at": "2026-07-03T17:20:04.572277", "updated_at": null}
+```
+
+HTTP 状态码：201
+
+### GET /api/satellite-data-contracts/{id}
+
+### PUT /api/satellite-data-contracts/{id}
+
+### DELETE /api/satellite-data-contracts/{id}
+
+响应：
+```json
+{"detail": "合同已删除"}
+```
+
+HTTP 状态码：200
+
+---
+
+## 算力服务合同 (ComputeServiceContract)
+
+### GET /api/compute-service-contracts
+
+列表，支持 `?search=&customer_id=&page=&page_size=`
+
+请求：`GET /api/compute-service-contracts?page=1&page_size=20`
+
+响应：
+```json
+{
+  "items": [
+    {"id": "189d753f-633a-4891-b421-5116282ffd6d", "customer_id": "b2e9b24d-ed5b-42c9-9fdb-d5b9a358fcc7", "customer_name": "测试客户A", "name": "算力服务合同-001", "contract_no": "FW-2026-001", "remark": null, "created_at": "2026-07-03T17:20:04.579058", "updated_at": null}
+  ],
+  "total": 1,
+  "page": 1,
+  "page_size": 20
+}
+```
+
+HTTP 状态码：200
+
+### POST /api/compute-service-contracts
+
+请求：
+```json
+{"customer_id": "uuid", "name": "算力服务合同-001", "contract_no": "FW-2026-001", "remark": ""}
+```
+
+HTTP 状态码：201
+
+### GET /api/compute-service-contracts/{id}
+
+### PUT /api/compute-service-contracts/{id}
+
+### DELETE /api/compute-service-contracts/{id}
+
+---
+
+## 附件分类管理 (System - Attachment Categories)
+
+### GET /api/system/attachment-categories?contract_type=compute_leasing
+
+请求：`GET /api/system/attachment-categories?contract_type=compute_leasing`
+
+响应：
+```json
+{
+  "items": [
+    {
+      "id": "145a0a06-e84f-4053-b85a-3c37120d7635",
+      "contract_type": "compute_leasing",
+      "name": "合同协议",
+      "code": "contract_agreement",
+      "sort_order": 1,
+      "is_active": true,
+      "items": [
+        {"id": "fa3e0431-51b9-4ece-a946-67adbe6a4e22", "name": "合同扫描件", "description": "合同扫描件PDF", "expected_type": "pdf", "sort_order": 1, "is_active": true}
+      ],
+      "created_at": "2026-07-03T17:20:04.226854"
+    }
+  ]
+}
+```
+
+HTTP 状态码：200
+
+关键字段：
+- `items[].items`（array）：分类下的子项列表
+- `contract_type`（string）：合同类型 compute_leasing / satellite_data / compute_service
+
+### POST /api/system/attachment-categories
+
+请求：
+```json
+{"contract_type": "satellite_data", "name": "合同协议", "code": "contract_agreement", "sort_order": 1}
+```
+
+HTTP 状态码：201
+
+### PUT /api/system/attachment-categories/{id}
+
+### DELETE /api/system/attachment-categories/{id}
+
+软删除（设 is_active=false）。
+
+### PUT /api/system/attachment-categories/{id}/reorder
+
+请求：
+```json
+{"sort_order": 2}
+```
+
+### POST /api/system/attachment-categories/{category_id}/items
+
+请求：
+```json
+{"name": "数据交付报告", "description": "...", "expected_type": "pdf", "sort_order": 1}
+```
+
+HTTP 状态码：201
+
+### PUT /api/system/attachment-items/{item_id}
+
+### DELETE /api/system/attachment-items/{item_id}
+
+软删除（设 is_active=false）。
+
+### PUT /api/system/attachment-items/{item_id}/reorder
+
+请求：
+```json
+{"sort_order": 2}
+```
+
+---
+
+## 附件文件 (Attachment)
+
+### GET /api/attachments?contract_type=satellite_data&contract_id={id}
+
+按合同获取附件列表（分类+子项结构）。
+
+请求：`GET /api/attachments?contract_type=satellite_data&contract_id=55ddb5f9-343f-40bc-bb05-65887d53ac2d`
+
+响应：
+```json
+{
+  "categories": [
+    {
+      "category_id": "e586b648-0c8c-479f-baa0-9457024fdfc9",
+      "category_name": "合同协议",
+      "items": [
+        {
+          "item_id": "dede9939-dff2-4eea-a057-65877bd1445e",
+          "item_name": "合同扫描件",
+          "expected_type": "pdf",
+          "files": [],
+          "file_count": 0,
+          "confirmed": false,
+          "confirmed_at": null
+        }
+      ]
+    }
+  ]
+}
+```
+
+HTTP 状态码：200
+
+关键字段：
+- `categories[].items[].files`（array）：文件列表，每个文件含 id/filename/file_size/mime_type/uploaded_at
+- `categories[].items[].file_count`（int）：文件数量
+- `categories[].items[].confirmed`（bool）：是否已确认完成
+
+### POST /api/attachments/upload?contract_type={type}&contract_id={id}&item_id={id}
+
+multipart/form-data，字段 `files`（可多文件上传）。
+
+响应：
+```json
+{"attachments": [{"id": "uuid", "filename": "xxx.pdf", "file_size": 2048000, "mime_type": "application/pdf", "uploaded_at": "..."}]}
+```
+
+HTTP 状态码：200
+
+关键字段：
+- `files`（file, required）：上传文件，支持多文件（前端字段名 `files`）
+- 文件大小限制：50MB
+- 存储路径：`/app/uploads/{contract_type}/{contract_id}/{item_id}/{uuid}.ext`
+
+### GET /api/attachments/{id}/download
+
+返回文件流，`Content-Disposition` 使用 RFC 5987 编码（`filename*=UTF-8''...`），支持中文文件名。
+
+响应头：
+- `Content-Type`: 文件的 MIME 类型（如 `application/pdf`），未知类型回退为 `application/octet-stream`
+- `Content-Disposition`: `attachment; filename="{ascii_fallback}"; filename*=UTF-8''{url_encoded_filename}`
+
+错误码：
+- `404`：文件不存在或已被删除
+
+### DELETE /api/attachments/{id}
+
+响应：
+```json
+{"detail": "文件已删除"}
+```
+
+HTTP 状态码：200
+
+---
+
+## 附件完成确认
+
+### GET /api/attachments/status/summary?contract_type={type}&contract_id={id}
+
+返回该合同所有分类的完成汇总。
+
+请求：`GET /api/attachments/status/summary?contract_type=satellite_data&contract_id=55ddb5f9-343f-40bc-bb05-65887d53ac2d`
+
+响应：
+```json
+{
+  "total_items": 4,
+  "confirmed_items": 0,
+  "all_confirmed": false,
+  "items": {
+    "contract_agreement": {"confirmed": false, "file_count": 0},
+    "acceptance_material": {"confirmed": false, "file_count": 0},
+    "process_material": {"confirmed": false, "file_count": 0}
+  }
+}
+```
+
+HTTP 状态码：200
+
+关键字段：
+- `total_items`（int）：总子项数
+- `confirmed_items`（int）：已确认子项数
+- `all_confirmed`（bool）：是否全部确认
+- `items`（dict）：按分类 code 分组的确认状态
+
+### POST /api/attachments/status/{item_id}/confirm
+
+请求：
+```json
+{"contract_type": "satellite_data", "contract_id": "55ddb5f9-343f-40bc-bb05-65887d53ac2d"}
+```
+
+响应：
+```json
+{"confirmed": true}
+```
+
+HTTP 状态码：200
+
+### POST /api/attachments/status/{item_id}/unconfirm
+
+同上，响应 `{"confirmed": false}`。

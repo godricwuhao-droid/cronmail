@@ -1,0 +1,156 @@
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - generic [ref=e6]: 盖亚纪元
+    - menubar [ref=e7]:
+      - menuitem "运营概览" [ref=e8] [cursor=pointer]:
+        - img [ref=e10]
+        - generic [ref=e14]: 运营概览
+      - menuitem "客户管理" [ref=e15] [cursor=pointer]:
+        - img [ref=e17]
+        - generic [ref=e19]: 客户管理
+      - menuitem "合同管理" [ref=e20]:
+        - generic [ref=e21] [cursor=pointer]:
+          - img [ref=e23]
+          - generic [ref=e26]: 合同管理
+          - img [ref=e28]
+      - menuitem "设备管理" [ref=e30] [cursor=pointer]:
+        - img [ref=e32]
+        - generic [ref=e34]: 设备管理
+      - menuitem "邮件模板" [ref=e35] [cursor=pointer]:
+        - img [ref=e37]
+        - generic [ref=e40]: 邮件模板
+      - menuitem "发送日志" [ref=e41] [cursor=pointer]:
+        - img [ref=e43]
+        - generic [ref=e45]: 发送日志
+      - menuitem "系统配置" [ref=e46]:
+        - generic [ref=e47] [cursor=pointer]:
+          - img [ref=e49]
+          - generic [ref=e51]: 系统配置
+          - img [ref=e53]
+  - generic [ref=e55]:
+    - generic [ref=e56]:
+      - generic [ref=e57]:
+        - button [ref=e58] [cursor=pointer]:
+          - img [ref=e60]
+        - navigation "Breadcrumb" [ref=e63]:
+          - generic [ref=e64]:
+            - link "首页" [ref=e65]
+            - text: /
+          - generic [ref=e66]:
+            - link "合同管理" [ref=e67]
+            - text: /
+          - link "编辑合同" [ref=e69]
+      - generic [ref=e70]:
+        - generic:
+          - generic:
+            - generic:
+              - img
+            - text: 系统运行中
+    - main [ref=e71]:
+      - generic [ref=e73]:
+        - generic [ref=e75]:
+          - generic [ref=e76]: 编辑合同
+          - button "返回" [ref=e77] [cursor=pointer]:
+            - generic [ref=e78]: 返回
+        - generic [ref=e79]:
+          - generic [ref=e80]:
+            - generic [ref=e81]:
+              - img [ref=e83]
+              - text: 基础信息
+            - generic [ref=e85]:
+              - generic [ref=e86]: "* 客户"
+              - generic [ref=e89]:
+                - generic:
+                  - combobox "* 客户" [disabled] [ref=e91]
+                  - generic [ref=e92]: 请选择客户
+                - generic:
+                  - generic:
+                    - img
+            - generic [ref=e93]:
+              - generic [ref=e94]: "* 合同名称"
+              - generic [ref=e97]:
+                - textbox "* 合同名称" [ref=e98]:
+                  - /placeholder: 如 主合同-2026
+                - generic [ref=e101]: 0 / 255
+            - generic [ref=e102]:
+              - generic [ref=e103]: 合同编号
+              - generic [ref=e106]:
+                - textbox "合同编号" [ref=e107]:
+                  - /placeholder: 可选，如 CT-2026-001
+                - generic [ref=e110]: 0 / 100
+            - generic [ref=e111]:
+              - img [ref=e113]
+              - text: 服务周期
+            - generic [ref=e115]:
+              - generic [ref=e116]: "* 开始日期"
+              - generic [ref=e119]:
+                - img [ref=e122]
+                - combobox "* 开始日期" [ref=e124]
+            - generic [ref=e125]:
+              - generic [ref=e126]: "* 到期日期"
+              - generic [ref=e129]:
+                - img [ref=e132]
+                - combobox "* 到期日期" [ref=e134]
+            - generic [ref=e135]:
+              - generic [ref=e136]: 计费方式
+              - radiogroup "计费方式" [ref=e138]:
+                - generic [ref=e139]:
+                  - radio "按月" [checked] [ref=e140]
+                  - generic [ref=e141] [cursor=pointer]: 按月
+                - generic [ref=e142]:
+                  - radio "按季" [ref=e143]
+                  - generic [ref=e144] [cursor=pointer]: 按季
+                - generic [ref=e145]:
+                  - radio "按年" [ref=e146]
+                  - generic [ref=e147] [cursor=pointer]: 按年
+            - generic [ref=e148]:
+              - generic [ref=e149]: 设备列表
+              - generic [ref=e150]:
+                - generic [ref=e151]:
+                  - img [ref=e153]
+                  - text: 关联设备
+                - generic [ref=e156]:
+                  - generic [ref=e157]:
+                    - generic [ref=e158]: 已选 0 台
+                    - generic [ref=e159]:
+                      - button "关联设备" [disabled] [ref=e160]:
+                        - img [ref=e162]
+                        - generic [ref=e165]: 关联设备
+                      - button "取消关联 (0)" [disabled] [ref=e166]:
+                        - generic [ref=e167]: 取消关联 (0)
+                  - generic [ref=e169]:
+                    - table [ref=e171]:
+                      - rowgroup [ref=e176]:
+                        - row "Select all rows 机器型号 机架位置" [ref=e177]:
+                          - columnheader "Select all rows" [ref=e178]:
+                            - generic "Select all rows" [ref=e180]:
+                              - generic [ref=e181] [cursor=pointer]:
+                                - checkbox "设备列表 Select all rows" [disabled]
+                          - columnheader "机器型号" [ref=e183]:
+                            - generic [ref=e184]: 机器型号
+                          - columnheader "机架位置" [ref=e185]:
+                            - generic [ref=e186]: 机架位置
+                    - generic [ref=e190]:
+                      - table:
+                        - rowgroup
+                      - generic [ref=e192]: 尚未关联设备
+            - generic [ref=e194]:
+              - img [ref=e196]
+              - text: 关联联系人
+            - group "收件人 (TO)" [ref=e198]:
+              - generic [ref=e199]: 收件人 (TO)
+              - generic [ref=e201]: 请先选择客户
+            - group "抄送人 (CC)" [ref=e202]:
+              - generic [ref=e203]: 抄送人 (CC)
+              - generic [ref=e205]: 请先选择客户
+            - generic [ref=e206]:
+              - generic [ref=e207]: 备注
+              - generic [ref=e209]:
+                - textbox "备注" [ref=e210]:
+                  - /placeholder: 可选
+                - generic [ref=e211]: 0 / 500
+          - generic [ref=e212]:
+            - button "取消" [ref=e213] [cursor=pointer]:
+              - generic [ref=e214]: 取消
+            - button "保存" [ref=e215] [cursor=pointer]:
+              - generic [ref=e216]: 保存

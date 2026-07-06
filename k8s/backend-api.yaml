@@ -18,6 +18,12 @@ spec:
         app: cronmail-backend
         component: api
     spec:
+      # Pod 级别安全上下文（确保挂载卷的组归属正确）
+      securityContext:
+        fsGroup: 1000
+        runAsGroup: 1000
+        runAsUser: 1000
+        runAsNonRoot: true
       containers:
         - name: backend
           image: harbor.xhwltech.com/xhcloud/cronmail-backend:latest
@@ -68,6 +74,14 @@ spec:
             capabilities:
               drop:
                 - ALL
+          volumeMounts:
+            - name: attachments
+              mountPath: /app/uploads
+              readOnly: false
+      volumes:
+        - name: attachments
+          persistentVolumeClaim:
+            claimName: cronmail-attachments-pvc
       restartPolicy: Always
 ---
 apiVersion: v1

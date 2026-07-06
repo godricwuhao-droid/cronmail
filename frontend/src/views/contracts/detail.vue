@@ -37,6 +37,10 @@ import {
   CONTRACT_STATUS_LABEL,
 } from '@/lib/contract'
 import { safeStatusLabel as rentalStatusLabel, safeStatusTagType as rentalStatusTagType } from '@/lib/rental'
+import {
+  getAttachmentSummary,
+  type AttachmentSummary,
+} from '@/api/modules/attachment'
 
 const route = useRoute()
 const router = useRouter()
@@ -75,11 +79,42 @@ async function fetchRecord() {
   try {
     const res = await getContract(route.params.id as string)
     record.value = res
+    // 加载附件状态
+    try {
+      attachmentSummary.value = await getAttachmentSummary('compute_leasing', res.id)
+    } catch {
+      attachmentSummary.value = null
+    }
   } catch {
     // 错误已统一处理
   } finally {
     loading.value = false
   }
+}
+
+// ============================================================
+// 附件状态
+// ============================================================
+const attachmentSummary = ref<AttachmentSummary | null>(null)
+
+function goAttachments() {
+  router.push({ name: 'ComputeLeasingAttachments', params: { id: route.params.id as string } })
+}
+
+function attStatusTagType(confirmed: boolean, fileCount: number): 'success' | 'danger' | 'info' {
+  if (fileCount === 0) return 'info'
+  return confirmed ? 'success' : 'danger'
+}
+
+function attStatusText(confirmed: boolean, fileCount: number): string {
+  if (fileCount === 0) return '未上传'
+  return confirmed ? '已确认' : '未确认'
+}
+
+const attCategoryLabels: Record<string, string> = {
+  contract_agreement: '合同协议',
+  delivery_material: '交付材料',
+  process_material: '过程材料',
 }
 
 // ============================================================
@@ -89,7 +124,7 @@ function goBack() {
   router.push({ name: 'ContractList' })
 }
 function handleEdit() {
-  router.push(`/contracts/${route.params.id}/edit`)
+  router.push({ name: 'ContractEdit', params: { id: route.params.id as string } })
 }
 async function handleDelete() {
   if (!record.value?.id) return
@@ -110,7 +145,7 @@ async function handleDelete() {
   try {
     await deleteContract(record.value.id)
     ElMessage.success('合同已删除')
-    router.replace('/contracts')
+    router.replace({ name: 'ContractList' })
   } catch {
     // 错误已统一处理
   } finally {
@@ -350,6 +385,9 @@ onMounted(() => {
           <el-button type="danger" :disabled="acting" @click="handleReclaim">标记回收</el-button>
         </template>
         <el-button @click="scrollToChangeLogs">变更记录</el-button>
+        <el-button type="primary" @click="goAttachments">
+          <el-icon style="margin-right:4px"><Paperclip /></el-icon>附件管理
+        </el-button>
       </div>
     </div>
 
@@ -523,6 +561,65 @@ onMounted(() => {
       </template>
     </el-dialog>
 
+    <!-- 附件状态 -->
+    <section class="detail-section">
+      <div class="section-toolbar">
+        <h3 class="section-title-inline">
+          <el-icon><Paperclip /></el-icon>
+          附件状态
+        </h3>
+        <div>
+          <el-button type="primary" size="small" @click="goAttachments">
+            <el-icon style="margin-right:4px"><Paperclip /></el-icon>附件管理
+          </el-button>
+        </div>
+      </div>
+      <div class="attachment-status-grid">
+        <el-card
+          v-for="(label, code) in attCategoryLabels"
+          :key="code"
+          shadow="hover"
+          class="status-card"
+        >
+          <template #header>
+            <div class="status-card-header">
+              <span>{{ label }}</span>
+              <el-tag
+                :type="attStatusTagType(
+                  attachmentSummary?.items?.[code]?.confirmed ?? false,
+                  attachmentSummary?.items?.[code]?.file_count ?? 0
+                )"
+                size="small"
+              >
+                {{ attStatusText(
+                  attachmentSummary?.items?.[code]?.confirmed ?? false,
+                  attachmentSummary?.items?.[code]?.file_count ?? 0
+                ) }}
+              </el-tag>
+            </div>
+          </template>
+          <div class="status-card-body">
+            <span class="status-stat">
+              <strong>{{ attachmentSummary?.items?.[code]?.file_count ?? 0 }}</strong> 个文件
+            </span>
+          </div>
+        </el-card>
+      </div>
+      <div style="margin-top: 12px;">
+        <span class="muted">
+          总计：{{ attachmentSummary?.confirmed_items ?? 0 }} / {{ attachmentSummary?.total_items ?? 0 }} 项已确认
+        </span>
+        <el-tag
+          v-if="attachmentSummary?.all_confirmed"
+          type="success"
+          size="small"
+          style="margin-left: 8px;"
+        >
+          全部完成
+        </el-tag>
+      </div>
+    </section>
+
     <!-- 变更记录（页面底部） -->
     <section id="changelog-section" class="detail-section">
       <div class="section-header">
@@ -644,5 +741,28 @@ onMounted(() => {
   font-size: 16px;
   font-weight: 600;
   color: var(--primary-color);
+}
+
+/* 附件状态卡片 */
+.attachment-status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+}
+.status-card {
+  border-radius: 8px;
+}
+.status-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 600;
+}
+.status-card-body {
+  padding: 8px 0;
+}
+.status-stat {
+  font-size: 14px;
+  color: var(--text-secondary);
 }
 </style>

@@ -18,39 +18,50 @@ Accepted
 | 未来拆分 | ✅ 模块边界即微服务边界 | N/A |
 | 适用场景 | 中小团队、业务初期 | 大团队、高并发 |
 
-### 模块划分（5 个限界上下文）
+### 模块划分（8 个限界上下文）
 
 ```
 backend/src/
 ├── customer/       # 客户 & 收件人管理
-├── rental/         # 租赁记录管理（核心聚合）
+├── contract/       # 合同管理（聚合根，ADR-010）
+├── rental/         # 设备管理（关联合同）
 ├── template/       # 邮件模板管理（Jinja2 模板编辑+预览）
 ├── mail/           # 邮件发送（SMTP + 发送日志）
 ├── scheduler/      # 定时任务（Celery Beat 到期扫描）
-├── system/         # 系统配置（SMTP配置 + 内部同事管理）
+├── system/         # 系统配置（SMTP配置 + 内部同事管理 + 钉钉通知 + 调度配置）
 └── core/           # 基础设施（数据库、安全、配置）
 ```
 
 ### 依赖方向（单向依赖原则）
 
 ```
-scheduler → rental + template + mail  （定时引擎协调各模块）
-customer ← → （独立，被 rental 引用）
-rental → customer + mail + template    （租赁记录聚合根）
-mail → template                       （发送时引用模板）
-system → （独立，被 mail 引用 SMTP 配置）
+scheduler → contract + mail + template    （定时引擎按合同扫描）
+rental → customer + contract              （设备关联客户和合同）
+contract → customer + rental              （合同聚合根，关联客户和设备）
+mail → template + rental (read models)    （发送时引用模板和设备只读）
+system → core + scheduler (触发调试任务)  （系统配置 + 手动触发定时任务）
 core → （被所有模块依赖）
 ```
 
 ### 模块间通信
 
 - **同步调用**：通过 Service 层直接调用（进程内，无网络开销）
-- **事件通知**：Python blinker Signal（详见 ADR-005）
-- 严格禁止模块间直接访问对方的 Model（跨模块只通过 Service 接口）
+- **事件通知**：Python blinker Signal（用于日志/审计，详见 ADR-005）
+- 跨模块 Model 引用：mail 和 contract 模块对 rental.models 的引用限于只读查询，不修改数据
 
-### 核心聚合：RentalRecord
+### 核心聚合：Contract（多种类型）
 
-聚合根包含租赁记录的所有属性（详见 ADR-006 数据模型），关联 Customer 和 Contact 通过 ID 引用而非对象嵌套。
+合同按类型分为独立表（详见 ADR-011）：
+
+| 类型 | 表名 | 邮件流程 | 说明 |
+|------|------|---------|------|
+| 算力租赁 | `contract` | ✅ 有 | 设备关联 + 邮件发送 + 状态流转 |
+| 卫星数据 | `satellite_data_contract` | ❌ 纯归档 | 独立元数据字段 |
+| 算力服务 | `compute_service_contract` | ❌ 纯归档 | 独立元数据字段 |
+
+附件系统（跨类型通用）：分类 → 子项 → 文件，管理员运行时管理（详见 ADR-011）。
+
+邮件发送粒度按算力租赁合同维度，一个合同一封邮件，包含该合同下所有关联设备。
 
 ## Consequences
 
@@ -58,11 +69,13 @@ core → （被所有模块依赖）
 - 单进程调试、单数据库事务，开发体验好
 - 模块目录隔离，新人容易理解项目结构
 - 未来如需拆微服务，模块边界可直接映射为服务边界
+- Contract 聚合根使邮件发送边界从「按日期匹配」变为「按合同关联」，一封邮件=一个合同
 
 ### 变得困难
 - 模块间依赖需要人为约束（靠 Code Review 而非编译器）
 - 所有模块共享数据库，某模块的慢查询可能影响全局
 - 无法独立扩缩容某个模块
+- rental→scheduler 和 system→scheduler 存在反向依赖（手动触发定时任务），需注意循环引用风险
 
 ### 可逆性等级：高
 - 模块边界清晰，拆分为微服务时只需将模块目录独立部署 + 内部调用改为 HTTP/RPC

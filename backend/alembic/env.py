@@ -13,12 +13,16 @@ from alembic import context
 
 # 导入所有模型，确保 Base.metadata 包含所有表
 from src.core.database import Base
-import src.customer.models    # noqa: E402, F401
-import src.rental.models      # noqa: E402, F401
-import src.template.models    # noqa: E402, F401
-import src.mail.models        # noqa: E402, F401
-import src.system.models       # noqa: E402, F401
-import src.scheduler.models   # noqa: E402, F401
+import src.customer.models        # noqa: E402, F401
+import src.rental.models          # noqa: E402, F401
+import src.template.models        # noqa: E402, F401
+import src.mail.models            # noqa: E402, F401
+import src.system.models           # noqa: E402, F401
+import src.scheduler.models       # noqa: E402, F401
+import src.attachment.models      # noqa: E402, F401
+import src.satellite.models       # noqa: E402, F401
+import src.compute_service.models # noqa: E402, F401
+import src.contract.models        # noqa: E402, F401
 
 # Alembic Config 对象
 config = context.config

@@ -16,6 +16,7 @@ import {
   createContract,
   getContract,
   linkContractRentals,
+  unlinkContractRentals,
   updateContract,
   type ContractBillingModel,
   type ContractCreatePayload,
@@ -111,68 +112,139 @@ async function loadColleagues() {
 }
 
 // 切换客户时：清空已选设备（设备只属于一个客户） + 重载联系人
+// 使用 _loadingDetail 标志防止 loadDetail 触发本 watch
+const _loadingDetail = ref(false)
+
 watch(
   () => form.customer_id,
-  (newId, oldId) => {
+  async (newId, oldId) => {
+    if (_loadingDetail.value) return
     if (newId !== oldId) {
       form.rental_ids = []
+      linkedRentalDetails.value = []
       loadCustomerContacts(newId)
     } else {
       loadCustomerContacts(newId)
     }
+    await loadAvailableRentals()
+    buildLinkedDetails()
   },
 )
 
 // ============================================================
-// 设备选择（两步加载：已关联 + 未关联）
+// 关联设备（参照 detail.vue 风格）
 // ============================================================
-const rentalOptions = ref<RentalListItem[]>([])
+const linkDialogVisible = ref(false)
+const linkForm = reactive<{ selected: string[] }>({ selected: [] })
+const linkSubmitting = ref(false)
+const availableRentals = ref<RentalListItem[]>([])
 
-async function loadCustomerRentals(customerId: string) {
-  // 1. 收集当前合同已关联的设备 id（编辑模式）
-  let linkedIds: string[] = []
-  if (isEdit.value && detail.value) {
-    linkedIds = (detail.value.rentals || []).map((r) => r.id)
-  }
-
-  // 2. 加载所有未关联合同的设备
-  try {
-    const res = await getRentals({ unlinked_only: true, page: 1, page_size: 200 })
-    rentalOptions.value = res.items
-  } catch {
-    rentalOptions.value = []
-  }
-
-  // 3. 已关联设备也加入选项（如果不在返回结果中）
-  if (linkedIds.length > 0 && detail.value) {
-    for (const r of detail.value.rentals || []) {
-      if (!rentalOptions.value.find((opt) => opt.id === r.id)) {
-        rentalOptions.value.push({
-          id: r.id,
-          customer: { id: customerId, name: '' },
-          machine_model: r.machine_model,
-          rack_location: r.rack_location || null,
-          private_ip: r.private_ip || '',
-          start_date: '',
-          end_date: '',
-          status: '空闲中' as const,
-          created_at: '',
-        })
-      }
-    }
-  }
-}
-
-watch(
-  () => form.customer_id,
-  (newId) => {
-    loadCustomerRentals(newId)
-  },
-)
+/** 已关联设备的详情（表格展示用，直接从 detail 或表单推导） */
+const linkedRentalDetails = ref<(RentalListItem & { isNew?: boolean })[]>([])
 
 function rentalLabel(row: RentalListItem) {
   const rack = row.rack_location ? ` · ${row.rack_location}` : ' · -'
   return `${row.machine_model}${rack}`
+}
+
+/** 弹窗「可选设备」：未关联的设备（排除 form.rental_ids） */
+const candidateRentals = computed<RentalListItem[]>(() => {
+  const selected = new Set(form.rental_ids)
+  return availableRentals.value.filter((r) => !selected.has(r.id))
+})
+
+/** 从 detail 重建设备列表 */
+function buildLinkedDetails() {
+  if (!detail.value) {
+    linkedRentalDetails.value = []
+    return
+  }
+  const ids = new Set(form.rental_ids)
+  const result: typeof linkedRentalDetails.value = []
+  // 先加入已关联的旧设备
+  for (const r of detail.value.rentals || []) {
+    if (ids.has(r.id)) {
+      result.push({
+        id: r.id,
+        customer: { id: form.customer_id, name: '' },
+        machine_model: r.machine_model,
+        rack_location: r.rack_location || null,
+        private_ip: r.private_ip || '',
+        start_date: '',
+        end_date: '',
+        status: '空闲中' as const,
+        created_at: '',
+      })
+      ids.delete(r.id)
+    }
+  }
+  // 再加入新选的设备（从 availableRentals 匹配）
+  for (const id of ids) {
+    const found = availableRentals.value.find((r) => r.id === id)
+    if (found) {
+      result.push({ ...found, isNew: true })
+    }
+  }
+  linkedRentalDetails.value = result
+}
+
+/** 加载可选设备（仅未关联的，不注入已关联） */
+async function loadAvailableRentals() {
+  try {
+    const res = await getRentals({
+      unlinked_only: true,
+      page: 1,
+      page_size: 200,
+    })
+    availableRentals.value = res.items
+  } catch {
+    availableRentals.value = []
+  }
+}
+
+async function openLinkDialog() {
+  linkForm.selected = []
+  if (availableRentals.value.length === 0) {
+    await loadAvailableRentals()
+  }
+  linkDialogVisible.value = true
+}
+
+async function handleConfirmLink() {
+  if (linkForm.selected.length === 0) {
+    ElMessage.warning('请至少选择一台设备')
+    return
+  }
+  linkSubmitting.value = true
+  try {
+    const newSet = new Set(form.rental_ids)
+    linkForm.selected.forEach((id) => newSet.add(id))
+    form.rental_ids = [...newSet]
+    ElMessage.success(`已选择 ${linkForm.selected.length} 台设备`)
+    linkDialogVisible.value = false
+    buildLinkedDetails()
+  } finally {
+    linkSubmitting.value = false
+  }
+}
+
+// 勾选取消关联
+const selectedRentalIds = ref<string[]>([])
+
+function handleRentalSelect(selection: any[]) {
+  selectedRentalIds.value = selection.map((r: any) => r.id)
+}
+
+async function handleUnlinkRental() {
+  if (selectedRentalIds.value.length === 0) {
+    ElMessage.warning('请先勾选要取消关联的设备')
+    return
+  }
+  const ids = selectedRentalIds.value
+  form.rental_ids = form.rental_ids.filter((id) => !ids.includes(id))
+  selectedRentalIds.value = []
+  buildLinkedDetails()
+  ElMessage.success(`已取消选择 ${ids.length} 台设备`)
 }
 
 // ============================================================
@@ -210,6 +282,7 @@ const loadingDetail = ref(false)
 
 async function loadDetail() {
   if (!contractId.value) return
+  _loadingDetail.value = true
   loadingDetail.value = true
   try {
     const data = await getContract(contractId.value)
@@ -221,23 +294,22 @@ async function loadDetail() {
     form.end_date = data.end_date
     form.billing_model = (data.billing_model as ContractBillingModel) || 'monthly'
     form.remark = data.remark ?? ''
-    // 已关联设备 id 列表
     form.rental_ids = (data.rentals || []).map((r) => r.id)
-    // 已关联联系人
     form.contacts = (data.contacts || []).map((c) => ({
       contact_id: c.contact_id,
       recipient_type: c.recipient_type,
     }))
 
-    // 编辑时把关联客户/同事联系人列表都拉好（同时回填已选）
     await Promise.all([
       loadCustomerContacts(data.customer_id),
-      loadCustomerRentals(data.customer_id),
+      loadAvailableRentals(),
     ])
+    buildLinkedDetails()
   } catch {
     // 错误已统一处理
   } finally {
     loadingDetail.value = false
+    _loadingDetail.value = false
   }
 }
 
@@ -302,11 +374,16 @@ async function handleSubmit() {
   try {
     if (isEdit.value) {
       await updateContract(contractId.value, buildUpdatePayload())
-      // 同步关联设备：已选但未关联的 → 关联
+      // 同步关联设备
       const existingIds = new Set((detail.value?.rentals || []).map(r => r.id))
+      const currentIds = new Set(form.rental_ids)
       const toLink = form.rental_ids.filter(id => !existingIds.has(id))
+      const toUnlink = [...existingIds].filter(id => !currentIds.has(id))
       if (toLink.length > 0) {
         await linkContractRentals(contractId.value, toLink)
+      }
+      if (toUnlink.length > 0) {
+        await unlinkContractRentals(contractId.value, toUnlink)
       }
       ElMessage.success('保存成功')
       router.replace({ name: 'ContractDetail', params: { id: contractId.value } })
@@ -425,32 +502,84 @@ onMounted(async () => {
           <el-icon><Connection /></el-icon>
           关联设备
         </div>
-        <el-form-item label="设备列表">
-          <div v-if="rentalOptions.length === 0" class="hint">
-            暂无可关联设备，请先到设备管理创建设备
+        <div class="rental-section">
+          <div class="rental-toolbar">
+            <span class="rental-count">已选 {{ form.rental_ids.length }} 台</span>
+            <div class="rental-actions">
+              <el-button
+                type="primary"
+                :icon="Connection"
+                :disabled="!form.customer_id"
+                @click="openLinkDialog"
+              >关联设备</el-button>
+              <el-button
+                type="danger"
+                plain
+                :disabled="selectedRentalIds.length === 0"
+                @click="handleUnlinkRental"
+              >
+                取消关联 ({{ selectedRentalIds.length }})
+              </el-button>
+            </div>
+          </div>
+          <el-table
+            :data="linkedRentalDetails"
+            size="small"
+            stripe
+            border
+            empty-text="尚未关联设备"
+            style="width: 100%;"
+            @selection-change="handleRentalSelect"
+          >
+            <el-table-column type="selection" width="50" />
+            <el-table-column prop="machine_model" label="机器型号" min-width="180" show-overflow-tooltip />
+            <el-table-column label="机架位置" min-width="140">
+              <template #default="{ row }">
+                {{ row.rack_location || '-' }}
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
+
+        <!-- 关联设备弹窗 -->
+        <el-dialog
+          v-model="linkDialogVisible"
+          title="关联设备到合同"
+          width="560px"
+          :close-on-click-modal="false"
+        >
+          <div v-if="candidateRentals.length === 0" class="hint">
+            暂无可关联的设备（所有设备已关联到此合同或无可用设备）
           </div>
           <el-select
-            v-else-if="rentalOptions.length > 0"
-            v-model="form.rental_ids"
+            v-else
+            v-model="linkForm.selected"
             multiple
+            filterable
             collapse-tags
             collapse-tags-tooltip
-            filterable
-            clearable
-            placeholder="选择要关联到合同的设备"
+            placeholder="选择要关联的设备"
             style="width: 100%"
           >
             <el-option
-              v-for="r in rentalOptions"
+              v-for="r in candidateRentals"
               :key="r.id"
               :label="rentalLabel(r)"
               :value="r.id"
             />
           </el-select>
-          <div class="hint" style="margin-top: 4px;">
-            {{ form.rental_ids.length ? `已选 ${form.rental_ids.length} 台` : '未选' }}
-          </div>
-        </el-form-item>
+          <template #footer>
+            <el-button @click="linkDialogVisible = false">取消</el-button>
+            <el-button
+              type="primary"
+              :loading="linkSubmitting"
+              :disabled="linkForm.selected.length === 0"
+              @click="handleConfirmLink"
+            >
+              关联（{{ linkForm.selected.length }}）
+            </el-button>
+          </template>
+        </el-dialog>
 
         <!-- 关联联系人 -->
         <div class="section-title">
@@ -560,5 +689,24 @@ onMounted(async () => {
 }
 .spacer {
   flex: 1;
+}
+.rental-section {
+  margin-bottom: 12px;
+}
+.rental-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.rental-count {
+  font-size: 13px;
+  color: #909399;
+}
+.rental-actions {
+  display: flex;
+  gap: 8px;
 }
 </style>

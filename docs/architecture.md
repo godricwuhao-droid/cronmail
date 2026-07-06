@@ -43,6 +43,11 @@ CronMail 是一个面向裸金属服务器租赁业务的自动邮件发送平�
                                        ┌───────────▼─────────┐
                                        │   企业 SMTP 服务器    │
                                        │  (自建邮件服务器)     │
+                                       └────────────────────┘
+                                                   │
+                                       ┌───────────▼─────────┐
+                                       │   钉钉 Webhook       │
+                                       │  (邮件失败告警)      │
                                        └─────────────────────┘
 ```
 
@@ -58,11 +63,13 @@ CronMail 是一个面向裸金属服务器租赁业务的自动邮件发送平�
 │  │  Frontend (Vue 3) │◄───────────────►│  Backend (FastAPI) │ │
 │  │                   │                  │                    │ │
 │  │  • 仪表盘         │                  │  • customer/       │ │
-│  │  • 客户管理       │                  │  • rental/         │ │
-│  │  • 租赁管理       │                  │  • template/       │ │
+│  │  • 客户管理       │                  │  • contract/       │ │
+│  │  • 合同管理       │                  │  • rental/         │ │
+│  │  • 设备管理       │                  │  • template/       │ │
 │  │  • 模板编辑       │                  │  • mail/           │ │
 │  │  • 发送日志       │                  │  • system/         │ │
 │  │  • 系统配置       │                  │  • core/           │ │
+│  │  • 钉钉通知       │                  │                    │ │
 │  └───────────────────┘                  └────────┬───────────┘ │
 │                                                  │              │
 │  ┌───────────────────┐                  ┌────────▼───────────┐ │
@@ -70,10 +77,13 @@ CronMail 是一个面向裸金属服务器租赁业务的自动邮件发送平�
 │  │  (定时调度)        │─── 投递任务 ───►│  (异步执行)        │ │
 │  │                   │                  │                    │ │
 │  │  • 临期扫描 08:00 │                  │  • 发临期提醒邮件   │ │
-│  │  • 到期扫描 02:00 │                  │  • 发到期回收邮件   │ │
-│  └───────────────────┘                  └────────────────────┘ │
+│  │  • 到期提醒 08:00 │                  │  • 发到期提醒邮件   │ │
+│  │  • 回收执行 00:01 │                  │  • 执行回收+发通知  │ │
+│  └───────────────────┘                  │  • 手动邮件异步发送 │ │
+│                                          └────────────────────┘ │
 │                                                                 │
-│  进程内通信: blinker Signal (rental → mail 事件)                │
+│  进程内通信: blinker Signal (审计/日志)                         │
+│  手动发送: Celery 异步任务 send_manual_email                    │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -102,43 +112,101 @@ backend/src/{module}/
 Customer (客户)
   ├── id, name, code, status
   │
-  └── 1──N → Contact (联系人)
-       ├── id, name, email, phone, department
-       ├── customer_id (FK, NULL=内部同事)
-       └── is_active
+  ├── 1──N → Contact (联系人)
+  │    ├── id, name, email, phone, department
+  │    ├── customer_id (FK, NULL=内部同事)
+  │    └── is_active
+  │
+  │
+  ├── 1──N → Contract / 算力租赁合同 (contract 表)
+  │    ├── id, customer_id (FK → Customer)
+  │    ├── name, contract_no
+  │    ├── start_date, end_date, billing_model (monthly/quarterly/yearly)
+  │    ├── status(ENUM): active | expiring | expired | reclaimed
+  │    ├── history_rental_ids (JSON, 回收时快照)
+  │    ├── remark
+  │    │
+  │    ├── M──N → RentalRecord via contract_rental
+  │    │    (rental_id UNIQUE, 一设备一合同)
+  │    │
+  │    └── M──N → Contact via contract_contact
+  │         └── recipient_type(ENUM): 'to' | 'cc'
+  │
+  ├── 1──N → SatelliteDataContract / 卫星数据合同 (satellite_data_contract 表)
+  │    └── id, customer_id, name, contract_no, remark（纯归档，无邮件流程）
+  │
+  └── 1──N → ComputeServiceContract / 算力服务合同 (compute_service_contract 表)
+       └── id, customer_id, name, contract_no, remark（纯归档，无邮件流程）
 
-RentalRecord (租赁记录)
+AttachmentCategory (附件分类，运行时管理)
+  ├── id, contract_type, name, code, sort_order, is_active
+  │
+  └── 1──N → AttachmentItem (子项清单，运行时管理)
+       ├── id, name, description, expected_type (pdf/excel/image/any)
+       ├── sort_order, is_active
+       │
+       └── 1──N → Attachment (实际文件)
+            ├── id, contract_type, contract_id, item_id
+            ├── filename, file_path, file_size, mime_type
+            └── uploaded_at
+
+AttachmentStatus (附件子项完成确认)
+  ├── (contract_type, contract_id, item_id) 联合唯一
+  ├── file_count (冗余，方便列表展示)
+  ├── confirmed (管理员手动确认)
+  └── confirmed_at
+
+RentalRecord (设备)
   ├── id, customer_id (FK → Customer)
   ├── machine_model, cpu_model, memory_gb, gpu_info
   ├── system_disk_gb, data_disks(JSON)
   ├── os_version, bandwidth_mbps, rack_location
   ├── private_ip, public_ips(JSON), ssh_port
-  ├── root_username, root_password_enc (AES-256-GCM)
-  ├── billing_model(ENUM), start_date, end_date, auto_renew
-  ├── status(ENUM): PROVISIONED | EXPIRING | EXPIRED | RECLAIMED
+  ├── root_username, root_password_enc (Fernet)
+  ├── end_date (DEPRECATED ── 以合同日期为准)
+  ├── billing_model (DEPRECATED ── 以合同计费方式为准)
+  ├── status(ENUM): provisioned | expiring | expired | reclaimed
   └── remark
 
-rental_contact (中间表)
-  ├── rental_id (FK → RentalRecord)
+contract_rental (中间表)
+  ├── contract_id (FK → Contract)
+  ├── rental_id (FK → RentalRecord, UNIQUE)
+  └── added_at
+
+contract_contact (中间表)
+  ├── contract_id (FK → Contract)
   ├── contact_id (FK → Contact)
   └── recipient_type(ENUM): 'to' | 'cc'
 
+ChangeLog (变更日志)
+  ├── id, target_type (contract|rental), target_id
+  ├── action, field_name, old_value, new_value
+  ├── operator, created_at
+
 EmailTemplate (邮件模板)
-  ├── id, name, trigger_type(ENUM)
+  ├── id, name, trigger_type(ENUM: provision|expiry_warning|expiry_notice|reclaim)
   ├── subject_tpl (TEXT, Jinja2)
   ├── body_html (TEXT, Jinja2)
+  ├── signature_html (TEXT, 签名区)
   ├── variables_desc(JSON), is_active, version
 
 EmailLog (发送日志)
   ├── id, rental_id(FK), template_id(FK)
-  ├── trigger_type, recipient, subject, body
+  ├── trigger_type, recipient, recipient_type
+  ├── subject, body
   ├── status(ENUM): sent | failed
   ├── error_msg, sent_at
 
 SmtpConfig (SMTP配置)
   ├── id, host, port, username
-  ├── password_enc (AES加密)
-  ├── sender_name, sender_email, use_tls
+  ├── password_enc (Fernet加密)
+  ├── sender_name, sender_email, encryption (tls|starttls|none)
+
+SystemConfig (系统配置)
+  ├── key, value, description
+  ├── 通知调度时间: check-expiring-rentals, check-expired-rentals, check-reclaim-expired
+  ├── 临期提醒天数: expiry_warning_days (如 "7,3")
+  └── 钉钉通知: dingtalk_webhook, dingtalk_secret
 ```
 
 ---
@@ -150,73 +218,88 @@ SmtpConfig (SMTP配置)
                        │
                        ▼
                  ┌──────────┐
-                 │ PROVISIONED│ ←── 使用中
+                 │ active    │ ←── 使用中
                  └─────┬────┘
                        │
-         到期前 ≤3 天    │  Celery Beat 自动
+         到期前 ≤N 天    │  Celery Beat 自动（N 可配置）
                        ▼
                  ┌──────────┐
-                 │ EXPIRING  │ ←── 即将到期（每天发提醒）
+                 │ expiring  │ ←── 即将到期（每天发提醒）
                  └─────┬────┘
                        │
-           管理员续期    │  end_date 过去
+           管理员续期    │  end_date 到达当天
            (手动更新)    │
          ┌──────────────┼──────────────┐
          ▼              │              ▼
    ┌──────────┐         │       ┌───────────┐
-   │PROVISIONED│        │       │  EXPIRED   │
+   │  active   │         │       │  expired   │ ←── 到期（当天发提醒）
    └──────────┘         │       └─────┬─────┘
                          │            │
-                         │    Celery Beat 自动发回收邮件
+                         │    Celery Beat 次日 00:01
+                         │    执行回收 + 发回收通知
                          │            │
                          │            ▼
                          │     ┌────────────┐
-                         │     │ RECLAIMED  │ ←── 已回收
+                         │     │ reclaimed  │ ←── 已回收
                          │     └────────────┘
                          │
                          │  任何状态均可手动触发发送
-                         │  （通过详情页按钮）
+                         │  （通过详情页按钮，按合同维度）
 ```
+
+> 注意：状态流转以 **Contract（合同）** 为维度，而非设备。合同下所有设备共享同一状态。
 
 ---
 
 ## 关键流程
 
-> **所有邮件发送（手动 + 定时）统一走 `send_merged_email()` 合并发送管道。**
-> 单台设备场景下 `rentals` 为单元素数组，模板结构不受影响。
+> **所有邮件发送（手动 + 定时）统一走 `send_merged_email_by_contract()` 管道。**
+> 合同是邮件发送的聚合边界，一个合同一封邮件，包含该合同下所有关联设备。
 
 ### 流程 1：开通邮件发送
 
 ```
-管理员创建租赁记录（仅入库，不发邮件）
+管理员创建设备并关联合同（仅入库，不发邮件）
   → 点击「发送开通邮件」
   → POST /api/rentals/{id}/send-provision-email
-  → 查出同一客户、同一 start_date 的所有 provisioned 记录
-  → send_merged_email(records, customer, 'provision')
-  → 一封邮件含该客户同日开通的所有设备
-  → 写 EmailLog（每条记录一条）
-  → 状态不变（保持 PROVISIONED）
+  → 查设备关联合同 → 得合同下所有设备
+  → send_manual_email.delay(contract_id, "provision")
+  → Celery Worker: send_merged_email_by_contract(contract, 'provision')
+  → 一封邮件含该合同下所有设备
+  → 写 EmailLog（每条设备一条）
+  → 状态不变
 ```
 
 ### 流程 2：临期自动提醒
 
 ```
 Celery Beat 每天 08:00（或手动触发）
-  → 查询: end_date - today ≤ 3 AND end_date > today AND status IN (PROVISIONED, EXPIRING)
-  → 按 customer_id 分组
-  → 每组合并 → send_merged_email(group_records, customer, 'expiry_warning')
-  → 状态更新为 EXPIRING
+  → 按合同维度扫描: 合同 end_date - today ≤ warning_days 且 end_date > today
+  → 过滤 合同 status IN (active, expiring)
+  → send_merged_email_by_contract(contract, 'expiry_warning')
+  → 合同状态更新为 expiring
   → 写 EmailLog
 ```
 
-### 流程 3：到期回收
+### 流程 3：到期提醒
 
 ```
-Celery Beat 每天 02:00（或手动触发）
-  → 手动: 查同一客户、同一 end_date 的记录
-  → 定时: 查 end_date < today AND status IN (PROVISIONED, EXPIRING)，按 customer_id 分组
-  → 每组合并 → send_merged_email(group_records, customer, 'reclaim')
-  → 批量更新状态为 RECLAIMED
+Celery Beat 每天 08:00
+  → 按合同维度扫描: 合同 end_date = today
+  → 过滤 合同 status IN (active, expiring)
+  → send_merged_email_by_contract(contract, 'expiry_notice')
+  → 合同状态更新为 expired
+  → 写 EmailLog
+```
+
+### 流程 4：到期回收
+
+```
+Celery Beat 每天 00:01（或手动触发）
+  → 按合同维度扫描: 合同 end_date < today AND status = expired
+  → 快照设备 ID 到 history_rental_ids
+  → send_merged_email_by_contract(contract, 'reclaim')
+  → 合同+设备批量更新状态为 reclaimed
   → 写 EmailLog
 ```
 
@@ -225,19 +308,26 @@ Celery Beat 每天 02:00（或手动触发）
 ## 前端路由设计
 
 ```
-/                          → 仪表盘
+/                          → 重定向到 /dashboard
+/dashboard                 → 仪表盘（运营概览 + 待处理提醒）
 /customers                 → 客户列表
 /customers/:id/contacts    → 某客户的联系人管理
-/rentals                   → 租赁记录列表
-/rentals/create            → 创建租赁记录
-/rentals/:id               → 租赁详情（含发送按钮）
-/rentals/:id/edit          → 编辑租赁记录
+/contracts                 → 合同列表
+/contracts/create          → 新建合同
+/contracts/:id             → 合同详情（含设备关联 + 发送按钮）
+/contracts/:id/edit        → 编辑合同
+/rentals                   → 设备列表
+/rentals/create            → 创建设备（关联合同）
+/rentals/:id               → 设备详情（含发送按钮）
+/rentals/:id/edit          → 编辑设备
 /templates                 → 邮件模板列表
 /templates/create          → 创建模板
-/templates/:id/edit        → 编辑模板（Monaco + 预览）
+/templates/:id/edit        → 编辑模板（Monaco + 预览 + 测试发送）
 /logs                      → 发送日志列表
 /system/smtp               → SMTP 配置
 /system/colleagues         → 内部同事管理
+/system/config             → 系统配置（临期提醒天数 + 通知时间）
+/system/dingtalk           → 钉钉通知配置
 ```
 
 ---
@@ -269,8 +359,8 @@ SMTP_SENDER_NAME=CronMail
 | 进程 | 命令 | 说明 |
 |------|------|------|
 | API 服务 | `uvicorn main:app --host 0.0.0.0 --port 8000` | FastAPI 主服务 |
-| Celery Worker | `celery -A scheduler.tasks worker` | 异步任务执行 |
-| Celery Beat | `celery -A scheduler.tasks beat` | 定时调度器 |
+| Celery Worker | `celery -A src.scheduler.tasks worker` | 异步任务执行（含手动邮件发送） |
+| Celery Beat | `celery -A src.scheduler.tasks beat` | 定时调度器（3 个定时任务） |
 | 前端 | `nginx` 托管静态文件 | Vue 3 SPA 构建产物 |
 | MySQL | 由用户提供 | 业务数据存储 |
 | Redis | 由用户提供 | Celery Broker |

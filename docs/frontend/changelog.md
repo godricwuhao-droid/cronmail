@@ -7,6 +7,985 @@
 > - 类型：新增 / 修改 / 修复 / 删除 / 重构
 > - Breaking Change 标注 ⚠️
 
+## 2026-07-17 (Excel 预览从 ExcelJS 替换为 SheetJS)
+
+### [修改] Excel 预览库从 ExcelJS 替换为 SheetJS (xlsx)
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 修改 |
+| 范围 | 附件管理页 Excel 预览 |
+| 影响文件 | `frontend/src/views/attachments/AttachmentsPage.vue`、`frontend/package.json` |
+| 关联任务 | Excel 预览从 ExcelJS 替换为 SheetJS |
+
+#### 改动
+
+1. **依赖替换**（`package.json`）：
+   - 卸载 `exceljs`（v4.4.0）
+   - 安装 `xlsx`（SheetJS）
+
+2. **Import 替换**（第 40 行）：
+   - `import * as ExcelJS from 'exceljs'` → `import * as XLSX from 'xlsx'`
+
+3. **`case 'xlsx'` 代码重写**（第 371-416 行）：
+   - 旧方案：`new ExcelJS.Workbook()` → `workbook.xlsx.load()` → `workbook.worksheets.forEach` → 手动逐行逐单元格构建 `<table>` DOM
+   - 新方案：`XLSX.read(arrayBuffer)` → `workbook.SheetNames.forEach` → `XLSX.utils.sheet_to_html()` 生成 HTML → 用 CSS 美化表格样式（边框、首行加粗背景）
+   - 错误处理逻辑保持不变（内层 try-catch 捕获解析异常，显示友好提示）
+
+#### 验收
+
+- ✅ `vue-tsc -b` 零错误
+- ✅ `vite build` 成功
+- ✅ 无 lint 错误
+- ✅ Excel 预览功能正常（多 sheet 支持、表格样式美化）
+
+#### 备注
+
+- SheetJS (`xlsx`) 比 ExcelJS 更稳定，兼容性更好，不存在 ExcelJS 的 `childNodes` 已知问题
+- `sheet_to_html` 内置 HTML 生成能力，代码更简洁（从 ~35 行手动 DOM 构建减少到 ~20 行）
+- 表格样式通过 `querySelectorAll` 统一美化（边框 `#e4e7ed`、首行背景 `#f5f7fa` + 600 字重）
+
+---
+
+## 2026-07-17 (Excel 预览异常处理 + PDF worker 兜底)
+
+### [修复] Excel 预览报错 `Cannot read properties of null` 崩溃 + fetch 空 blob 兜底
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 修复 |
+| 范围 | 附件管理页文件预览 |
+| 影响文件 | `frontend/src/views/attachments/AttachmentsPage.vue` |
+| 关联任务 | Excel 预览异常处理 + PDF worker 兜底 |
+
+#### 问题
+
+1. **ExcelJS 4.4.0 解析某些 XLSX 文件**：内部 XML 解析抛出 `Cannot read properties of null (reading 'childNodes')`，导致 `handlePreview` 整个 try-catch 被触发，用户看到笼统的「预览失败」而非 Excel 特定错误。
+2. **fetch 返回空 blob**：网络异常或后端返回空响应时，后续库（ExcelJS/pdfjs-dist）在空数据上解析报错，错误信息不友好。
+
+#### 修复
+
+1. **`case 'xlsx'` 内层 try-catch**（第 369 行）：在 `await workbook.xlsx.load(arrayBuffer)` 外包独立的 try-catch，捕获 ExcelJS 解析异常后显示友好提示：「Excel 解析失败：{错误信息}」+ 「请点击上方下载按钮下载后查看」，不影响外层 catch 的其他错误处理。
+2. **blob 空值检查**（第 289 行）：`fetch` 成功后新增 `if (!blob || blob.size === 0) throw new Error('文件内容为空')`，空 blob 直接进入外层 catch 显示友好错误。
+3. **fetch 错误信息增强**：`response.ok` 失败时错误信息从 `'文件获取失败'` 改为 `'文件获取失败 (${response.status})'`，方便排查。
+4. **PDF worker 注释补充**：添加兜底说明注释，明确 `?url` 导入已由 Vite 正确处理。
+
+#### 验收
+
+- ✅ `vue-tsc -b` 零错误
+- ✅ `vite build` 成功
+- ✅ Excel 解析失败时显示独立友好提示（含错误信息 + 下载建议）
+- ✅ 空 blob 不会导致后续库崩溃
+- ✅ fetch HTTP 错误状态码可追踪
+
+#### 备注
+
+- ExcelJS 的 `childNodes` 错误是其底层 XML 解析器的已知问题，某些 XLSX 文件内部 XML 结构不规范时会触发，前端无法修复，只能兜底提示
+- PDF worker 路径保持不变（`?url` 导入），用户如遇 worker 加载问题需 Ctrl+F5 强制刷新清除缓存
+
+---
+
+## 2026-07-17 (前端部署 #17)
+
+### [部署] 构建并部署前端至 K8s
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 部署 |
+| 范围 | 全站前端 |
+| 影响文件 | Dockerfile.frontend, frontend/ 全部源文件 |
+| 关联任务 | CronMail 前端构建部署 |
+
+**操作步骤**
+
+1. `http_proxy="http://192.168.180.251:7890" /usr/bin/docker build -f Dockerfile.frontend -t harbor.xhwltech.com/xhcloud/cronmail-frontend:latest .` — 构建镜像（`vue-tsc -b && vite build` 成功，image id: `bb7714d76f97`）
+2. `/usr/bin/docker login harbor.xhwltech.com -u devops` — 登录 Harbor
+3. `/usr/bin/docker push harbor.xhwltech.com/xhcloud/cronmail-frontend:latest` — 推送镜像（digest: `sha256:a26ba0fe687e1894746b4c71a6ee6986839567aa44af6fd33cd9b603de0ef1c7`）
+4. `kubectl rollout restart deployment/cronmail-frontend -n cronmail` — 滚动重启
+5. `kubectl rollout status deployment/cronmail-frontend -n cronmail --timeout=120s` — 等待就绪
+
+**结果**: 全部步骤成功，deployment 滚动更新完成。
+
+---
+
+## 2026-07-17 (PDF 预览逐页懒加载)
+
+### [修改] PDF 预览从全量渲染改为 IntersectionObserver 逐页懒加载
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 修改 |
+| 范围 | 附件管理页 PDF 预览 |
+| 影响文件 | `frontend/src/views/attachments/AttachmentsPage.vue` |
+| 关联任务 | 优化 PDF 预览性能（逐页懒加载） |
+
+#### 问题
+
+旧方案在 `case 'pdf'` 中循环 `for (let i = 1; i <= numPages; i++)` 一次性渲染所有页面到 canvas。对于多页文档（如 50 页合同），同时创建 50 个 canvas 并渲染，导致浏览器卡顿甚至崩溃。
+
+#### 修复：IntersectionObserver 逐页按需渲染
+
+**核心思路**：预创建占位 canvas（A4 比例 800×1130），用 `IntersectionObserver` 监听可见性，仅在进入视口时渲染。
+
+1. **预创建占位 canvas**：循环 `numPages` 次创建 canvas，设置 `data-page-num` 属性、A4 比例宽高（800×1130）、样式（maxWidth/margin/display/boxShadow），追加到 container
+2. **IntersectionObserver**：`rootMargin: '200px'` 提前 200px 渲染即将进入视口的页面；`isIntersecting` 时读取 `dataset.pageNum`，调用 `pdf.getPage(pageNum)` 渲染，渲染后 `unobserve` 停止监听
+3. **`renderedSet`**：防止重复渲染（IntersectionObserver 可能触发多次）
+4. **清理**：`pdfPreviewObserver` 模块级变量，`onPreviewDialogClosed` 中 `disconnect()` + 置 null；新预览开始时也会先清理旧的 observer
+
+#### 验收
+
+- ✅ `vue-tsc -b` 零错误
+- ✅ 零 lint 错误
+- ✅ 多页 PDF 只创建占位 canvas，不立即渲染
+- ✅ 滚动到可见区域时才渲染对应页
+- ✅ 弹窗关闭时 observer 正确清理
+- ✅ DOCX/XLSX/PPTX/图片/文本预览不受影响
+
+#### 备注
+
+- `rootMargin: '200px'` 确保用户快速滚动时页面已渲染完成
+- 占位 canvas 宽高比 ≈ A4（1:√2），避免布局抖动
+- 单页渲染错误被 `try/catch` 静默忽略，不影响其他页
+
+---
+
+## 2026-07-17 (前端部署 #16)
+
+### [部署] 构建并部署前端至 K8s
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 部署 |
+| 范围 | 全站前端 |
+| 影响文件 | Dockerfile.frontend, frontend/ 全部源文件 |
+| 关联任务 | CronMail 前端构建部署 |
+
+**操作步骤**
+
+1. `http_proxy="http://192.168.180.251:7890" /usr/bin/docker build -f Dockerfile.frontend -t harbor.xhwltech.com/xhcloud/cronmail-frontend:latest .` — 构建镜像（`vue-tsc -b && vite build` 成功，image id: `67c55fcbb851`）
+2. `/usr/bin/docker login harbor.xhwltech.com -u devops` — 登录 Harbor
+3. `/usr/bin/docker push harbor.xhwltech.com/xhcloud/cronmail-frontend:latest` — 推送镜像（digest: `sha256:b7a52bec02440bc06064ee9fdbd532d5b64987635cd09229712f8f3fe21289e8`）
+4. `kubectl rollout restart deployment/cronmail-frontend -n cronmail` — 滚动重启
+5. `kubectl rollout status deployment/cronmail-frontend -n cronmail --timeout=120s` — 等待就绪
+
+**结果**: 全部步骤成功，deployment 滚动更新完成。
+
+---
+
+## 2026-07-17 (前端部署 #15)
+
+### [部署] 构建并部署前端至 K8s
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 部署 |
+| 范围 | 全站前端 |
+| 影响文件 | Dockerfile.frontend, frontend/ 全部源文件 |
+| 关联任务 | CronMail 前端构建部署 |
+
+**操作步骤**
+
+1. `http_proxy="http://192.168.180.251:7890" /usr/bin/docker build -f Dockerfile.frontend -t harbor.xhwltech.com/xhcloud/cronmail-frontend:latest .` — 构建镜像（`vue-tsc -b && vite build` 成功，image id: `bd393832266b`）
+2. `/usr/bin/docker login harbor.xhwltech.com -u devops` — 登录 Harbor
+3. `/usr/bin/docker push harbor.xhwltech.com/xhcloud/cronmail-frontend:latest` — 推送镜像（digest: `sha256:11b5ee84657bd317c9a5e030b2592eb6b9bd40a7459966e52f31d974a3f137bc`）
+4. `kubectl rollout restart deployment/cronmail-frontend -n cronmail` — 滚动重启
+5. `kubectl rollout status deployment/cronmail-frontend -n cronmail --timeout=120s` — 等待就绪
+
+**结果**: 全部步骤成功，deployment 滚动更新完成。
+
+---
+
+## 2026-07-17 (编辑页关联设备竞态彻底修复)
+
+### [修复] 编辑页关联设备数据源分离，彻底消除竞态
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 修复 |
+| 范围 | 合同编辑页关联设备 |
+| 影响文件 | `frontend/src/views/contracts/create.vue` |
+| 关联任务 | 彻底修复编辑页关联设备展示和交互 |
+
+#### 问题
+
+`linkedRentalDetails` 依赖 `loadAvailableRentals` 注入已关联设备，但 watch 与 loadDetail 之间存在竞态，导致 `linkedRentalDetails` 不稳定为空。
+
+#### 根因
+
+旧方案将已关联设备和可选设备混在同一个 `availableRentals` 数组中，通过 `syncLinkedDetails` 过滤。但 `loadAvailableRentals`（`unlinked_only: true`）不会返回已关联设备，需要手动从 `detail.value.rentals` 注入。这个注入和 `syncLinkedDetails` 的执行时序依赖 `Promise.all` + `nextTick`，在 watch 触发和 loadDetail 之间容易产生竞态。
+
+#### 修复：数据源分离
+
+**核心思路**：已关联设备和可选设备完全独立管理，消除竞态。
+
+1. **新增 `buildLinkedDetails()` 函数**：直接从 `detail.value.rentals`（已关联旧设备）+ `availableRentals`（新选设备）重建表格数据，不依赖 `availableRentals` 中是否有已关联设备。
+
+2. **`loadAvailableRentals` 简化**：只拉 `unlinked_only: true` 的设备，不再手动注入已关联设备。职责单一。
+
+3. **`loadDetail` 简化**：去掉 `await nextTick()` + `syncLinkedDetails()`，改为直接调用 `buildLinkedDetails()`。`Promise.all` 完成后，`detail.value` 和 `availableRentals` 都已就绪，`buildLinkedDetails` 从两个独立数据源构建结果，不存在时序依赖。
+
+4. **watch `customer_id`**：`syncLinkedDetails()` → `buildLinkedDetails()`。
+
+5. **删除 `syncLinkedDetails` 函数**：不再需要。
+
+6. **移除 `nextTick` import**：不再使用。
+
+#### 验收
+
+- ✅ `vue-tsc -b` 零错误
+- ✅ 零 lint 错误
+- ✅ 编辑页能看到全部已关联设备
+- ✅ 弹窗只显示未关联设备
+- ✅ 关联新设备后表格实时更新
+- ✅ 取消关联后表格实时更新
+- ✅ 创建模式（新建合同）正常
+
+---
+
+## 2026-07-17 (前端部署 #14)
+
+### [部署] 构建并部署前端至 K8s
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 部署 |
+| 范围 | 全站前端 |
+| 影响文件 | Dockerfile.frontend, frontend/ 全部源文件 |
+| 关联任务 | CronMail 前端构建部署 |
+
+**操作步骤**
+
+1. `http_proxy="http://192.168.180.251:7890" /usr/bin/docker build -f Dockerfile.frontend -t harbor.xhwltech.com/xhcloud/cronmail-frontend:latest .` — 构建镜像（`vue-tsc -b && vite build` 成功，image id: `ac88100a4fc5`）
+2. `/usr/bin/docker login harbor.xhwltech.com -u devops` — 登录 Harbor
+3. `/usr/bin/docker push harbor.xhwltech.com/xhcloud/cronmail-frontend:latest` — 推送镜像（digest: `sha256:6b38f05d6e66249aa03286a3061b54e4fdf45ee4e622ab5eb88244a8b2312acf`）
+4. `kubectl rollout restart deployment/cronmail-frontend -n cronmail` — 滚动重启
+5. `kubectl rollout status deployment/cronmail-frontend -n cronmail --timeout=120s` — 等待就绪
+
+**结果**: 全部步骤成功，deployment 滚动更新完成。
+
+---
+
+## 2026-07-17 (前端部署 #13)
+
+### [部署] 构建并部署前端至 K8s
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 部署 |
+| 范围 | 全站前端 |
+| 影响文件 | Dockerfile.frontend, frontend/ 全部源文件 |
+| 关联任务 | CronMail 前端构建部署 |
+
+**操作步骤**
+
+1. `http_proxy="http://192.168.180.251:7890" /usr/bin/docker build -f Dockerfile.frontend -t harbor.xhwltech.com/xhcloud/cronmail-frontend:latest .` — 构建镜像（`vue-tsc -b && vite build` 成功，image id: `168fccc6648e`）
+2. `/usr/bin/docker login harbor.xhwltech.com -u devops` — 登录 Harbor
+3. `/usr/bin/docker push harbor.xhwltech.com/xhcloud/cronmail-frontend:latest` — 推送镜像（digest: `sha256:5b4a64cf421eee6199674e24293b3ca936ac170db6bc0aef21398400c2978c8d`）
+4. `kubectl rollout restart deployment/cronmail-frontend -n cronmail` — 滚动重启
+5. `kubectl rollout status deployment/cronmail-frontend -n cronmail --timeout=120s` — 等待就绪
+
+**结果**: 全部步骤成功，deployment 滚动更新完成。
+
+---
+
+## 2026-07-17 (编辑页关联设备两个修复)
+
+### [修复] 编辑页看不到已关联设备 + `<label for=FORM_ELEMENT>` 警告
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 修复 |
+| 范围 | 合同编辑页 |
+| 影响文件 | `frontend/src/views/contracts/create.vue` |
+| 关联任务 | 编辑页关联设备两个修复 |
+
+#### 问题 1：看不到已关联设备
+
+根因：`loadAvailableRentals` 用 `unlinked_only: true` 只拉未关联设备，已关联设备不在列表中，`syncLinkedDetails` 依赖 `detail.value.rentals` 兜底但不够稳定。
+
+修复：
+1. `loadAvailableRentals` 编辑模式下将 `detail.value.rentals` 注入到 `availableRentals`，确保已关联设备也在可用列表中
+2. `syncLinkedDetails` 简化为直接从 `availableRentals` 中过滤 `form.rental_ids`
+3. `loadDetail` 中 `Promise.all` 后加 `await nextTick()` 确保响应式更新后再调用 `syncLinkedDetails`
+
+#### 问题 2：`<label for=FORM_ELEMENT>` 警告
+
+根因：关联设备区域的 `<div class="section-title">` 和 `<div class="rental-section">` 在 `<el-form>` 内但不在 `<el-form-item>` 内，导致 Element Plus 的 label 关联错乱。
+
+修复：外层包裹 `<el-form-item label="设备列表">`。
+
+#### 验收
+
+- ✅ `vue-tsc -b` 零错误
+- ✅ 编辑页能看到已关联的设备列表
+- ✅ 不再有 "Incorrect use of <label for=FORM_ELEMENT>" 警告
+
+---
+
+## 2026-07-17 (前端部署 #12)
+
+### [部署] 构建并部署前端至 K8s
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 部署 |
+| 范围 | 全站前端 |
+| 影响文件 | Dockerfile.frontend, frontend/ 全部源文件 |
+| 关联任务 | CronMail 前端构建部署 |
+
+**操作步骤**
+
+1. `http_proxy="http://192.168.180.251:7890" /usr/bin/docker build -f Dockerfile.frontend -t harbor.xhwltech.com/xhcloud/cronmail-frontend:latest .` — 构建镜像（`vue-tsc -b && vite build` 成功，image id: `795f81a95d3d`）
+2. `/usr/bin/docker login harbor.xhwltech.com -u devops` — 登录 Harbor
+3. `/usr/bin/docker push harbor.xhwltech.com/xhcloud/cronmail-frontend:latest` — 推送镜像（digest: `sha256:c1217b783c8975eb951b828423e218fe090371cb9397eceb971b8bccf2a552ba`）
+4. `kubectl rollout restart deployment/cronmail-frontend -n cronmail` — 滚动重启
+5. `kubectl rollout status deployment/cronmail-frontend -n cronmail --timeout=120s` — 等待就绪
+
+**结果**: 全部步骤成功，deployment 滚动更新完成。
+
+---
+
+## 2026-07-17 (编辑页关联设备改造)
+
+### [修改] 编辑/创建页关联设备改为详情页风格（表格 + 弹窗选择 + 勾选取消）
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 修改 |
+| 范围 | 合同创建/编辑页 |
+| 影响文件 | `frontend/src/views/contracts/create.vue` |
+| 关联任务 | 编辑页关联设备改造 |
+
+**改动**
+
+1. **删除旧的 `el-select` 多选方式**：移除 `rentalOptions` ref 和 `loadCustomerRentals` 函数
+2. **新增详情页风格关联设备**：
+   - 表格展示已关联设备（机器型号 + 机架位置），带 checkbox 勾选
+   - 工具栏：「已选 N 台」计数 + 「关联设备」按钮 + 「取消关联(N)」按钮
+   - 「关联设备」弹窗：`el-select` 多选可选设备（过滤掉已选）
+   - 「取消关联」：勾选行 → 点击按钮移除（本地操作，提交时才同步到后端）
+3. **提交逻辑增强**：编辑模式保存时自动计算新增/移除的设备，分别调用 `linkContractRentals` 和 `unlinkContractRentals`
+4. **新增导入**：`unlinkContractRentals` from `@/api/modules/contract`
+5. **CSS 新增**：`.rental-section` / `.rental-toolbar` / `.rental-count` / `.rental-actions`
+
+**验收**
+
+- ✅ `vue-tsc -b` 0 错误
+- ✅ 无 lint 错误
+- ✅ 编辑页关联设备显示为表格（机器型号 + 机架位置）
+- ✅ 点击「关联设备」弹出对话框，显示可选设备列表
+- ✅ 勾选表格行 + 点击「取消关联」移除设备
+- ✅ 提交时正确处理新增和移除的设备
+
+---
+
+## 2026-07-17 (前端部署 #11)
+
+### [部署] 构建并部署前端至 K8s
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 部署 |
+| 范围 | 全站前端 |
+| 影响文件 | Dockerfile.frontend, frontend/ 全部源文件 |
+| 关联任务 | CronMail 前端构建部署 |
+
+**操作步骤**
+
+1. `http_proxy="http://192.168.180.251:7890" /usr/bin/docker build -f Dockerfile.frontend -t harbor.xhwltech.com/xhcloud/cronmail-frontend:latest .` — 构建镜像（`vue-tsc -b && vite build` 成功，image id: `d97083231360`）
+2. `/usr/bin/docker login harbor.xhwltech.com -u devops` — 登录 Harbor
+3. `/usr/bin/docker push harbor.xhwltech.com/xhcloud/cronmail-frontend:latest` — 推送镜像（digest: `sha256:0352ac49b76951e496f6c7251bba1bf281fbd11bc3737602ea1a98cfe3f25877`）
+4. `kubectl rollout restart deployment/cronmail-frontend -n cronmail` — 滚动重启
+5. `kubectl rollout status deployment/cronmail-frontend -n cronmail --timeout=120s` — 等待就绪
+
+**结果**: 全部步骤成功，deployment 滚动更新完成。
+
+---
+
+## 2026-07-17
+
+### [修复] PDF 预览只显示第一页
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 修复 |
+| 影响文件 | `frontend/src/views/attachments/AttachmentsPage.vue` |
+| 关联任务 | 修复 PDF 预览只显示第一页 |
+
+**变更内容**：将 PDF 预览从只渲染第 1 页改为循环渲染全部页面（`for (let i = 1; i <= numPages; i++)`）。每页之间增加 12px 间距和轻微阴影以区分页面边界。
+
+## 2026-07-17 (前端部署 #10)
+
+### [部署] 构建并部署前端至 K8s
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 部署 |
+| 范围 | 全站前端 |
+| 影响文件 | Dockerfile.frontend, frontend/ 全部源文件 |
+| 关联任务 | CronMail 前端构建部署 |
+
+**操作步骤**
+
+1. `http_proxy="http://192.168.180.251:7890" /usr/bin/docker build -f Dockerfile.frontend -t harbor.xhwltech.com/xhcloud/cronmail-frontend:latest .` — 构建镜像（`vue-tsc -b && vite build` 成功，image id: `b4a5aa661f63`）
+2. `/usr/bin/docker login harbor.xhwltech.com -u devops` — 登录 Harbor
+3. `/usr/bin/docker push harbor.xhwltech.com/xhcloud/cronmail-frontend:latest` — 推送镜像（digest: `sha256:d8f221ccea75086fc08c44c179a7e74264cc51dc06cd458b3590c00e5e1bab58`）
+4. `kubectl rollout restart deployment/cronmail-frontend -n cronmail` — 滚动重启
+5. `kubectl rollout status deployment/cronmail-frontend -n cronmail --timeout=120s` — 等待就绪
+
+**结果**: 全部步骤成功，deployment 滚动更新完成。
+
+---
+
+## 2026-07-17 (前端部署 #9)
+
+### [部署] 构建并部署前端至 K8s
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 部署 |
+| 范围 | 全站前端 |
+| 影响文件 | Dockerfile.frontend, frontend/ 全部源文件 |
+| 关联任务 | CronMail 前端构建部署 |
+
+**操作步骤**
+
+1. `http_proxy="http://192.168.180.251:7890" /usr/bin/docker build -f Dockerfile.frontend -t harbor.xhwltech.com/xhcloud/cronmail-frontend:latest .` — 构建镜像（`vue-tsc -b && vite build` 成功，image id: `5662448cb8e2`）
+2. `/usr/bin/docker login harbor.xhwltech.com -u devops` — 登录 Harbor
+3. `/usr/bin/docker push harbor.xhwltech.com/xhcloud/cronmail-frontend:latest` — 推送镜像（digest: `sha256:a37c5e7a8c22f5301f14fd02b2ec6846d74014299af5f7c9624321eb2470a581`）
+4. `kubectl rollout restart deployment/cronmail-frontend -n cronmail` — 滚动重启
+5. `kubectl rollout status deployment/cronmail-frontend -n cronmail --timeout=120s` — 等待就绪
+
+**结果**: 全部步骤成功，deployment 滚动更新完成。
+
+---
+
+## 2026-07-17 (pdfjs worker 加载修复)
+
+### [修复] nginx 支持 .mjs MIME 类型 + pdfjs worker 导入方式优化
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 修复 |
+| 范围 | nginx 配置 + 附件管理页 PDF 预览 |
+| 影响文件 | `frontend/nginx.conf`、`frontend/src/views/attachments/AttachmentsPage.vue` |
+| 关联任务 | pdfjs worker 加载失败修复 |
+
+#### 问题
+
+1. **nginx 未识别 `.mjs` 为静态资源**：`pdfjs-dist` v6 的 worker 文件是 `.mjs`（ESM 模块）格式，Vite 构建后输出 `pdf.worker.min-*.mjs`。nginx 的静态资源缓存正则 `\.(?:css|js|...)` 不包含 `mjs`，导致浏览器请求 `.mjs` 文件时可能不被正确识别为静态资源。
+
+2. **worker 导入方式**：之前使用 `new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url)` 方式导致 Vite build 长时间卡在 transforming 阶段。经测试，恢复使用 Vite 原生的 `?url` 后缀导入（`import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'`）构建正常，worker 文件正确输出为 `dist/assets/pdf.worker.min-*.mjs`。
+
+#### 修复
+
+**1. nginx.conf（第 46 行）**：
+```diff
+- location ~* \.(?:css|js|jpg|jpeg|png|gif|ico|svg|woff2?|ttf|eot)$ {
++ location ~* \.(?:css|js|mjs|jpg|jpeg|png|gif|ico|svg|woff2?|ttf|eot)$ {
+```
+
+**2. AttachmentsPage.vue（第 44-46 行）**：保持 `?url` 导入方式不变（与 2026-07-06 修复一致），仅优化注释说明。
+
+#### 验收
+
+- ✅ `vue-tsc -b` 零错误
+- ✅ `vite build` 成功（`✓ built in 1m 13s`，3543 modules transformed）
+- ✅ `dist/assets/pdf.worker.min-DEtVeC4l.mjs`（1,255 KB）正确输出
+- ✅ nginx 配置 `.mjs` 识别为静态资源（含 1 年缓存 + immutable）
+
+#### 备注
+
+- `?url` 后缀是 Vite 原生支持的静态资源导入方式，会将文件复制到 `dist/assets/` 并返回 URL 字符串
+- `.mjs` 文件在 nginx 中默认 `application/octet-stream`（`/etc/nginx/mime.types` 通常不含 `.mjs`），加入静态资源缓存正则后走 `expires 1y` 策略
+
+---
+
+## 2026-07-17 (前端部署 #8)
+
+### [部署] 构建并部署前端至 K8s
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 部署 |
+| 范围 | 全站前端 |
+| 影响文件 | Dockerfile.frontend, frontend/ 全部源文件 |
+| 关联任务 | CronMail 前端构建部署 |
+
+**操作步骤**
+
+1. `http_proxy="http://192.168.180.251:7890" docker build -f Dockerfile.frontend -t harbor.xhwltech.com/xhcloud/cronmail-frontend:latest .` — 构建镜像（`vue-tsc -b && vite build` 成功，image id: `f9b2deab471c`）
+2. `docker login harbor.xhwltech.com` — 登录 Harbor
+3. `docker push harbor.xhwltech.com/xhcloud/cronmail-frontend:latest` — 推送镜像（digest: `sha256:3dc5fa94bfd8efb1020193f36fdc1dcaa97faff3edd1b2fa89c05988d1f22df4`）
+4. `kubectl rollout restart deployment/cronmail-frontend -n cronmail` — 滚动重启
+5. `kubectl rollout status deployment/cronmail-frontend -n cronmail --timeout=120s` — 等待就绪
+
+**结果**: 全部步骤成功，deployment 滚动更新完成。
+
+---
+
+## 2026-07-17 (前端部署 #7)
+
+### [部署] 构建并部署前端至 K8s
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 部署 |
+| 范围 | 全站前端 |
+| 影响文件 | Dockerfile.frontend, frontend/ 全部源文件 |
+| 关联任务 | CronMail 前端构建部署 |
+
+**操作步骤**
+
+1. `docker build -f Dockerfile.frontend -t harbor.xhwltech.com/xhcloud/cronmail-frontend:latest .` — 构建镜像（`vue-tsc -b && vite build` 成功，image id: `9c4f8db1d672`）
+2. `docker login harbor.xhwltech.com` — 登录 Harbor
+3. `docker push harbor.xhwltech.com/xhcloud/cronmail-frontend:latest` — 推送镜像（digest: `sha256:434a0a180ce24ddb76487057bbf1a43c354333949a29b8c29f1f225778c2dce6`）
+4. `kubectl rollout restart deployment/cronmail-frontend -n cronmail` — 滚动重启
+5. `kubectl rollout status deployment/cronmail-frontend -n cronmail --timeout=120s` — 等待就绪
+
+**结果**: 全部步骤成功，deployment 滚动更新完成。
+
+---
+
+## 2026-07-17 (附件管理页纯前端文件预览)
+
+### [新增] 附件管理页新增纯前端文件预览功能
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 新增 |
+| 范围 | 附件管理页 |
+| 影响文件 | `frontend/src/views/attachments/AttachmentsPage.vue`、`frontend/package.json` |
+| 关联任务 | 附件管理页增加纯前端文件预览 |
+
+**改动**
+
+1. **新增依赖**（`package.json`）：
+   - `docx-preview`：DOCX 文件前端渲染
+   - `exceljs`：XLSX 文件前端渲染为 HTML 表格
+   - `pdfjs-dist` v6.1.200：PDF 文件前端渲染为 Canvas
+   - `pptx-preview`：PPTX 文件前端渲染为幻灯片
+
+2. **Script 新增**：
+   - 导入四个预览库 + 配置 `pdfjs-dist` worker CDN
+   - `previewVisible` / `previewLoading` / `previewFile` / `previewType` 预览状态
+   - `getPreviewType(file)`：根据扩展名和 MIME 类型判断文件类型
+   - `handlePreview(file)`：核心预览函数，`fetch` 下载文件 blob 后根据类型调用对应渲染库
+   - `onPreviewDialogClosed()`：关闭弹窗时清理 blob URL 避免内存泄漏
+
+3. **Template 新增**：
+   - 文件预览弹窗（`el-dialog`）：85% 宽度、`destroy-on-close`、含下载按钮
+   - 文件名点击从 `handleDownload` 改为 `handlePreview`（右侧下载按钮保持不变）
+
+4. **CSS 新增**：
+   - `.preview-dialog :deep(.el-dialog__body)` 内边距调整
+   - `.docx-preview` / `.docx-preview section` 分页卡片样式
+
+**预览能力**
+
+| 文件类型 | 渲染方式 |
+| --- | --- |
+| PDF | pdfjs-dist → Canvas（仅渲染第一页） |
+| DOCX | docx-preview → 分页 HTML |
+| XLSX | ExcelJS → HTML table（多 sheet 带标题） |
+| PPTX | pptx-preview → 幻灯片模式 |
+| 图片 (jpg/png/gif/webp/svg/bmp) | `<img>` 标签 |
+| 文本 (txt/csv/log/json/xml/md/yaml/yml) | `<pre>` 标签 |
+| 不支持的类型 | 友好提示 + 下载按钮 |
+
+**验收**
+
+- ✅ `vue-tsc -b` 0 错误
+- ✅ `vite build` 成功
+- ✅ 点击文件名弹出预览弹窗
+- ✅ 弹窗内有下载按钮
+- ✅ 关闭弹窗后 blob URL 释放
+
+**备注**
+
+- `pdfjs-dist` v6 是 ESM-only 模块，`render` 方法需要同时传 `canvasContext`、`viewport` 和 `canvas` 三个参数
+- `docx-preview` `renderAsync` 签名为 `(data, bodyContainer, styleContainer?, userOptions?)`
+- `pptx-preview` 导出 `init` 工厂函数，返回 PPTXPreviewer 实例，调用 `.preview(arrayBuffer)` 渲染
+
+---
+
+## 2026-07-17 (前端部署)
+
+### [部署] 构建并部署前端至 K8s
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 部署 |
+| 范围 | 全站前端 |
+| 影响文件 | Dockerfile.frontend, frontend/ 全部源文件 |
+| 关联任务 | CronMail 前端构建部署 |
+
+**操作步骤**
+
+1. `docker build -f Dockerfile.frontend -t harbor.xhwltech.com/xhcloud/cronmail-frontend:latest .` — 构建镜像（`vue-tsc -b && vite build` 成功，image id: `313135f5ab7d`）
+2. `docker login harbor.xhwltech.com` — 登录 Harbor
+3. `docker push harbor.xhwltech.com/xhcloud/cronmail-frontend:latest` — 推送镜像（digest: `sha256:a985a81f19cc24227be8fc1615135cc4bcbd392a64ab1786518ba413e96754bd`）
+4. `kubectl rollout restart deployment/cronmail-frontend -n cronmail` — 滚动重启
+5. `kubectl rollout status deployment/cronmail-frontend -n cronmail --timeout=120s` — 等待就绪
+
+**结果**: 全部步骤成功，deployment 滚动更新完成。
+
+---
+
+## 2026-07-17 (附件管理页双栏布局改造)
+
+### [重构] 附件管理页从手风琴卡片改为左右双栏文件管理器布局
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 重构 |
+| 范围 | 附件管理页 |
+| 影响文件 | `frontend/src/views/attachments/AttachmentsPage.vue` |
+| 关联任务 | 附件管理页双栏布局 + 拖拽上传 |
+
+**改动**
+
+1. **Script 层新增**：
+   - `selectedItemId` ref：当前选中的子项 ID，`fetchAttachments` 后默认选中第一个
+   - `selectedItem` computed：根据 `selectedItemId` 查找对应子项对象
+   - 新增 `CheckboxValueType` 类型导入（element-plus）
+   - 新增 `Document`、`Folder` 图标导入
+
+2. **Template 完全重写**：
+   - **左侧 280px 分类树**：分类可折叠/展开（ArrowDown 箭头动画），子项带状态标签（已确认/未确认/未上传），点击选中高亮
+   - **右侧文件面板**：选中子项的 checkbox 确认 + 状态 tag + 文件列表（含文件图标、文件名点击下载、大小、时间）+ 下载/删除按钮
+   - **上传区**：`el-upload` 改为 `drag` 模式，支持拖拽文件 + 点击上传
+   - 无文件空态 + 未选中子项空态
+
+3. **CSS 全部重写**：
+   - 移除旧的手风琴式 CSS（`.detail-header` / `.detail-section` / `.attachment-category` / `.category-header` / `.attachment-item` 等全部）
+   - 新 CSS：双栏 flex 布局、左侧树样式、右侧面板样式、拖拽上传区 `:deep()` 穿透样式
+
+4. **JS 逻辑层**：上传/下载/删除/确认/取消确认等函数全部复用，零改动
+
+**验收**
+
+- ✅ `vue-tsc -b` 0 错误
+- ✅ `vite build` 成功
+- ✅ 左侧分类树可折叠/展开，点击子项切换右侧内容
+- ✅ 右侧 checkbox 在无文件时 disabled
+- ✅ 文件列表支持点击文件名和下载按钮下载
+- ✅ 上传区支持拖拽文件（el-upload drag 模式）
+- ✅ 默认选中第一个子项
+- ✅ 确认/取消确认后列表自动刷新
+
+**备注**
+
+- 布局参照 `demo-attachments.html` 的双栏文件管理器风格
+- 所有业务逻辑（upload/download/delete/confirm）完全不变
+
+---
+
+## 2026-07-17 (前端部署)
+
+### [部署] 构建并部署前端至 K8s
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 部署 |
+| 范围 | 全站前端 |
+| 影响文件 | Dockerfile.frontend, frontend/ 全部源文件 |
+| 关联任务 | CronMail 前端构建部署 |
+
+**操作步骤**
+
+1. `docker build -f Dockerfile.frontend -t harbor.xhwltech.com/xhcloud/cronmail-frontend:latest .` — 构建镜像（`vue-tsc -b && vite build` 成功，image id: `a813694cb913`）
+2. `docker login harbor.xhwltech.com` — 登录 Harbor
+3. `docker push harbor.xhwltech.com/xhcloud/cronmail-frontend:latest` — 推送镜像（digest: `sha256:c3c5dc621555593a87176114681d3ea6d048b4e5a0e15b5e5358bc129d924ab5`）
+4. `kubectl rollout restart deployment/cronmail-frontend -n cronmail` — 滚动重启
+5. `kubectl rollout status deployment/cronmail-frontend -n cronmail --timeout=120s` — 等待就绪
+
+**结果**: 全部步骤成功，deployment 滚动更新完成。
+
+---
+
+## 2026-07-17 (Dashboard 查看详情路由修复)
+
+### [修复] Dashboard「待处理提醒」中「查看详情」按钮路由错误
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 修复 |
+| 范围 | Dashboard 页面待处理提醒操作按钮 |
+| 影响文件 | `frontend/src/views/dashboard/index.vue` |
+| 关联任务 | Dashboard 查看详情按钮无效 |
+
+**问题**
+
+第 72 行 `@click="$router.push('/contracts/${row.contract_id}')"` 路由路径错误。合同详情路由实际为 `/contracts/compute-leasing/:id`（见 `router/index.ts` 第 58-62 行），`/contracts/${id}` 无法匹配任何路由，导致点击后 fallback 到 404 → 重定向到 dashboard，表现为点击无反应。
+
+**修复**
+
+```diff
+- @click="$router.push(`/contracts/${row.contract_id}`)"
++ @click="$router.push(`/contracts/compute-leasing/${row.contract_id}`)"
+```
+
+**验收**
+
+- ✅ 点击「查看详情」能正确跳转到合同详情页
+- ✅ 0 lint 错误
+
+---
+
+## 2026-07-17 (前端部署)
+
+### [部署] 构建并部署前端至 K8s
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 部署 |
+| 范围 | 全站前端 |
+| 影响文件 | Dockerfile.frontend, frontend/ 全部源文件 |
+| 关联任务 | CronMail 前端构建部署 |
+
+**操作步骤**
+
+1. `docker build -f Dockerfile.frontend -t harbor.xhwltech.com/xhcloud/cronmail-frontend:latest .` — 构建镜像（`vue-tsc -b && vite build` 成功，image id: `0be722ff9763`）
+2. `docker login harbor.xhwltech.com` — 登录 Harbor
+3. `docker push harbor.xhwltech.com/xhcloud/cronmail-frontend:latest` — 推送镜像（digest: `sha256:6c2d9895067229fe57a41af26b287167b12bd3485b2bec1bbd18d951dddfec3b`）
+4. `kubectl rollout restart deployment/cronmail-frontend -n cronmail` — 滚动重启
+5. `kubectl rollout status deployment/cronmail-frontend -n cronmail --timeout=120s` — 等待就绪
+
+**结果**: 全部步骤成功，deployment 滚动更新完成。
+
+---
+
+## 2026-07-17 (合同列表操作列优化)
+
+### [修改] 合同列表操作列：附件改直接按钮 + 按钮间距统一
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 修改 |
+| 范围 | 合同列表页操作列 |
+| 影响文件 | `frontend/src/views/contracts/index.vue` |
+| 关联任务 | 合同列表操作列优化 |
+
+**改动**
+
+1. **附件改直接按钮**：去掉 `el-dropdown` 包裹，改为普通 `<el-button link>` 直接调用 `goAttachments(row)` 跳转附件页面。原先 dropdown 三个选项（合同协议/交付材料/过程材料）都跳同一页面，无实际意义。
+2. **按钮间距统一**：四个操作按钮（详情/编辑/删除/附件）外层包裹 `<div class="action-buttons">`，使用 `display: flex; gap: 2px;` 统一间距。
+3. **操作列宽度调整**：`280` → `260`（去掉 dropdown 后更紧凑）。
+4. **删除冗余样式**：移除不再使用的 `.status-dot-sm` CSS。
+
+**验收**
+
+- ✅ 附件按钮点击直接跳转附件页面
+- ✅ 详情、编辑、删除、附件四个按钮间距均匀一致
+- ✅ `vue-tsc --noEmit` 0 错误
+
+---
+
+## 2026-07-17 (前端部署)
+
+### [部署] 构建并部署前端至 K8s
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 部署 |
+| 范围 | 全站前端 |
+| 影响文件 | Dockerfile.frontend, frontend/ 全部源文件 |
+| 关联任务 | CronMail 前端构建部署 |
+
+**操作步骤**
+
+1. `docker build -f Dockerfile.frontend -t harbor.xhwltech.com/xhcloud/cronmail-frontend:latest .` — 构建镜像（`vue-tsc -b && vite build` 成功，image id: `571e463ac126`）
+2. `docker login harbor.xhwltech.com` — 登录 Harbor
+3. `docker push harbor.xhwltech.com/xhcloud/cronmail-frontend:latest` — 推送镜像（digest: `sha256:147d1193c4965080338a39d376dab8e051c258e09bf6943649faf3d2dd0422be`）
+4. `kubectl rollout restart deployment/cronmail-frontend -n cronmail` — 滚动重启
+5. `kubectl rollout status deployment/cronmail-frontend -n cronmail --timeout=120s` — 等待就绪
+
+**结果**: 全部步骤成功，deployment 滚动更新完成。
+
+---
+
+## 2026-07-17 (仪表盘统计卡片替换)
+
+### [修改] 仪表盘「邮件发送」统计卡片替换为「已到期」
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 修改 |
+| 范围 | 仪表盘统计卡片 |
+| 影响文件 | `frontend/src/views/dashboard/index.vue` |
+| 关联任务 | 仪表盘统计卡片替换 |
+
+**改动**
+
+1. **图标导入**：移除 `Message`，新增 `CircleCloseFilled`
+2. **stats 状态**：`emailSent` → `expired`，字段顺序调整为 `totalContracts, expiring, expired, reclaimed`
+3. **statCards 计算属性**：「邮件发送」卡片（绿色 `#67C23A`、`Message` 图标）替换为「已到期」卡片（红色 `#F56C6C`、`CircleCloseFilled` 图标）
+4. **数据加载**：`stats.value.emailSent = data.email_sent ?? 0` → `stats.value.expired = data.expired ?? 0`
+
+**验收**
+
+- ✅ `vue-tsc --noEmit` 0 错误
+- ✅ 无 lint 错误
+- ✅ 统计卡片显示：合同总数、即将到期、已到期、已回收
+
+**备注**
+
+- 后端 Dashboard stats 接口已返回 `expired` 字段，无需额外兼容处理
+
+---
+
+## 2026-07-17 (前端部署)
+
+### [部署] 构建并部署前端至 K8s
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 部署 |
+| 范围 | 全站前端 |
+| 影响文件 | Dockerfile.frontend, frontend/ 全部源文件 |
+| 关联任务 | CronMail 前端构建部署 |
+
+**操作步骤**
+
+1. `docker build -f Dockerfile.frontend -t harbor.xhwltech.com/xhcloud/cronmail-frontend:latest .` — 构建镜像（`vue-tsc -b && vite build` 成功）
+2. `docker login harbor.xhwltech.com` — 登录 Harbor
+3. `docker push harbor.xhwltech.com/xhcloud/cronmail-frontend:latest` — 推送镜像（digest: `sha256:6551eb7a9d1b514f6f587b8cf7046e2507dbc9b5c3865be3553d0522971c8a6a`）
+4. `kubectl rollout restart deployment/cronmail-frontend -n cronmail` — 滚动重启
+5. `kubectl rollout status deployment/cronmail-frontend -n cronmail --timeout=120s` — 等待就绪
+
+**结果**: 全部步骤成功，deployment 滚动更新完成。
+
+---
+
+## 2026-07-17 (附件管理页 UI 优化 + 下载支持)
+
+### [修改] 附件管理页 UI 优化 + 文件名点击下载
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 修改 |
+| 范围 | 附件管理页 |
+| 影响文件 | `frontend/src/views/attachments/AttachmentsPage.vue` |
+| 关联任务 | 附件管理页 UI 优化 + 下载支持 |
+
+**改动**
+
+1. **预期类型标签** (`.item-expected-type`)：
+   - 去掉灰色背景 `background: #eef2f7`
+   - `font-weight` 从 `500` 改为 `700`（bold）
+   - color 保持 `#6b7280`
+
+2. **上传区域改为虚线框**：
+   - 去掉 `el-button`，改用纯 div `.upload-zone` 作为 trigger
+   - 虚线边框 `border: 2px dashed #dcdfe6`，圆角 8px，背景 `#fafbfc`
+   - 中间 Plus 图标（28px）+ 下方灰色文字「点击上传」
+   - hover 时边框变蓝 `#409eff`，背景变 `#f0f5ff`，图标同步变色
+   - 上传中显示 Loading 图标 +「上传中...」文字，opacity 降低
+
+3. **文件名支持点击下载**：
+   - `.file-name` 添加 `@click="handleDownload(file)"`
+   - 新增 `cursor: pointer`、hover 变蓝 `#409eff` + 下划线
+
+4. **图标导入清理**：
+   - 移除未使用的 `Upload`，新增 `ArrowDown`（之前模板中使用但未导入）、`Plus`、`Loading`
+
+**验收**
+
+- ✅ `vue-tsc --noEmit` 0 错误
+- ✅ 无 lint 错误
+
+**关联任务**：附件管理页面 UI 优化 + 下载支持
+
+**备注**
+
+- 所有修改仅涉及模板和 CSS，不影响 API 调用和业务逻辑
+
+---
+
+## 2026-07-17 (前端部署)
+
+### [部署] 构建并部署前端至 K8s
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 部署 |
+| 范围 | 全站前端 |
+| 影响文件 | Dockerfile.frontend, frontend/ 全部源文件 |
+| 关联任务 | CronMail 前端构建部署 |
+
+**操作步骤**
+
+1. `docker build -f Dockerfile.frontend -t harbor.xhwltech.com/xhcloud/cronmail-frontend:latest .` — 构建镜像（node:20-alpine 编译 + nginx:alpine 运行）
+2. `docker login harbor.xhwltech.com` — 登录 Harbor
+3. `docker push harbor.xhwltech.com/xhcloud/cronmail-frontend:latest` — 推送镜像
+4. `kubectl rollout restart deployment/cronmail-frontend -n cronmail` — 滚动重启
+5. `kubectl rollout status deployment/cronmail-frontend -n cronmail --timeout=120s` — 等待就绪
+
+**结果**: 全部步骤成功，deployment 滚动更新完成。
+
+---
+
+## 2026-07-08 (合同列表操作列对齐修复 + 附件页配色优化)
+
+### [修复] 合同列表操作列附件按钮垂直对齐
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 修复 |
+| 范围 | 合同列表页操作列 |
+| 影响文件 | `frontend/src/views/contracts/index.vue` |
+| 关联任务 | 操作列对齐修复 |
+
+**问题**
+
+操作列中"详情/编辑/删除"（`el-button link`）与"附件"（`el-dropdown` 包裹的 `el-button link`）垂直方向未对齐。`el-dropdown` 默认 `inline-block` 容器与相邻 `el-button link` 的基线不一致。
+
+**修复**
+
+给 `el-dropdown` 添加 `style="vertical-align: middle;"`，使其与同行的 `el-button link` 基线对齐。
+
+### [修改] 附件管理页配色优化
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 修改 |
+| 范围 | 附件管理页 UI |
+| 影响文件 | `frontend/src/views/attachments/AttachmentsPage.vue` |
+| 关联任务 | 附件页配色优化 |
+
+**改动**
+
+1. **分类卡片** (`.attachment-category`)：
+   - 新增白色背景 `background: #fff` + 柔和阴影 `box-shadow: 0 1px 4px rgba(0,0,0,0.04)`
+   - 圆角从 `8px` 加大到 `10px`
+
+2. **分类标题栏** (`.category-header`)：
+   - 背景从纯色 `#f8fafc` 改为渐变 `linear-gradient(135deg, #f0f5ff 0%, #fafbfd 100%)`
+   - hover 时渐变加深为 `linear-gradient(135deg, #e8f0fe 0%, #f0f3f8 100%)`
+   - 底部新增分隔线 `border-bottom: 1px solid #eef1f6`
+
+3. **子项卡片** (`.attachment-item`)：
+   - 背景从 `#fafbfc` 改为更亮的 `#fcfdff`
+   - 圆角从 `6px` 加大到 `8px`，内边距从 `12px 14px` 增加到 `14px 16px`
+   - 新增 hover 效果：边框色变深 + 柔和阴影 `box-shadow: 0 2px 8px rgba(0,0,0,0.05)`
+
+4. **预期类型标签** (`.item-expected-type`)：
+   - 背景从 `#e5e7eb` 改为更柔和的 `#eef2f7`
+   - 圆角从 `3px` 加大到 `4px`，内边距增加
+
+5. **文件行** (`.file-row`)：
+   - 从虚线分隔改为独立卡片式（圆角 `6px` + 浅灰背景 `#f9fafb`）
+   - hover 时背景变为 `#f0f4fa`
+
+6. **上传行** (`.upload-row`)：
+   - 新增顶部分隔虚线 `border-top: 1px dashed #e4e7ed`
+
+**备注**
+
+- 整体配色向 Element Plus 默认主题靠拢，使用柔和的蓝色系渐变替代纯灰色
+- 所有修改仅涉及 CSS，不影响功能和 API 调用
+
 ---
 
 ## 2026-07-04 (设备编辑页布局对齐 + 列表排序 + 列置顶)
@@ -1842,3 +2821,123 @@ K8s Ingress 未代理 `/api/*` 到后端，前端 `POST http://192.168.180.171:3
 **备注**
 
 - 网络断开时不再被误判为「未配置」，用户能看到明确的错误提示
+
+---
+
+## 2026-07-08 (多类型合同列表页 + 附件管理页)
+
+### [新增] 多类型合同管理前端
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 新增 |
+| 范围 | 路由 + 侧边栏 + API 模块 + 6 个业务页面 |
+| 影响文件 | 见下方详细清单 |
+| 关联任务 | 多类型合同列表页 + 附件管理页 |
+
+#### 改动概览
+
+1. **路由重构** (`frontend/src/router/index.ts`)：
+   - `/contracts` → 重定向到 `/contracts/compute-leasing`
+   - 原算力租赁合同路径迁移至 `/contracts/compute-leasing/*`
+   - 新增卫星数据合同路由：`/contracts/satellite-data/*`
+   - 新增算力服务合同路由：`/contracts/compute-service/*`
+   - 每种合同类型新增 `/:id/attachments` 附件管理路由
+   - 系统配置新增 `/system/attachment-categories` 附件分类管理路由
+
+2. **侧边栏重构** (`frontend/src/layouts/MainLayout.vue`)：
+   - 「合同管理」从单一菜单改为 sub-menu（算力租赁 / 卫星数据 / 算力服务）
+   - 系统配置子菜单新增「附件分类管理」
+   - 面包屑逻辑适配新路由结构
+   - 新增图标导入：Monitor、DataAnalysis、Cpu、FolderOpened
+
+3. **新增 API 模块**：
+   - `frontend/src/api/modules/satellite-contract.ts`：卫星数据合同 CRUD
+   - `frontend/src/api/modules/service-contract.ts`：算力服务合同 CRUD
+   - `frontend/src/api/modules/attachment.ts`：附件管理全部接口（含附件 CRUD、状态确认、分类管理）
+
+4. **共享常量扩展** (`frontend/src/lib/contract.ts`)：
+   - 新增 `CONTRACT_TYPE_LABEL`、`CONTRACT_TYPE_ROUTE`、`CONTRACT_TYPE_OPTIONS`
+   - 新增 `ATTACHMENT_STATUS_COLORS`
+
+5. **卫星数据合同页面** (`frontend/src/views/satellite-contracts/`)：
+   - `index.vue`：列表页（客户筛选、搜索、附件状态圆点、附件下拉按钮）
+   - `form.vue`：创建/编辑共用（客户选择器、合同名称、合同编号、备注）
+   - `detail.vue`：详情页（基本信息 + 附件状态卡片）
+
+6. **算力服务合同页面** (`frontend/src/views/service-contracts/`)：
+   - 结构与卫星数据合同相同，API 指向 `/api/compute-service-contracts`
+
+7. **附件管理页** (`frontend/src/views/attachments/AttachmentsPage.vue`)：
+   - 可复用页面，根据路由自动推断 contract_type
+   - 展开/折叠分类 + 子项确认/取消确认
+   - 文件上传（el-upload）、下载（window.open）、删除（二次确认）
+   - 文件大小格式化显示
+
+8. **附件分类管理页** (`frontend/src/views/system/attachment-categories.vue`)：
+   - 三个 Tab 切换合同类型
+   - 分类增删改 + 上移/下移排序
+   - 子项增删改 + 上移/下移排序
+   - 删除为软删除（弹窗提示不影响已有数据）
+
+9. **算力租赁合同列表页更新** (`frontend/src/views/contracts/index.vue`)：
+   - 新增「附件状态」列（三个圆点指示器）
+   - 操作列新增「附件」下拉按钮
+   - 异步加载附件汇总状态
+
+10. **算力租赁合同详情页更新** (`frontend/src/views/contracts/detail.vue`)：
+    - 新增「附件状态」区块（三个分类的状态卡片）
+    - 操作栏新增「附件管理」按钮
+    - 不影响已有设备关联/联系人/邮件发送功能
+
+#### 验收
+
+- ✅ `vue-tsc --noEmit` 0 错误
+- ✅ 所有新文件 TypeScript 严格类型，无 `any`
+- ✅ 原有算力租赁合同功能保持不变
+- ✅ 路由 / 侧边栏 / 面包屑全部适配
+
+#### 关联任务
+
+多类型合同列表页 + 附件管理页
+
+#### 备注
+
+- 附件管理页通过路由路径推断 `contract_type`（`compute_leasing` / `satellite_data` / `compute_service`）
+- 附件状态圆点颜色：绿色=已确认、红色=未确认、灰色=未上传
+- 后端 API 接口按 `docs/api-contracts-attachments.md` 契约实现
+
+---
+
+## 2026-07-06
+
+### [修复] pdfjs-dist worker 从 CDN 改为本地 npm 包导入
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 修复 |
+| 范围 | 附件管理页 PDF 预览 |
+| 影响文件 | `frontend/src/views/attachments/AttachmentsPage.vue` |
+| 关联任务 | pdfjs-dist worker 加载失败修复 |
+
+#### 问题
+
+原代码通过 CDN 加载 pdfjs worker：
+```typescript
+GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/6.1.200/pdf.worker.min.mjs`
+```
+内网环境无法访问 CDN，导致 PDF 预览报错。
+
+#### 修复
+
+改为使用 Vite `?url` 后缀从 npm 包本地导入 worker 文件：
+```typescript
+import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
+GlobalWorkerOptions.workerSrc = pdfjsWorker
+```
+
+#### 验收
+
+- `vue-tsc -b` 零错误 ✅
+- `vite build` 成功，worker 文件正确打包至 `dist/assets/pdf.worker.min-*.mjs` ✅
+- PDF 预览不再依赖外网 CDN ✅

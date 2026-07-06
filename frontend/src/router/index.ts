@@ -35,30 +35,106 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '联系人管理', icon: 'User', hidden: true },
       },
 
-      // ---------- 合同管理（位于客户/租赁之间：合同归属客户，租赁归属合同） ----------
+      // ---------- 合同管理（重定向到算力租赁） ----------
       {
         path: 'contracts',
+        redirect: '/contracts/compute-leasing',
+      },
+
+      // ---------- 算力租赁合同（原 /contracts 内容，路径迁移至此） ----------
+      {
+        path: 'contracts/compute-leasing',
         name: 'ContractList',
         component: () => import('@/views/contracts/index.vue'),
-        meta: { title: '合同管理', icon: 'Notebook' },
+        meta: { title: '算力租赁', icon: 'Monitor', parent: 'contracts' },
       },
       {
-        path: 'contracts/create',
+        path: 'contracts/compute-leasing/create',
         name: 'ContractCreate',
         component: () => import('@/views/contracts/create.vue'),
-        meta: { title: '新建合同', icon: 'Notebook', hidden: true },
+        meta: { title: '新建合同', icon: 'Monitor', hidden: true, parent: 'contracts' },
       },
       {
-        path: 'contracts/:id',
+        path: 'contracts/compute-leasing/:id',
         name: 'ContractDetail',
         component: () => import('@/views/contracts/detail.vue'),
-        meta: { title: '合同详情', icon: 'Notebook', hidden: true },
+        meta: { title: '合同详情', icon: 'Monitor', hidden: true, parent: 'contracts' },
       },
       {
-        path: 'contracts/:id/edit',
+        path: 'contracts/compute-leasing/:id/edit',
         name: 'ContractEdit',
         component: () => import('@/views/contracts/create.vue'),
-        meta: { title: '编辑合同', icon: 'Notebook', hidden: true },
+        meta: { title: '编辑合同', icon: 'Monitor', hidden: true, parent: 'contracts' },
+      },
+      {
+        path: 'contracts/compute-leasing/:id/attachments',
+        name: 'ComputeLeasingAttachments',
+        component: () => import('@/views/attachments/AttachmentsPage.vue'),
+        meta: { title: '附件管理', icon: 'Monitor', hidden: true, parent: 'contracts' },
+      },
+
+      // ---------- 卫星数据合同 ----------
+      {
+        path: 'contracts/satellite-data',
+        name: 'SatelliteContractList',
+        component: () => import('@/views/satellite-contracts/index.vue'),
+        meta: { title: '卫星数据', icon: 'DataAnalysis', parent: 'contracts' },
+      },
+      {
+        path: 'contracts/satellite-data/create',
+        name: 'SatelliteContractCreate',
+        component: () => import('@/views/satellite-contracts/form.vue'),
+        meta: { title: '新建卫星数据合同', icon: 'DataAnalysis', hidden: true, parent: 'contracts' },
+      },
+      {
+        path: 'contracts/satellite-data/:id',
+        name: 'SatelliteContractDetail',
+        component: () => import('@/views/satellite-contracts/detail.vue'),
+        meta: { title: '卫星数据合同详情', icon: 'DataAnalysis', hidden: true, parent: 'contracts' },
+      },
+      {
+        path: 'contracts/satellite-data/:id/edit',
+        name: 'SatelliteContractEdit',
+        component: () => import('@/views/satellite-contracts/form.vue'),
+        meta: { title: '编辑卫星数据合同', icon: 'DataAnalysis', hidden: true, parent: 'contracts' },
+      },
+      {
+        path: 'contracts/satellite-data/:id/attachments',
+        name: 'SatelliteDataAttachments',
+        component: () => import('@/views/attachments/AttachmentsPage.vue'),
+        meta: { title: '附件管理', icon: 'DataAnalysis', hidden: true, parent: 'contracts' },
+      },
+
+      // ---------- 算力服务合同 ----------
+      {
+        path: 'contracts/compute-service',
+        name: 'ServiceContractList',
+        component: () => import('@/views/service-contracts/index.vue'),
+        meta: { title: '算力服务', icon: 'Cpu', parent: 'contracts' },
+      },
+      {
+        path: 'contracts/compute-service/create',
+        name: 'ServiceContractCreate',
+        component: () => import('@/views/service-contracts/form.vue'),
+        meta: { title: '新建算力服务合同', icon: 'Cpu', hidden: true, parent: 'contracts' },
+      },
+      {
+        path: 'contracts/compute-service/:id',
+        name: 'ServiceContractDetail',
+        component: () => import('@/views/service-contracts/detail.vue'),
+        meta: { title: '算力服务合同详情', icon: 'Cpu', hidden: true, parent: 'contracts' },
+      },
+      {
+        path: 'contracts/compute-service/:id/edit',
+        name: 'ServiceContractEdit',
+        component: () => import('@/views/service-contracts/form.vue'),
+        meta: { title: '编辑算力服务合同', icon: 'Cpu', hidden: true, parent: 'contracts' },
+      },
+      {
+        path: 'contracts/compute-service/:id/attachments',
+        name: 'ComputeServiceAttachments',
+        component: () => import('@/views/attachments/AttachmentsPage.vue'),
+        meta: { title: '附件管理', icon: 'Cpu', hidden: true, parent: 'contracts' },
       },
 
       // ---------- 设备管理 ----------
@@ -146,6 +222,12 @@ const routes: RouteRecordRaw[] = [
             name: 'DingTalkConfig',
             component: () => import('@/views/system/dingtalk.vue'),
             meta: { title: '钉钉通知', icon: 'ChatDotRound' },
+          },
+          {
+            path: 'attachment-categories',
+            name: 'AttachmentCategories',
+            component: () => import('@/views/system/attachment-categories.vue'),
+            meta: { title: '附件分类管理', icon: 'FolderOpened' },
           },
         ],
       },

@@ -57,11 +57,12 @@ metadata:
   labels:
     app: cronmail-frontend
 spec:
-  type: ClusterIP
+  type: NodePort
   selector:
     app: cronmail-frontend
   ports:
     - port: 80
       targetPort: 80
+      nodePort: 30081
       protocol: TCP
       name: http

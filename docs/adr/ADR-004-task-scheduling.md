@@ -4,9 +4,10 @@
 Accepted
 
 ## Context
-平台需要两个定时任务：
-1. **临期提醒**：每天检查到期前 ≤3 天的租赁记录，发提醒邮件
-2. **到期回收**：每天检查已到期的租赁记录，发回收邮件并更新状态
+平台需要三个定时任务（原计划两个，V2 通知流程将到期提醒与回收拆分为独立任务）：
+1. **临期提醒**：每天 08:00 检查到期前 N 天的合同，发提醒邮件（N 可配置，默认 7 天和 3 天）
+2. **到期提醒**：每天 08:00 检查当天到期的合同，发「今天到期，今晚回收」提醒
+3. **到期回收**：每天 00:01 执行回收 + 发送回收通知邮件
 
 需要选择一个定时任务调度方案。
 
@@ -27,48 +28,56 @@ Accepted
 ### 定时任务定义
 
 ```python
-# 临期提醒：每天 08:00 执行
+# 临期提醒：每天 08:00 执行（扫描到期前 N 天的合同，N 从 system_config 读取）
 @celery_app.task
 def check_expiring_rentals():
     """
-    查出 end_date - today <= 3 天且 end_date > today
-    且 status in (PROVISIONED, EXPIRING)
-    逐条发临期提醒邮件，状态更新为 EXPIRING
+    按合同维度扫描：合同 end_date - today <= warning_days 且 end_date > today
+    且合同 status in (active, expiring)
+    按合同合并设备 → send_merged_email_by_contract
+    合同状态更新为 expiring
     """
 
-# 到期回收：每天 02:00 执行
+# 到期提醒：每天 08:00 执行
 @celery_app.task
 def check_expired_rentals():
     """
-    查出 end_date < today 且 status in (EXPIRING, PROVISIONED)
-    逐条发回收通知邮件，状态更新为 RECLAIMED
+    按合同维度扫描：合同 end_date = today 且合同 status in (active, expiring)
+    发 expiry_notice 邮件（「今天到期，今晚回收」）
+    合同状态更新为 expired
+    """
+
+# 到期回收：每天 00:01 执行
+@celery_app.task
+def check_reclaim_expired():
+    """
+    按合同维度扫描：合同 end_date < today 且合同 status = expired
+    执行回收 + 发 reclaim 邮件
+    合同状态更新为 reclaimed + 快照设备 ID 到 history_rental_ids
     """
 ```
 
-### Celery Beat 调度配置
+### 调度时间：从数据库动态读取
 
-```python
-beat_schedule = {
-    'check-expiring-rentals': {
-        'task': 'scheduler.tasks.check_expiring_rentals',
-        'schedule': crontab(hour=8, minute=0),
-    },
-    'check-expired-rentals': {
-        'task': 'scheduler.tasks.check_expired_rentals',
-        'schedule': crontab(hour=2, minute=0),
-    },
-}
+调度时间不在代码中硬编码，而是从 `system_config` 表读取，管理员可在前端 `/system/config` 页面动态调整：
+
+```
+system_config keys:
+- check-expiring-rentals  → 默认 "08:00"
+- check-expired-rentals   → 默认 "08:00"
+- check-reclaim-expired   → 默认 "00:01"
+- expiry_warning_days     → 默认 "7,3"（逗号分隔多天数）
 ```
 
 ### 手动触发支持
 
-管理员可在前端手动触发以下操作（不走定时任务）：
-- 发送开通邮件（租赁详情页按钮）
-- 发送临期提醒（对单条记录手动发送）
-- 标记已回收并发送通知
+管理员可在前端手动触发以下操作（通过 Celery 异步任务 `send_manual_email`）：
+- 发送开通邮件（设备详情页按钮，按合同合并发送）
+- 发送临期提醒（按合同合并发送）
+- 回收并发送通知（按合同合并发送）
 - 对失败的邮件一键重发
 
-手动触发通过调用 REST API，由后端同步或异步（Celery task）执行。
+手动触发通过调用 REST API，后端通过 Celery task 异步执行。
 
 ## Consequences
 

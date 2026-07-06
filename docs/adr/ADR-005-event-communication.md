@@ -12,7 +12,7 @@ Accepted
 
 ## Decision
 
-采用 **Python blinker（Signal）做进程内事件总线**。
+采用 **Python blinker（Signal）做进程内事件总线**，但实际邮件发送已改为直接调用 + Celery 异步任务。
 
 ### 方案对比
 
@@ -24,53 +24,32 @@ Accepted
 | 适用场景 | 单体应用 | 分布式 | 单体 |
 | 调试难度 | ✅ 容易 | ⚠️ 需额外工具 | ✅ 容易 |
 
+### 当前实际使用情况
+
+blinker 事件机制仍然存在，但**主要发送路径已改为直接调用**：
+
+| 场景 | 发送机制 | 说明 |
+|------|---------|------|
+| 定时任务（临期/到期/回收） | 直接调用 `send_merged_email_by_contract()` | 同步发送，按合同合并 |
+| 手动发送（开通/提醒/回收） | Celery 异步任务 `send_manual_email.delay()` | 按合同合并，异步执行 |
+| blinker 订阅者 | 保留但降级为日志/审计用途 | 仅记录 EmailLog，不执行 SMTP 发送 |
+
 ### 事件定义
 
 ```python
 # rental/events.py
 import blinker
 
-# 信号定义
+# 信号定义（保留用于审计/日志）
 rental_provisioned = blinker.signal('rental.provisioned')
 rental_expiring = blinker.signal('rental.expiring')
 rental_expired = blinker.signal('rental.expired')
 rental_reclaimed = blinker.signal('rental.reclaimed')
 ```
 
-```python
-# mail/subscribers.py
-from rental.events import rental_provisioned, rental_expiring, rental_expired
+### 手动触发的流程（当前实际实现）
 
-@rental_provisioned.connect
-def on_rental_provisioned(sender, rental_record, template):
-    """发送开通邮件"""
-    ...
-
-@rental_expiring.connect
-def on_rental_expiring(sender, rental_record, template):
-    """发送临期提醒"""
-    ...
-
-@rental_expired.connect
-def on_rental_expired(sender, rental_record, template):
-    """发送回收通知"""
-    ...
-```
-
-```python
-# 发布事件（在 rental/services.py 中）
-from rental.events import rental_provisioned
-
-def send_provision_email(rental_record):
-    template = get_template('provision')
-    rental_provisioned.send(rental_record, template=template)
-```
-
-### 手动触发的流程
-
-管理员在详情页点击「发送开通邮件」→ 调用 `POST /api/rentals/{id}/send-provision-email` → rental Service 发布 `rental_provisioned` 事件 → mail 模块监听到 → 渲染模板 → SMTP 发送 → 写 EmailLog
-
-**区别于自动发送**：创建租赁记录时不自动发布事件，仅保存数据。
+管理员在详情页点击「发送开通邮件」→ 调用 `POST /api/rentals/{id}/send-provision-email` → rental API 查出关联合同 → `send_manual_email.delay(contract_id, trigger_type)` → Celery Worker 执行 → `send_merged_email_by_contract()` → 渲染模板 → SMTP 发送 → 写 EmailLog
 
 ## Consequences
 

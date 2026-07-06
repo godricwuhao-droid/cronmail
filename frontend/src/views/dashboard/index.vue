@@ -69,7 +69,7 @@
                 </el-table-column>
               </el-table>
               <div class="reminder-actions">
-                <el-button size="small" type="primary" @click="$router.push(`/contracts/${row.contract_id}`)">查看详情</el-button>
+                <el-button size="small" type="primary" @click="$router.push(`/contracts/compute-leasing/${row.contract_id}`)">查看详情</el-button>
                 <el-button size="small" type="warning" @click="handleSendReminder(row)">发送提醒</el-button>
               </div>
             </div>
@@ -212,7 +212,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, reactive } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Odometer, Bell, Document, Clock, Checked, Message, ArrowRightBold } from '@element-plus/icons-vue'
+import { Odometer, Bell, Document, Clock, Checked, CircleCloseFilled, ArrowRightBold } from '@element-plus/icons-vue'
 import { getDashboardStats, type DashboardStats } from '@/api/modules/contract'
 import { sendExpiryReminder } from '@/api/modules/rental'
 function formatIpList(ips: any): string {
@@ -222,7 +222,7 @@ function formatIpList(ips: any): string {
 }
 
 const loading = ref(false)
-const stats = ref({ totalContracts: 0, expiring: 0, reclaimed: 0, emailSent: 0 })
+const stats = ref({ totalContracts: 0, expiring: 0, expired: 0, reclaimed: 0 })
 const expiringContracts = ref<DashboardStats['expiring_contracts']>([])
 
 /** 展开状态映射 */
@@ -236,7 +236,7 @@ const statCards = computed(() => [
   { key: 'total', label: '合同总数', value: stats.value.totalContracts, color: '#409EFF', icon: Document },
   { key: 'expiring', label: '即将到期', value: stats.value.expiring, color: '#E6A23C', icon: Clock },
   { key: 'reclaimed', label: '已回收', value: stats.value.reclaimed, color: '#909399', icon: Checked },
-  { key: 'email', label: '邮件发送', value: stats.value.emailSent, color: '#67C23A', icon: Message },
+  { key: 'expired', label: '已到期', value: stats.value.expired, color: '#F56C6C', icon: CircleCloseFilled },
 ])
 
 /** 合同状态标签颜色 */
@@ -275,7 +275,7 @@ onMounted(async () => {
     stats.value.totalContracts = data.total_contracts
     stats.value.expiring = data.expiring
     stats.value.reclaimed = (data as any).reclaimed ?? 0
-    stats.value.emailSent = data.email_sent ?? 0
+    stats.value.expired = data.expired ?? 0
     expiringContracts.value = data.expiring_contracts || []
   } catch {
     // 错误已统一处理

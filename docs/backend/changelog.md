@@ -1,5 +1,154 @@
 # CronMail 后端变更日志
 
+## 2026-07-17 (部署) — 后端镜像重新构建部署 (第四次)
+
+### 部署
+- **后端镜像构建 + K8s 滚动更新**
+  - 影响文件：`Dockerfile.backend`
+  - 变更内容：
+    1. Docker 构建 `harbor.xhwltech.com/xhcloud/cronmail-backend:latest`（镜像 ID: `ff028ddb99fc`）
+    2. 推送镜像到 Harbor（digest: `sha256:3a08533606f87ac19b946abe1fa1ca009b736dea5330f01a66a4bdda1ff2d582`）
+    3. 滚动重启 `cronmail-backend-api` Deployment（`kubectl rollout restart`）
+    4. 部署成功，`cronmail-backend-api` successfully rolled out
+  - 构建代理：`http://192.168.180.251:7890`
+  - 关联任务：后端部署
+
+---
+
+## 2026-07-17 (修复) — 附件分类管理页软删除子项仍显示
+
+### 修复
+- **`GET /api/system/attachment-categories` 软删除子项仍显示**
+  - 影响文件：`backend/src/attachment/services.py`
+  - 根因：`list_categories` 函数未过滤 `is_active`，直接通过 SQLAlchemy relationship 加载所有子项（含软删除）
+  - 修复方式：
+    1. 查询分类时增加 `AttachmentCategory.is_active == True` 过滤软删除的分类
+    2. 对每个分类的 `items` 列表做 `is_active` 过滤，排除已软删除的子项
+  - 关联任务：附件分类管理页软删除子项仍显示
+  - 备注：附件管理页面（`get_attachment_list` / `get_summary`）原本已正确过滤 `is_active`，不受影响
+
+---
+
+## 2026-07-17 (修改) — Dashboard 待处理提醒加入已到期合同
+
+### 修改
+- **`get_expiring_contracts_with_rentals` 纳入已到期合同**
+  - 影响文件：`backend/src/contract/dashboard.py`
+  - 变更内容：
+    1. 函数从「仅返回临期合同」改为「返回已到期 + 临期合同」
+    2. 新增已到期查询：`Contract.status == 'expired'`，按 `end_date` 升序
+    3. 合并逻辑：已到期排在临期前面（更紧急），通过 `seen` set 去重防止同一合同被两次命中
+    4. 总返回条数不超过 `limit` 参数（默认 10）
+  - 关联任务：Dashboard 待处理提醒加入已到期合同
+  - 备注：前端无需修改 —— `contractStatusTagType` 和 `contractStatusLabel` 已有 `expired` 状态支持
+
+---
+
+## 2026-07-17 (修改) — 仪表盘统计增加「已到期」合同数
+
+### 修改
+- **`get_dashboard_stats` 新增 `expired` 字段**
+  - 影响文件：`backend/src/contract/dashboard.py`
+  - 变更内容：
+    1. 新增 `expired = db.query(Contract).filter(Contract.status == 'expired').count()` 查询已到期合同数
+    2. 返回值新增 `expired` 字段：`{"total_contracts": ..., "expiring": ..., "expired": ..., "reclaimed": ...}`
+  - 关联任务：仪表盘已到期统计
+
+---
+
+## 2025-07-17 (修复) — 中文文件名下载 UnicodeEncodeError
+
+### 修复
+- **`GET /api/attachments/{id}/download` 中文文件名下载 500 错误**
+  - 影响文件：`backend/src/attachment/api.py`
+  - 根因：`Content-Disposition` header 直接拼接中文文件名（如 `【晨涧-盖亚】算力服务合同.pdf`），Starlette/Uvicorn 底层对 HTTP header 做 latin-1 编码时报 `UnicodeEncodeError: 'latin-1' codec can't encode characters`
+  - 修复方式：
+    1. 新增 `import urllib.parse`
+    2. `download_attachment` 函数中，使用 `urllib.parse.quote(filename, safe='')` 对文件名做 URL 编码（RFC 5987）
+    3. 同时提供 `filename`（ASCII fallback，中文 strip 后剩余部分或 `download`）和 `filename*=UTF-8''...`（RFC 5987 编码），兼容新旧浏览器
+  - 关联任务：中文文件名下载修复
+
+---
+
+## 2025-07-17 (修复) — 附件上传 413 + FormData 字段名匹配
+
+### 修复
+- **nginx 未设置 client_max_body_size 导致附件上传 413**
+  - 影响文件：`frontend/nginx.conf`
+  - 变更内容：
+    1. `http` 块全局添加 `client_max_body_size 200m;`（第 15 行）
+    2. `/api/` location 块内添加 `client_max_body_size 200m;`（第 32 行）
+  - 根因：nginx 默认 `client_max_body_size` 仅 1MB，上传大文件直接返回 413 Request Entity Too Large
+  - 关联任务：附件上传 413 修复
+
+- **前端 FormData 字段名 `file` 与后端 `files` 不匹配**
+  - 影响文件：`frontend/src/views/attachments/AttachmentsPage.vue`
+  - 变更内容：`formData.append('file', file)` → `formData.append('files', file)`
+  - 根因：前端传 `file`（单数），后端 `POST /api/attachments/upload` 期望 `files`（复数 `list[UploadFile]`），字段名不匹配导致后端收不到文件
+  - 关联任务：附件上传 413 修复
+
+---
+
+## 2026-07-03 (新增) — 多类型合同 + 附件管理
+
+### 新增
+- **附件管理模块 (`backend/src/attachment/`)**
+  - 影响文件：`backend/src/attachment/models.py`, `schemas.py`, `services.py`, `api.py`
+  - 变更内容：
+    1. `AttachmentCategory` — 附件分类表，支持按合同类型（compute_leasing/satellite_data/compute_service）区分
+    2. `AttachmentItem` — 分类下的子项清单表（如「合同扫描件」「验收单扫描件」等）
+    3. `Attachment` — 实际文件表，多态关联三张合同表（contract_type + contract_id）
+    4. `AttachmentStatus` — 子项完成确认状态表，含 UniqueConstraint(contract_type, contract_id, item_id)
+  - API 路由：
+    - `GET /api/attachments?contract_type=&contract_id=` — 按合同获取附件列表（分类+子项结构）
+    - `POST /api/attachments/upload` — 多文件上传（multipart/form-data），存储至 `/app/uploads/{contract_type}/{contract_id}/{item_id}/{uuid}.ext`
+    - `GET /api/attachments/{id}/download` — 文件下载（FileResponse）
+    - `DELETE /api/attachments/{id}` — 删除文件（磁盘 + DB）
+    - `GET /api/attachments/status/summary?contract_type=&contract_id=` — 完成状态汇总
+    - `POST /api/attachments/status/{item_id}/confirm` — 确认完成
+    - `POST /api/attachments/status/{item_id}/unconfirm` — 取消确认
+  - 附件分类管理路由（挂载在 `/api/system/attachment-categories`）：
+    - `GET /api/system/attachment-categories?contract_type=` — 列表（含子项）
+    - `POST /api/system/attachment-categories` — 创建分类
+    - `PUT /api/system/attachment-categories/{id}` — 更新
+    - `DELETE /api/system/attachment-categories/{id}` — 软删除
+    - `PUT /api/system/attachment-categories/{id}/reorder` — 排序
+    - `POST /api/system/attachment-categories/{category_id}/items` — 添加子项
+    - `PUT /api/system/attachment-items/{item_id}` — 更新子项
+    - `DELETE /api/system/attachment-items/{item_id}` — 软删除子项
+    - `PUT /api/system/attachment-items/{item_id}/reorder` — 子项排序
+  - 关联任务：多类型合同 + 附件管理
+
+- **卫星数据合同模块 (`backend/src/satellite/`)**
+  - 影响文件：`backend/src/satellite/models.py`, `schemas.py`, `services.py`, `api.py`
+  - 路由前缀：`/api/satellite-data-contracts`
+  - CRUD + 列表（支持 `customer_id`, `search` 筛选，含 customer_name 关联查询）
+  - 关联任务：多类型合同 + 附件管理
+
+- **算力服务合同模块 (`backend/src/compute_service/`)**
+  - 影响文件：`backend/src/compute_service/models.py`, `schemas.py`, `services.py`, `api.py`
+  - 路由前缀：`/api/compute-service-contracts`
+  - CRUD + 列表（支持 `customer_id`, `search` 筛选）
+  - 关联任务：多类型合同 + 附件管理
+
+- **默认附件分类初始化**
+  - 影响文件：`backend/main.py`, `backend/src/attachment/services.py`
+  - 变更内容：应用启动时自动初始化三种合同类型（compute_leasing / satellite_data / compute_service）的默认分类和子项，幂等（已存在则跳过）
+  - 默认分类：合同协议(合同扫描件) / 交付材料(验收单扫描件) / 过程材料(资源交付清单 + 资源开通邮件截图)
+  - 关联任务：多类型合同 + 附件管理
+
+- **Alembic 迁移**
+  - 影响文件：`backend/alembic/versions/c587c343402d_004_add_attachment_satellite_compute_.py`
+  - 变更内容：创建 6 张新表（attachment_category, attachment_item, attachment, attachment_status, satellite_data_contract, compute_service_contract）
+  - 关联任务：多类型合同 + 附件管理
+
+### 约束
+- ⚠️ 现有 `contract` 表/模型/API 一行未改，算力租赁功能不受影响
+- 文件上传存储在 `/app/uploads/` 目录下（K8s NFS 挂载），通过 `os.makedirs` 确保目录存在
+- 所有新模块遵循项目现有分层：models / schemas / services / api
+
+---
+
 ## 2026-07-03 (新增) — 设备列表支持排序
 
 ### 新增
@@ -952,3 +1101,49 @@ INSERT IGNORE INTO system_config (id, `key`, value, description) VALUES (UUID(),
 - **Alembic 迁移配置**：`backend/alembic.ini` + `backend/alembic/env.py` + `backend/alembic/script.py.mako`
   - 影响文件：`backend/alembic.ini`, `backend/alembic/env.py`, `backend/alembic/script.py.mako`
   - 关联任务：后端脚手架 + 全部数据模型 + 核心基础设施
+
+---
+
+## 2026-07-17 (部署) — 后端镜像重新构建部署 (第三次)
+
+### 部署
+- **后端镜像构建 + K8s 滚动更新**
+  - 影响文件：`Dockerfile.backend`
+  - 变更内容：
+    1. Docker 构建 `harbor.xhwltech.com/xhcloud/cronmail-backend:latest`（镜像 ID: `24d322b7f47d`）
+    2. 推送镜像到 Harbor（digest: `sha256:7ac0cc0ae548b4bcef2dc4ea411934a5e9216149a9abc6bb71b19cb8d5dba45c`）
+    3. 滚动重启 `cronmail-backend-api` Deployment（`kubectl rollout restart`）
+    4. 部署成功，`cronmail-backend-api` successfully rolled out
+  - 构建代理：`http://192.168.180.251:7890`
+  - 关联任务：后端部署
+
+---
+
+## 2026-07-17 (部署) — 后端镜像重新构建部署 (第三次)
+
+### 部署
+- **后端镜像构建 + K8s 滚动更新**
+  - 影响文件：`Dockerfile.backend`
+  - 变更内容：
+    1. Docker 构建 `harbor.xhwltech.com/xhcloud/cronmail-backend:latest`（镜像 ID: `da3897757668`）
+    2. 推送镜像到 Harbor（digest: `sha256:2a8f2ada47443e112bdc87f066a403efe2341da87f5701ce5b4d40640f99b8a6`）
+    3. 滚动重启 `cronmail-backend-api` Deployment（`kubectl rollout restart`）
+    4. 部署成功，`cronmail-backend-api` successfully rolled out
+  - 构建代理：`http://192.168.180.251:7890`
+  - 关联任务：后端部署
+
+---
+
+## 2026-07-17 (部署) — 后端镜像重新构建部署 (第二次)
+
+### 部署
+- **后端镜像构建 + K8s 滚动更新**
+  - 影响文件：`Dockerfile.backend`
+  - 变更内容：
+    1. Docker 构建 `harbor.xhwltech.com/xhcloud/cronmail-backend:latest`（镜像 ID: `4da85e1497fb`）
+    2. 推送镜像到 Harbor（digest: `sha256:3d5a56b2fa181ef6ac3d6b0b76fd3a0f5325ed58a15d935310016b9fa8e735e8`）
+    3. 滚动重启 `cronmail-backend-api` Deployment（`kubectl rollout restart`）
+    4. 新 Pod `cronmail-backend-api-65488f7694-kvhcc` 就绪，1/1 Running
+    5. 健康检查 `GET /api/health` 200 OK，应用环境 PRODUCTION
+  - 构建代理：`http://192.168.180.251:7890`
+  - 关联任务：后端部署

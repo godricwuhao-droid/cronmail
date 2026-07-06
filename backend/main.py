@@ -14,13 +14,16 @@ from src.core.database import engine, Base, SessionLocal
 # 导入所有模型，确保 Base.metadata 包含全部表定义
 # （必须在 create_all 之前导入）
 # ============================================================
-import src.customer.models   # noqa: E402, F401
-import src.rental.models     # noqa: E402, F401
-import src.contract.models   # noqa: E402, F401
-import src.template.models   # noqa: E402, F401
-import src.mail.models       # noqa: E402, F401
-import src.system.models      # noqa: E402, F401
-import src.scheduler.models  # noqa: E402, F401
+import src.customer.models        # noqa: E402, F401
+import src.rental.models          # noqa: E402, F401
+import src.contract.models        # noqa: E402, F401
+import src.template.models        # noqa: E402, F401
+import src.mail.models            # noqa: E402, F401
+import src.system.models           # noqa: E402, F401
+import src.scheduler.models       # noqa: E402, F401
+import src.attachment.models      # noqa: E402, F401
+import src.satellite.models       # noqa: E402, F401
+import src.compute_service.models # noqa: E402, F401
 
 
 # ============================================================
@@ -74,6 +77,16 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"[CronMail] 初始化默认配置跳过: {e}")
 
+    # 初始化默认附件分类
+    try:
+        db = SessionLocal()
+        from src.attachment.services import init_default_categories
+        init_default_categories(db)
+        db.close()
+        print("[CronMail] 已初始化默认附件分类")
+    except Exception as e:
+        print(f"[CronMail] 初始化默认附件分类跳过: {e}")
+
     print(f"[CronMail] 应用启动完成，环境: {'DEBUG' if settings.DEBUG else 'PRODUCTION'}")
     yield
     # 关闭时释放资源
@@ -115,6 +128,9 @@ from src.rental.api import rental_router  # noqa: E402
 from src.template.api import template_router  # noqa: E402
 from src.mail.api import log_router  # noqa: E402
 from src.contract.api import contract_router  # noqa: E402
+from src.satellite.api import satellite_router  # noqa: E402
+from src.compute_service.api import compute_service_router  # noqa: E402
+from src.attachment.api import attachment_router, system_attachment_category_router  # noqa: E402
 
 app.include_router(customer_router)
 app.include_router(contact_router)
@@ -123,6 +139,10 @@ app.include_router(rental_router)
 app.include_router(template_router)
 app.include_router(log_router)
 app.include_router(contract_router)
+app.include_router(satellite_router)
+app.include_router(compute_service_router)
+app.include_router(attachment_router)
+app.include_router(system_attachment_category_router)
 
 
 # ============================================================

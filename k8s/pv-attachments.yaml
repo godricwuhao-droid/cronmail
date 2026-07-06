@@ -1,0 +1,20 @@
+# CronMail 附件存储 PersistentVolume (NFS)
+# 手动创建（不由 StorageClass 动态分配）
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: cronmail-attachments-pv
+  labels:
+    app: cronmail
+    purpose: attachments
+spec:
+  capacity:
+    storage: 100Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  nfs:
+    server: 192.168.180.50
+    path: /cronmail

@@ -25,6 +25,10 @@ import {
   CONTRACT_STATUS_LABEL,
   CONTRACT_STATUS_TAG,
 } from '@/lib/contract'
+import {
+  getAttachmentSummary,
+  type AttachmentSummary,
+} from '@/api/modules/attachment'
 
 const router = useRouter()
 
@@ -55,6 +59,9 @@ async function loadCustomerOptions() {
   }
 }
 
+// 附件状态汇总缓存
+const summaryMap = ref<Record<string, AttachmentSummary>>({})
+
 let searchTimer: ReturnType<typeof setTimeout> | null = null
 function handleSearch() {
   if (searchTimer) clearTimeout(searchTimer)
@@ -82,10 +89,23 @@ async function fetchList() {
     const res = await listContracts(params)
     list.value = res.items
     total.value = res.total
+    // 异步加载附件汇总
+    loadSummaries(res.items)
   } catch {
     // 错误已统一处理
   } finally {
     loading.value = false
+  }
+}
+
+async function loadSummaries(items: ContractItem[]) {
+  for (const item of items) {
+    try {
+      const summary = await getAttachmentSummary('compute_leasing', item.id)
+      summaryMap.value[item.id] = summary
+    } catch {
+      // 忽略
+    }
   }
 }
 
@@ -126,6 +146,31 @@ async function handleDelete(row: ContractItem) {
   } catch {
     // 错误已统一处理
   }
+}
+
+// ============================================================
+// 附件状态辅助
+// ============================================================
+function goAttachments(row: ContractItem) {
+  router.push({ name: 'ComputeLeasingAttachments', params: { id: row.id } })
+}
+
+function statusDotColor(summary: AttachmentSummary | undefined, code: string): string {
+  if (!summary) return '#c0c4cc'
+  const item = summary.items[code]
+  if (!item || item.file_count === 0) return '#c0c4cc'
+  return item.confirmed ? '#10b981' : '#ef4444'
+}
+
+function statusDotTitle(summary: AttachmentSummary | undefined, code: string): string {
+  if (!summary) return '加载中...'
+  const item = summary.items[code]
+  if (!item || item.file_count === 0) return '未上传'
+  return item.confirmed ? `已确认 (${item.file_count} 个文件)` : `未确认 (${item.file_count} 个文件)`
+}
+
+function getSummary(row: ContractItem): AttachmentSummary | undefined {
+  return summaryMap.value[row.id]
 }
 
 // ============================================================
@@ -260,20 +305,40 @@ onMounted(() => {
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="200" fixed="right">
+        <el-table-column label="附件状态" width="140" align="center">
           <template #default="{ row }">
-            <el-button size="small" link type="primary" @click="goDetail(row)">详情</el-button>
-            <el-button size="small" link type="primary" @click="goEdit(row)">编辑</el-button>
-            <el-popconfirm
-              title="确定删除该合同？关联设备不会被删除"
-              confirm-button-text="删除"
-              cancel-button-text="取消"
-              @confirm="handleDelete(row)"
+            <el-tooltip
+              v-for="code in ['contract_agreement', 'delivery_material', 'process_material']"
+              :key="code"
+              :content="statusDotTitle(getSummary(row), code)"
+              placement="top"
             >
-              <template #reference>
-                <el-button size="small" link type="danger">删除</el-button>
-              </template>
-            </el-popconfirm>
+              <span
+                class="status-dot"
+                :style="{ backgroundColor: statusDotColor(getSummary(row), code) }"
+              />
+            </el-tooltip>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="260" fixed="right">
+          <template #default="{ row }">
+            <div class="action-buttons">
+              <el-button size="small" link type="primary" @click="goDetail(row)">详情</el-button>
+              <el-button size="small" link type="primary" @click="goEdit(row)">编辑</el-button>
+              <el-popconfirm
+                title="确定删除该合同？关联设备不会被删除"
+                confirm-button-text="删除"
+                cancel-button-text="取消"
+                @confirm="handleDelete(row)"
+              >
+                <template #reference>
+                  <el-button size="small" link type="danger">删除</el-button>
+                </template>
+              </el-popconfirm>
+              <el-button size="small" link type="primary" @click="goAttachments(row)">
+                附件
+              </el-button>
+            </div>
           </template>
         </el-table-column>
       </el-table>
@@ -310,5 +375,19 @@ onMounted(() => {
 }
 .muted {
   color: #c0c4cc;
+}
+.status-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin: 0 2px;
+  cursor: default;
+}
+.action-buttons {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  white-space: nowrap;
 }
 </style>

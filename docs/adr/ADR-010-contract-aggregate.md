@@ -1,7 +1,7 @@
 # ADR-010: 引入合同（Contract）聚合根
 
 ## Status
-Proposed
+Accepted
 
 ## Context
 
@@ -79,6 +79,18 @@ Customer ──1:N── Contract ──M:N── RentalRecord  (contract_rental
 - 前端需要合同管理页面（CRUD + 设备关联/解除）
 - 已有 API 需适配：租赁 CRUD 中去掉联系人字段，改为合同维度
 - 定时任务需改为扫描合同
+
+## 实现后补充
+
+实际实现与 ADR 的细微差异：
+
+| 项目 | ADR 原描述 | 实际实现 | 原因 |
+|------|-----------|---------|------|
+| `billing_model` 枚举 | `monthly/yearly` | 增加了 `quarterly` | 业务需要季度计费 |
+| `RentalRecord.end_date` | "设备去掉 end_date" | 保留但标注 DEPRECATED | 兼容过渡，邮件发送以合同日期为准 |
+| `contract_rental.rental_id` | "随时关联/取消关联" | `unique=True`（一设备一合同） | 防止设备被多个合同重复关联 |
+| `history_rental_ids` | 未提及 | JSON 字段，回收时快照设备 ID | 便于回收后复盘 |
+| `ChangeLog` 模型 | 未提及 | 新增变更日志表 | 审计合同/设备历史变更 |
 
 ## Reversibility
 中 —— 涉及数据库 schema 变更（2 新表 + 1 字段废弃），回滚需要数据回迁，但可在上线前通过测试环境充分验证。
