@@ -53,6 +53,7 @@ export const CONTRACT_TYPE_LABEL: Record<string, string> = {
   compute_leasing: '算力租赁',
   satellite_data: '卫星数据',
   compute_service: '算力服务',
+  project: '项目管理',
 }
 
 /** 合同类型 → 路由前缀 */
@@ -60,6 +61,7 @@ export const CONTRACT_TYPE_ROUTE: Record<string, string> = {
   compute_leasing: '/contracts/compute-leasing',
   satellite_data: '/contracts/satellite-data',
   compute_service: '/contracts/compute-service',
+  project: '/projects/fengyun',
 }
 
 /** 合同类型选项（用于下拉） */
@@ -67,6 +69,7 @@ export const CONTRACT_TYPE_OPTIONS: Array<{ label: string; value: string }> = [
   { label: '算力租赁', value: 'compute_leasing' },
   { label: '卫星数据', value: 'satellite_data' },
   { label: '算力服务', value: 'compute_service' },
+  { label: '项目管理', value: 'project' },
 ]
 
 /** 附件状态图标颜色映射 */

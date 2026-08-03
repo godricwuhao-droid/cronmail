@@ -44,7 +44,7 @@ ALLOWED_MIMETYPES = {
 }
 
 # 最大文件大小 50MB
-MAX_FILE_SIZE = 50 * 1024 * 1024
+MAX_FILE_SIZE = 200 * 1024 * 1024  # 200MB，与 Nginx client_max_body_size 一致
 
 
 def _get_upload_dir(contract_type: str, contract_id: str, item_id: str) -> str:
@@ -604,6 +604,35 @@ DEFAULT_CATEGORIES = [
                 "items": [
                     {"name": "资源交付清单", "description": "资源交付清单Excel", "expected_type": "excel", "sort_order": 1},
                     {"name": "资源开通邮件截图", "description": "资源开通邮件截图", "expected_type": "image", "sort_order": 2},
+                ],
+            },
+        ],
+    },
+    {
+        "contract_type": "project",
+        "categories": [
+            {
+                "name": "合同材料",
+                "code": "contract_material",
+                "sort_order": 1,
+                "items": [
+                    {"name": "合同扫描件", "expected_type": "pdf", "sort_order": 1},
+                ],
+            },
+            {
+                "name": "交付材料",
+                "code": "delivery_material",
+                "sort_order": 2,
+                "items": [
+                    {"name": "验收单", "expected_type": "pdf", "sort_order": 1},
+                ],
+            },
+            {
+                "name": "过程材料",
+                "code": "process_material",
+                "sort_order": 3,
+                "items": [
+                    {"name": "交付清单", "expected_type": "excel", "sort_order": 1},
                 ],
             },
         ],

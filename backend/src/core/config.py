@@ -20,6 +20,11 @@ class Settings(BaseSettings):
     APP_VERSION: str = "0.1.0"
     DEBUG: bool = True
 
+    # LLM（合同解析）
+    LLM_BASE_URL: str = "http://192.168.180.67:8080/v1"
+    LLM_API_KEY: str = "not-needed"
+    LLM_MODEL: str = "Qwen3.6-27B"
+
     # CORS
     CORS_ORIGINS: list[str] = ["*"]
 

@@ -20,6 +20,17 @@ export type ContractStatus = 'active' | 'expiring' | 'expired' | 'reclaimed'
 /** 计费方式 */
 export type ContractBillingModel = 'monthly' | 'quarterly' | 'yearly'
 
+/** 续期链路节点 */
+export interface RenewalChainNode {
+  id: string
+  name: string
+  status: string
+  start_date: string | null
+  end_date: string | null
+  is_current: boolean
+  renewal_seq: number
+}
+
 /** 合同列表项（不含 rentals/contacts 详情） */
 export interface ContractItem {
   id: string
@@ -31,11 +42,16 @@ export interface ContractItem {
   end_date: string
   billing_model: string
   status: ContractStatus
+  amount?: number | null
   remark?: string | null
   rental_count: number
   contact_count: number
+  sort_order?: number
   created_at?: string | null
   updated_at?: string | null
+  renewed_from_id?: string | null
+  renewal_seq?: number
+  has_renewal?: boolean
 }
 
 /** 合同关联设备条目 */
@@ -61,6 +77,7 @@ export interface ContractContactItem {
 export interface ContractDetail extends ContractItem {
   rentals: ContractRentalItem[]
   contacts: ContractContactItem[]
+  renewal_chain?: RenewalChainNode[]
 }
 
 /** 合同列表响应 */
@@ -88,9 +105,12 @@ export interface ContractCreatePayload {
   start_date: string
   end_date: string
   billing_model?: ContractBillingModel
+  amount?: number
   remark?: string
   rental_ids?: string[]
   contacts?: Array<{ contact_id: string; recipient_type: 'to' | 'cc' }>
+  renewed_from_id?: string
+  sort_order?: number
 }
 
 /** 合同更新载荷（所有字段可选；contacts 传入时全量替换） */
@@ -101,8 +121,10 @@ export interface ContractUpdatePayload {
   end_date?: string
   billing_model?: ContractBillingModel
   status?: ContractStatus
+  amount?: number
   remark?: string
   contacts?: Array<{ contact_id: string; recipient_type: 'to' | 'cc' }>
+  sort_order?: number
 }
 
 // ============================================================
@@ -159,6 +181,7 @@ export interface DashboardStats {
   total_contracts: number
   expiring: number
   expired: number
+  reclaimed: number
   email_sent?: number
   expiring_contracts: Array<{
     contract_id: string

@@ -15,17 +15,34 @@
 
 ### GET /api/customers
 
-列表，支持 `?search=` 模糊搜索名称。
+列表，支持以下查询参数：
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `search` | string | 否 | 按客户名称模糊搜索 |
+| `business_type` | string | 否 | 业务类型过滤，可选值：`算力租赁` / `卫星数据` / `算力服务`；命中 `business_types` JSON 数组中包含该值的客户；非法值被忽略 |
+| `status` | string | 否 | 状态过滤：`active` / `inactive` |
+| `page` | int | 否 | 页码，默认 1 |
+| `page_size` | int | 否 | 每页条数，默认 20，最大 100 |
 
 **响应**:
 ```json
 {
   "items": [
-    {"id": "uuid", "name": "某科技公司", "code": "KEJI", "status": "active", "created_at": "..."}
+    {"id": "uuid", "name": "某科技公司", "code": "KEJI", "status": "active", "business_types": ["算力租赁"], "created_at": "..."}
   ],
   "total": 1, "page": 1, "page_size": 20
 }
 ```
+
+**业务类型过滤示例**：
+
+合同管理按业务类型划分三类：
+- 算力租赁 → `?business_type=算力租赁`
+- 卫星数据 → `?business_type=卫星数据`
+- 算力服务 → `?business_type=算力服务`
+
+实现说明：MySQL 通过 `JSON_CONTAINS(business_types, '"算力租赁"') > 0` 进行数组包含匹配，单一字段精确匹配，不做模糊。
 
 ### POST /api/customers
 
@@ -371,6 +388,265 @@ encryption 枚举: `tls` | `starttls` | `none`
 **响应**:
 ```json
 {"success": true, "message": "测试邮件已发送"}
+```
+
+---
+
+## 8. 卫星数据合同 (SatelliteDataContract)
+
+Base: `/api/satellite-data-contracts`
+
+### 8.1 合同 CRUD
+
+### GET /api/satellite-data-contracts
+
+查询参数: `?customer_id=&search=&page=&page_size=`
+
+**响应** (ADR-013 新增字段标注 🆕):
+```json
+{
+  "items": [{
+    "id": "uuid",
+    "customer_id": "uuid",
+    "customer_name": "某科技公司",
+    "name": "卫星数据合同-2026",
+    "contract_no": "SAT-2026-001",
+    "contract_type": "数据采购",           // 🆕 自由文本
+    "project_name": "某某卫星项目",        // 🆕
+    "party_a_name": "某科技公司",          // 🆕
+    "party_b_name": "我方公司",            // 🆕
+    "start_date": "2026-07-01",           // 🆕
+    "end_date": "2027-06-30",             // 🆕
+    "amount": "800000.00",                // 🆕
+    "contract_content": "合同主要内容描述",  // 🆕 Text
+    "delivery_requirements": "交付标准要求", // 🆕 Text
+    "process_records": "过程记录",          // 🆕 Text
+    "remark": null,
+    "created_at": "...",
+    "updated_at": "..."
+  }],
+  "total": 1, "page": 1, "page_size": 20
+}
+```
+
+### POST /api/satellite-data-contracts
+
+**请求**:
+```json
+{
+  "customer_id": "uuid",
+  "name": "卫星数据合同-2026",
+  "contract_no": "SAT-2026-001",
+  "contract_type": "数据采购",           // 🆕 Optional, 自由文本
+  "project_name": "某某卫星项目",        // 🆕 Optional
+  "party_a_name": "某科技公司",          // 🆕 Optional
+  "party_b_name": "我方公司",            // 🆕 Optional
+  "start_date": "2026-07-01",           // 🆕 Optional
+  "end_date": "2027-06-30",             // 🆕 Optional
+  "amount": "800000.00",                // 🆕 Optional
+  "contract_content": "合同主要内容描述",  // 🆕 Optional Text
+  "delivery_requirements": "交付标准要求", // 🆕 Optional Text
+  "process_records": "过程记录",          // 🆕 Optional Text
+  "remark": null
+}
+```
+
+### GET /api/satellite-data-contracts/{id}
+
+响应同列表项结构。
+
+### PUT /api/satellite-data-contracts/{id}
+
+请求体同 POST，所有字段均为 Optional。
+
+### DELETE /api/satellite-data-contracts/{id}
+
+---
+
+## 9. 算力服务合同 (ComputeServiceContract)
+
+Base: `/api/compute-service-contracts`
+
+### 9.1 合同 CRUD
+
+### GET /api/compute-service-contracts
+
+查询参数: `?customer_id=&search=&page=&page_size=`
+
+**响应** (ADR-013 新增字段标注 🆕):
+```json
+{
+  "items": [{
+    "id": "uuid",
+    "customer_id": "uuid",
+    "customer_name": "某科技公司",
+    "name": "算力服务合同-2026",
+    "contract_no": "FW-2026-001",
+    "contract_type": "sales",
+    "party_a_name": "某科技公司",
+    "party_b_name": "我方公司",
+    "amount": "1500000.00",
+    "start_date": "2026-07-01",
+    "end_date": "2027-06-30",
+    "related_contract_id": null,
+    "project_name": "某某算力项目",        // 🆕
+    "contract_content": "合同主要内容描述",  // 🆕 Text
+    "delivery_requirements": "交付标准要求", // 🆕 Text
+    "process_records": "过程记录",          // 🆕 Text
+    "remark": null,
+    "service_lines_count": 5,
+    "created_at": "...",
+    "updated_at": "..."
+  }],
+  "total": 1, "page": 1, "page_size": 20
+}
+```
+
+### POST /api/compute-service-contracts
+
+**请求**:
+```json
+{
+  "customer_id": "uuid",
+  "name": "算力服务合同-2026",
+  "contract_no": "FW-2026-001",
+  "contract_type": "sales",
+  "party_a_name": "某科技公司",
+  "party_b_name": "我方公司",
+  "amount": null,
+  "start_date": "2026-07-01",
+  "end_date": "2027-06-30",
+  "related_contract_id": null,
+  "project_name": "某某算力项目",        // 🆕 Optional
+  "contract_content": "合同主要内容描述",  // 🆕 Optional Text
+  "delivery_requirements": "交付标准要求", // 🆕 Optional Text
+  "process_records": "过程记录",          // 🆕 Optional Text
+  "remark": null,
+  "service_lines": [
+    {
+      "category": "算力服务",
+      "item_name": "通用CPU容器实例",
+      "specification": {"vcpu": 10, "frequency": "2.5GHz", "memory": "32GB DDR4", "storage": "500GB NVMe SSD"},
+      "vcpu_count": 10,
+      "memory_gb": 32,
+      "storage_gb": 500,
+      "unit": "个/月",
+      "quantity": 5,
+      "period_months": 12,
+      "unit_price": 5000,
+      "sort_order": 0
+    }
+  ]
+}
+```
+
+- `contract_type`: `"sales"` | `"procurement"`，必填，默认 `"sales"`
+- `amount`: 可选，不填则由 service_lines.total_price 自动汇总
+- `service_lines`: 可选，创建后可单独管理
+- `related_contract_id`: 可选，关联背靠背合同
+- 🆕 `project_name`/`contract_content`/`delivery_requirements`/`process_records`: 均为 Optional，手动填写
+
+### GET /api/compute-service-contracts/{id}
+
+响应含完整 service_lines 和关联合同信息，以及 🆕 四个新增字段：
+
+**响应**:
+```json
+{
+  "id": "uuid",
+  "customer_id": "uuid",
+  "customer_name": "某科技公司",
+  "name": "...",
+  "contract_no": "...",
+  "contract_type": "sales",
+  "party_a_name": "...",
+  "party_b_name": "...",
+  "amount": "1500000.00",
+  "amount_auto_calc": "1500000.00",
+  "start_date": "2026-07-01",
+  "end_date": "2027-06-30",
+  "related_contract_id": "uuid-of-procurement",
+  "related_contract": {
+    "id": "uuid-of-procurement",
+    "name": "采购合同-英伟达",
+    "contract_no": "CG-2026-001",
+    "contract_type": "procurement",
+    "amount": "1200000.00"
+  },
+  "project_name": "某某算力项目",        // 🆕
+  "contract_content": "合同主要内容描述",  // 🆕
+  "delivery_requirements": "交付标准要求", // 🆕
+  "process_records": "过程记录",          // 🆕
+  "remark": null,
+  "service_lines": [...],
+  "created_at": "...",
+  "updated_at": "..."
+}
+```
+
+- `amount_auto_calc`: 由 service_lines 自动计算的总金额（SUM of total_price），前端用于与 `amount` 对比提示
+- `related_contract`: **双向查询**——无论关联从哪端建立，两个合同详情都能看到对方
+
+### PUT /api/compute-service-contracts/{id}
+
+请求体同 POST。更新时 `service_lines` 如果传入则**全量替换**（先删后插）。
+
+### DELETE /api/compute-service-contracts/{id}
+
+级联删除关联的 service_lines。
+
+---
+
+### 9.2 服务行 CRUD
+
+### GET /api/compute-service-contracts/{contract_id}/service-lines
+
+**响应**:
+```json
+{
+  "items": [
+    {
+      "id": "uuid",
+      "category": "算力服务",
+      "item_name": "通用CPU容器实例",
+      "specification": {...},
+      "vcpu_count": 10,
+      "memory_gb": 32,
+      "storage_gb": 500,
+      "unit": "个/月",
+      "quantity": 5,
+      "period_months": 12,
+      "unit_price": 5000,
+      "total_price": 300000,
+      "sort_order": 0
+    }
+  ]
+}
+```
+
+### POST /api/compute-service-contracts/{contract_id}/service-lines
+
+创建单行服务内容。请求体格式同 service_line 对象（不含 id/total_price，total_price 由后端计算）。
+
+### PUT /api/compute-service-contracts/{contract_id}/service-lines/{line_id}
+
+更新单行。
+
+### DELETE /api/compute-service-contracts/{contract_id}/service-lines/{line_id}
+
+删除单行。
+
+### POST /api/compute-service-contracts/{contract_id}/service-lines/batch
+
+批量保存（全量替换）:
+
+**请求**:
+```json
+{
+  "lines": [
+    { "category": "...", "item_name": "...", ... }
+  ]
+}
 ```
 
 ---

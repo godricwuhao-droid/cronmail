@@ -7,6 +7,485 @@
 > - 类型：新增 / 修改 / 修复 / 删除 / 重构
 > - Breaking Change 标注 ⚠️
 
+## 2026-07-28 (项目管理合同新增 project_type + 动态表格渲染 + 统计面板)
+
+### [新增] 项目管理合同新增 project_type 字段、raw_tables 表格渲染、resource_summary 统计面板
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 新增 |
+| 范围 | 项目管理合同的 API 类型、创建/编辑表单、详情页、列表页 |
+| 影响文件 | `frontend/src/api/modules/project.ts`、`frontend/src/views/projects/form.vue`、`frontend/src/views/projects/detail.vue`、`frontend/src/views/projects/index.vue` |
+| 关联任务 | TASK-PROJECT-TYPE-FE |
+
+#### 改动
+
+##### 1. API 类型扩展（`project.ts`）
+
+- `ProjectContractItem` 新增 `project_type?: string | null`
+- `ProjectContractCreatePayload` 新增 `project_type?: string`
+- `ProjectContractUpdatePayload` 新增 `project_type?: string`
+
+##### 2. 表单页（`form.vue`）
+
+- 新增「项目类型」输入框（自由文本，非必填），位于「所属项目」字段下方
+- 智能解析 `fieldMap` 新增 `project_type: 'project_type'` 映射
+- 新增 `rawTables` 和 `resourceSummary` 响应式变量
+- 新增 `STATS_LABELS` 常量映射和 `statsDisplay` 计算属性
+- 服务内容区域上方新增「文档表格」展示区（`raw_tables`）和「交付资源统计」面板（`statsDisplay`）
+- `fillFormFromFields` 中新增 `raw_tables` 和 `resource_summary` 数据绑定
+- 创建/编辑提交载荷携带 `project_type`
+- 编辑模式正确回填 `project_type`
+
+##### 3. 详情页（`detail.vue`）
+
+- 合同信息区域新增「项目类型」展示
+- 新增「文档表格」section（`raw_tables` 只读渲染）
+- 新增「交付资源统计」section（`statsDisplay` 统计展示）
+- `fetchRecord` 从后端详情提取 `raw_tables` 和 `resource_summary`
+
+##### 4. 列表页（`index.vue`）
+
+- 列定义 `allColumns` 新增 `project_type`（项目类型）
+- `getColumnProps` 新增 `project_type` 列配置
+- 模板新增 `project_type` 列渲染
+
+### 备注
+- `project_type` 为用户手动填写的自由文本，无必填校验
+- `raw_tables` 和 `resource_summary` 为智能解析结果的展示数据，不影响现有 `service_lines` 编辑器
+- 统计面板仅在有数值时显示，无数据时自动隐藏
+
+### [新增] 算力租赁 / 卫星数据 / 算力服务合同新增 sort_order 序号字段
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 新增 |
+| 范围 | 三类合同的 API 类型、创建/编辑表单、列表页 |
+| 影响文件 | `frontend/src/api/modules/contract.ts`、`frontend/src/api/modules/satellite-contract.ts`、`frontend/src/api/modules/service-contract.ts`、`frontend/src/views/contracts/create.vue`、`frontend/src/views/contracts/index.vue`、`frontend/src/views/satellite-contracts/form.vue`、`frontend/src/views/satellite-contracts/index.vue`、`frontend/src/views/service-contracts/form.vue`、`frontend/src/views/service-contracts/index.vue` |
+| 关联任务 | TASK-SORT-ORDER-FE |
+
+#### 改动
+
+##### 1. API 类型扩展（3 个文件）
+
+- `contract.ts`：`ContractItem`、`ContractCreatePayload`、`ContractUpdatePayload` 新增 `sort_order?: number`
+- `satellite-contract.ts`：`SatelliteContractItem`、`SatelliteContractCreatePayload`、`SatelliteContractUpdatePayload` 新增 `sort_order?: number`
+- `service-contract.ts`：`ServiceContractItem`、`ServiceContractCreatePayload`、`ServiceContractUpdatePayload` 新增 `sort_order?: number`
+
+##### 2. 创建/编辑表单（3 个文件）
+
+- `contracts/create.vue`：表单接口新增 `sort_order: number`（默认 0），合同编号后增加 `<el-input-number>` 序号输入框；创建/更新载荷携带 `sort_order`；编辑/续期模式正确回填
+- `satellite-contracts/form.vue`：同上，表单接口、输入框、载荷均已添加
+- `service-contracts/form.vue`：同上，表单接口、输入框、载荷均已添加
+
+##### 3. 列表页（3 个文件）
+
+- `contracts/index.vue`：列定义 `allColumns` 新增 `sort_order`（序号），支持列设置面板拖拽/勾选
+- `satellite-contracts/index.vue`：表格新增「序号」列（width=70, align=center），显示 `row.sort_order ?? 0`
+- `service-contracts/index.vue`：列定义 `allColumns` 新增 `sort_order`（序号），支持列设置面板拖拽/勾选
+
+## 2026-07-23 (卫星数据合同 ADR-013 新增 10 字段)
+
+### [新增] 卫星数据合同表单/详情/列表新增 10 字段 (ADR-013)
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 新增 |
+| 范围 | 卫星数据合同创建/编辑表单、详情页、API 类型 |
+| 影响文件 | `frontend/src/api/modules/satellite-contract.ts`、`frontend/src/views/satellite-contracts/form.vue`、`frontend/src/views/satellite-contracts/detail.vue` |
+| 关联任务 | TASK-013-SAT-FE |
+
+#### 改动
+
+##### 1. API 类型扩展（`satellite-contract.ts`）
+
+- `SatelliteContractItem` 新增 10 个可选字段：`contract_type`、`project_name`、`party_a_name`、`party_b_name`、`start_date`、`end_date`、`amount`、`contract_content`、`delivery_requirements`、`process_records`
+- `SatelliteContractCreatePayload` 和 `SatelliteContractUpdatePayload` 同步新增对应字段
+
+##### 2. 表单页（`form.vue`）
+
+- 表单数据接口 `SatelliteContractForm` 新增 10 个字段，初始化为空字符串/null
+- `loadDetail()` 编辑模式下回填所有新字段（`??` 兜底）
+- `handleSubmit()` 创建/更新时将所有新字段纳入 payload（trim 处理，空字符串转 undefined）
+- 模板新增 4 个分区（用 `el-divider` 分隔）：
+  - **合同扩展信息**：合同类型（el-input）、项目名称（el-input）
+  - **日期与金额**：开始日期（el-date-picker）、结束日期（el-date-picker）、合同金额（el-input-number, precision=2）
+  - **签约方信息**：甲方名称（el-input）、乙方名称（el-input）
+  - **合同内容与要求**：合同内容（textarea rows=4）、交付要求（textarea rows=4）、过程记录（textarea rows=4）
+- 备注区域前加 `el-divider` 分隔
+
+##### 3. 详情页（`detail.vue`）
+
+- `el-descriptions` 新增 9 个描述项（3 列 border 布局）：
+  - 合同类型、项目名称、合同金额（¥ 格式化）、开始日期、结束日期、甲方名称、乙方名称
+  - 合同内容（:span="3"）、交付要求（:span="3"）、过程记录（:span="3"）
+- 修复：补充 `Paperclip` 图标导入（之前模板中使用但未导入）
+
+##### 4. 列表页（`index.vue`）
+
+- 无需改动（列表页硬编码列不变，新字段通过 API 返回但不在列表中展示）
+
+#### 验收
+
+- ✅ `vue-tsc --noEmit` 零错误
+- ✅ 零 lint 错误
+- ✅ 所有新增字段均为可选，无必填校验
+- ✅ 不影响算力租赁合同和算力服务合同页面
+- ✅ 编辑模式下已有数据可正确回填
+- ✅ 不填新字段也能正常提交
+
+#### 备注
+
+- 10 个新字段均为 optional + nullable，与后端 ADR-013 契约一致
+- 表单分区排列：基本信息 → 合同扩展信息 → 日期与金额 → 签约方信息 → 合同内容与要求 → 备注
+- 金额使用 `el-input-number`，精度 2 位小数，无 spinner 控件
+
+---
+
+## 2026-07-23 (算力服务合同表单/详情/列表新增4字段 ADR-013)
+
+### [新增] 算力服务合同表单/详情/列表新增4字段(ADR-013)
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 新增 |
+| 范围 | 算力服务合同相关页面 |
+| 影响文件 | `frontend/src/api/modules/service-contract.ts`、`frontend/src/views/service-contracts/form.vue`、`frontend/src/views/service-contracts/detail.vue`、`frontend/src/views/service-contracts/index.vue` |
+| 关联任务 | TASK-013-CS-FE |
+
+#### 改动
+
+##### 1. API 模块（`service-contract.ts`）
+
+- `ServiceContractItem` / `ServiceContractDetail` / `ServiceContractCreatePayload` / `ServiceContractUpdatePayload` 新增 4 个字段：
+  - `project_name`（string|null）：所属项目
+  - `contract_content`（string|null）：合同内容
+  - `delivery_requirements`（string|null）：合同交付要求
+  - `process_records`（string|null）：过程记录
+- 所有新字段均为可选（`?:`），与后端 `Optional[str]` 对齐
+
+##### 2. 表单页（`form.vue`）
+
+- **表单数据**：`ServiceContractForm` 接口 + `form` reactive 对象新增 4 个字段（默认空字符串）
+- **基本信息区**：在「合同编号」后新增「所属项目」`el-input`（maxlength=255）
+- **长文本区**：在「备注」后新增 `el-divider`「合同详细内容」分隔，下方三个 `el-input type="textarea"`（rows=4, maxlength=5000）：
+  - 合同内容（placeholder: "可选，合同主要内容概述或长文本描述"）
+  - 交付要求（placeholder: "可选，合同交付标准/要求"）
+  - 过程记录（placeholder: "可选，合同执行过程中的记录，如问题、变更说明等"）
+- **编辑回填**：`loadDetail()` 中用 `?? ''` 兜底回填 4 个字段
+- **提交载荷**：创建和编辑 payload 均包含 4 个字段（trim 后为空则传 undefined）
+- ⚠️ service_lines 服务行编辑器位置和功能完全不受影响
+
+##### 3. 详情页（`detail.vue`）
+
+- **合同信息区**：`el-descriptions` 中「备注」前新增「所属项目」行（`:span="3"`）
+- **新增「合同详细内容」section**：仅当 `contract_content` / `delivery_requirements` / `process_records` 任一有值时显示
+  - 使用 `el-descriptions :column="1" border` 单列布局
+  - 长文本使用 `<div class="long-text">` 渲染（`white-space: pre-wrap; word-break: break-word`）
+  - 空字段不显示对应行（`v-if` 条件渲染）
+
+##### 4. 列表页（`index.vue`）
+
+- `allColumns` 新增 4 列定义：`project_name`（所属项目）、`contract_content`（合同内容）、`delivery_requirements`（交付要求）、`process_records`（过程记录）
+- 4 列均非默认显示，用户可通过列设置面板勾选启用
+- `getColumnProps` 新增 4 列 props 配置（min-width, show-overflow-tooltip）
+- 模板新增 4 列渲染：`project_name` 直接显示文本，三个长文本列用 `text-ellipsis` 截断
+
+#### 验收
+
+- ✅ `vue-tsc --noEmit` 零错误
+- ✅ 零 lint 错误
+- ✅ 创建算力服务合同时能看到并填写 4 个新字段
+- ✅ 编辑算力服务合同时新字段值能正确回填
+- ✅ 详情页能展示新字段的值
+- ✅ 不填新字段也能正常提交（无必填校验）
+- ✅ service_lines 服务行编辑器不受影响
+- ✅ 样式与现有表单一致（Element Plus 风格、深蓝主题）
+
+#### 备注
+
+- 4 个字段均来自 ADR-013 定义，后端 Schema（`ComputeServiceContractCreate` / `ComputeServiceContractUpdate` / `ComputeServiceContractListResponse`）已包含对应字段
+- `contract_content`、`delivery_requirements`、`process_records` 为 Text 长文本类型，表单使用 `type="textarea" rows=4 maxlength=5000`
+- 列表页 4 列默认隐藏，用户可按需在列设置面板中启用
+
+---
+
+## 2026-07-18 (租赁概览卡片点击弹窗)
+
+### [新增] 租赁概览页统计卡片点击弹出合同列表
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 新增 |
+| 范围 | 租赁概览页 |
+| 影响文件 | `frontend/src/views/data-report/rental-overview.vue` |
+| 关联任务 | 租赁概览卡片点击弹窗 |
+
+#### 改动
+
+1. **4 个统计卡片加 `@click` 事件**：合同总数、即将到期、已回收、已到期，点击后弹出 `el-dialog` 展示对应类型合同列表
+2. **新增合同列表弹窗**（`el-dialog` width=800px, destroy-on-close）：
+   - 表格列：合同名称、客户、到期日期、设备数、状态（el-tag）、操作（详情按钮）
+   - 详情按钮点击后关闭弹窗并跳转到合同详情页（`router.push({ name: 'ContractDetail' })`）
+3. **新增 Script 逻辑**：
+   - 导入 `listContracts`、`ContractItem`、`ContractStatus`、`useRouter`
+   - `dialogVisible` / `dialogTitle` / `dialogContracts` / `dialogLoading` 弹窗状态
+   - `openContractDialog(type)` — 根据卡片类型（total/expiring/expired/reclaimed）调用 `listContracts` 加载数据
+   - `goContractDetail(id)` — 关闭弹窗后跳转合同详情
+4. **CSS**：`.stat-card` 新增 `cursor: pointer`
+
+#### 验收
+
+- ✅ `vue-tsc --noEmit` 零错误
+- ✅ 零 lint 错误
+- ✅ 4 个卡片均可点击弹出弹窗
+- ✅ 弹窗表格正确显示合同名称、客户、到期日期、设备数、状态
+- ✅ 详情按钮可跳转到合同详情页
+- ✅ 弹窗关闭后销毁（destroy-on-close）
+
+#### 备注
+
+- 弹窗风格对齐客户管理页（`customers/index.vue`）的合同统计弹窗
+- 复用已有的 `contractStatusTagType` / `contractStatusLabel` / `formatDate` 工具函数
+- 原有待处理提醒区域和数据加载逻辑完全保留
+
+---
+
+## 2026-07-18 (算力服务合同列表：列设置升级 + 日期拆分)
+
+### [修改] 算力服务合同列表页排版对齐 + 列设置功能
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 修改 |
+| 范围 | 算力服务合同列表页 |
+| 影响文件 | `frontend/src/views/service-contracts/index.vue` |
+| 关联任务 | 算力服务合同列表页排版对齐 + 列设置 |
+
+#### 改动
+
+1. **日期拆成两列**：
+   - 原「合同日期」列合并显示 `start_date ~ end_date`，拆为独立的「开始日期」和「结束日期」列
+   - 两列均 width: 120，使用 `formatDate()` 格式化
+
+2. **新增列设置功能**（完整移植自算力租赁合同页）：
+   - 引入 `Top`、`Operation as OperationIcon` 图标
+   - 新增三个 localStorage 键：`svc_contract_columns`、`svc_contract_column_order`、`svc_contract_pinned_columns`
+   - 新增 `pinnedColumns`、`columnOrder`、`dragKey`、`dragOverKey` 等状态
+   - 新增 `pinColumn`、`isPinned`、load/persist 函数
+   - 列设置 popover：⠿ 拖手柄 + 📌 置顶 + ☐ checkbox
+   - 默认置顶列：`['name', 'customer_name', 'amount']`
+
+3. **表格改用动态列渲染**：
+   - 用 `v-for` + `v-bind` 动态 column 渲染（与算力租赁合同页一致）
+   - 新增 `getColumnProps(col)` 函数
+   - 特殊列（contract_type、amount、attachment_status 等）用 template 覆盖
+
+4. **操作列简化**：
+   - 4 个 link 按钮平铺：详情 / 编辑 / 删除（popconfirm）/ 附件
+   - 移除旧版的 el-dropdown 附件下拉
+
+## 2026-07-18 (合同列表列设置升级：置顶 + 拖拽 + 持久化)
+
+### [修改] 合同列表列设置升级，对齐设备列表的置顶 + 拖拽模式
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 修改 |
+| 范围 | 合同列表页列设置 |
+| 影响文件 | `frontend/src/views/contracts/index.vue`、`docs/frontend/column-settings-pattern.md`（新增） |
+| 关联任务 | 升级算力租赁合同列设置，参考设备管理页面 |
+
+#### 改动
+
+1. **新增置顶功能**（`contracts/index.vue`）：
+   - 引入 `Top` 图标
+   - 新增 `pinnedColumns: ref<string[]>` + `loadPinned()` + `persistPinned()` + `pinColumn()` + `isPinned()`
+   - `DEFAULT_PINNED = ['name', 'status', 'amount']`（合同名、状态、金额）
+   - localStorage key: `contract_pinned_columns`
+
+2. **重做 `orderedColumns` computed**：
+   - 按 `columnOrder` 顺序生成 allColumns 对象列表
+   - 置顶列排在前面，与未置顶列用 `column-divider` 分割线分隔
+
+3. **重做拖拽逻辑**（基于 column key 拖拽）：
+   - `onDragStart` / `onDragOver` / `onDragLeave` / `onDrop` / `onDragEnd` 五个事件
+   - 使用 `columnOrder` 数组重排（不再用 dragIndex）
+   - `drag-over` 顶部蓝色虚线（`border-top: 2px solid #1e40af`）+ `dragging` 状态半透明（`opacity: 0.4`）
+
+4. **列设置面板 popover 重做**：
+   - 标题改为「拖拽调整顺序 · 勾选显示」
+   - 每项：⠿ 拖手柄 + 📌 置顶按钮 + ☐ checkbox 三件套
+   - 置顶列与未置顶列之间用 `column-divider` 分隔
+
+5. **表格改用 `v-for` + `v-bind` 动态渲染**：
+   - 新增 `getColumnProps(col)` 函数定义每列的 props
+   - 特殊列（`status` / `amount` / `attachment_status` / `actions` / `remark` / `created_at` / `updated_at`）用 `<template #default>` 渲染
+   - 普通列（`name` / `customer_name` / `contract_no` / `start_date` / `end_date` / `billing_model` / `rental_count`）直接走 `prop`
+
+6. **`resetColumns` 同时重置三项**：
+   - `visibleColumns` / `columnOrder` / `pinnedColumns` 全部恢复默认 + 全部持久化
+
+7. **保留 `DEFAULT_VISIBLE` / `DEFAULT_ORDER` / `allColumns` / 续期字段逻辑**：
+   - 续期相关字段 `renewal_seq`（在 `name` 列后追加「(续N)」）/ `has_renewal` / `renewed_from_id`（在 actions 列显示 🔗）逻辑完全保留
+   - 附件状态列、详情/编辑/删除/附件按钮、状态 tag 全部保留
+
+#### 新增文档
+
+- **`docs/frontend/column-settings-pattern.md`**：列设置 Pattern（拖拽 + 置顶 + 持久化）设计文档
+  - 包含：三个 localStorage 键约定、HTML5 拖拽实现要点、置顶列 computed 重排思路、JSON.stringify 持久化模式
+  - 复用清单：列设置弹窗 HTML 模板片段、CSS、核心 script 函数清单、图标导入
+  - 验收清单 + 易踩的坑
+  - 参考实现：`rentals/index.vue`（最早引入）和 `contracts/index.vue`（本次复用）
+
+#### localStorage 键
+
+| Key | 内容 |
+| --- | --- |
+| `contract_columns` | 可见列 |
+| `contract_column_order` | 列顺序 |
+| `contract_pinned_columns` | 置顶列（本次新增） |
+
+#### 验收
+
+- ✅ `vue-tsc --noEmit -p tsconfig.app.json` 0 错误
+- ✅ `Top` 图标 import 正确
+- ✅ 置顶列在弹窗面板中排在前面 + 分割线
+- ✅ 表格中置顶列实际排在最前（通过 `orderedColumns` computed）
+- ✅ 拖拽 5 事件 + 视觉反馈正常
+- ✅ 三个 localStorage 键互不干扰
+- ✅ 操作列不可取消 + 至少保留一列的兜底提示保留
+- ✅ 重置默认同时清三个 key
+
+#### 备注
+
+- 旧 `dragIndex` ref 和 `orderedVisibleColumns` / `hiddenColumns` computed 已删除（被 `orderedColumns` 替代）
+- 旧 `dragIndex >= 0 && dragIndex !== idx` 的视觉判断改为 `dragOverKey === col.key && dragKey !== col.key`
+- 续期链路相关字段渲染（`renewal_seq` / `has_renewal` / `renewed_from_id`）在 `name` 和 `actions` 两个特殊列的 `<template #default>` 中完整保留
+
+---
+
+## 2026-07-18 (续期链路纵向表格 + 点击跳转修复)
+
+### [修改] 续期链路改为纵向表格布局 + 修复点击跳转
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 修改 |
+| 范围 | 合同详情页续期链路区域 |
+| 影响文件 | `frontend/src/views/contracts/detail.vue` |
+| 关联任务 | 续期链路纵向表格 + 点击跳转修复 |
+
+#### 问题
+
+1. 续期链路使用横向 tag 行 + 独立日期行，续期多时排版错乱
+2. 点击非当前合同的 tag 无法跳转（`$router` 在 `<script setup>` 中不可用）
+
+#### 改动
+
+1. **模板替换**：续期链路从「横向 tag 行 + 独立日期行」改为 `el-table` 纵向表格（`:show-header="false"` `:border="false"`）
+   - 三列：标识列（📄原合同/🔄续期N tag）、名称列（当前行加粗）、日期列（`start_date ~ end_date`）
+   - 当前合同行：`row-class-name="renewal-row-current"` 蓝底高亮 `#ecf5ff`
+   - 非当前行：`cursor: pointer`，hover 浅灰底
+
+2. **Script 新增**：
+   - `goContractDetail(id)` — 用 `router.push` 跳转（修复 `$router` 不可用问题）
+   - `renewalRowClass({ row })` — 根据 `is_current` 返回行 class
+   - `handleRenewalRowClick(row)` — 非当前行点击跳转
+
+3. **CSS 替换**：删除旧 `.renewal-chain` / `.chain-arrow` / `.renewal-chain-dates` / `.chain-node-info` / `.chain-name` / `.chain-date` 样式，新增 `.renewal-row-current` / `.renewal-row-clickable` / `.renewal-name-current` / `.renewal-date`
+
+#### 验收
+
+- ✅ `vue-tsc --noEmit` 零错误
+- ✅ 零 lint 错误
+- ✅ 续期链路以纵向表格展示，无边框无表头
+- ✅ 当前合同行蓝底高亮 + 名称加粗
+- ✅ 非当前合同行 hover 有 pointer + 浅灰背景
+- ✅ 点击非当前行正确跳转
+- ✅ `renewal_chain.length <= 1` 时 section 不显示
+
+#### 备注
+
+- `renewal_chain` 数据结构不变（来自后端 `GET /api/contracts/{id}`）
+- 不影响续期链路 section 以外的任何模板和逻辑
+
+---
+
+## 2026-07-17 (ADR-012 算力服务合同 - 服务内容模型)
+
+### [修改] ADR-012 算力服务合同前端全量升级
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 修改 |
+| 范围 | 算力服务合同列表页、表单页、详情页、API 模块 |
+| 影响文件 | `frontend/src/api/modules/service-contract.ts`、`frontend/src/views/service-contracts/index.vue`、`frontend/src/views/service-contracts/form.vue`、`frontend/src/views/service-contracts/detail.vue` |
+| 关联任务 | ADR-012 算力服务合同 - 服务内容模型 |
+
+#### 改动
+
+##### 1. API 模块（`service-contract.ts`）
+
+- **合同类型扩展**：`ServiceContractItem` 新增 `contract_type`、`party_a_name`、`party_b_name`、`amount`、`start_date`、`end_date`、`related_contract_id`、`service_lines_count`
+- **详情类型扩展**：`ServiceContractDetail` 新增 `service_lines[]`、`related_contract`（嵌套）、`amount_auto_calc`
+- **载荷类型扩展**：`ServiceContractCreatePayload` / `ServiceContractUpdatePayload` 新增上述合同字段 + `service_lines[]`
+- **新增服务行类型**：`ServiceLineItem`、`ServiceLineCreatePayload`、`ServiceLineUpdatePayload`、`ServiceLineBatchPayload`
+- **新增 API 函数**：`listServiceLines`、`createServiceLine`、`updateServiceLine`、`deleteServiceLine`、`batchSaveServiceLines`
+- **新增常量**：`CONTRACT_TYPE_LABEL`、`CONTRACT_TYPE_TAG`（销售/采购）
+
+##### 2. 列表页（`index.vue`）
+
+- 新增列：合同类型（销售/采购 tag）、合同金额（¥ 格式化）、合同日期（start_date ~ end_date）、服务行数
+- 金额为空时显示「自动计算」提示
+
+##### 3. 表单页（`form.vue`）⭐ 重点
+
+**合同基本信息区（新增）**：
+- 合同类型：Radio 切换 `sales`(销售) / `procurement`(采购)，甲乙方 label 联动变化
+  - sales：甲方=客户，乙方=我方
+  - procurement：甲方=我方，乙方=供应商
+- 甲方名称、乙方名称、合同名称、合同编号
+- 合同金额：number input（placeholder: "留空则自动计算"）
+- 开始/结束日期：date picker
+- 关联合同：select 下拉（列出所有算力服务合同，编辑模式排除自身）
+
+**服务行编辑器（新增区域）**：
+- 动态表格，每行包含：服务大类（select/input）、服务项名称、vCPU核数、内存GB、存储GB、单位、数量、周期(月)、单价、总价（自动计算、只读）
+- 规格参数：简易 key-value 编辑器（至少 4 组 key:value），支持增删
+- 行操作：新增行、删除行、上移/下移（调整 sort_order）
+- 按 category 分组显示（视觉分组，非树形）
+- 底部显示「自动汇总金额」+「合同金额」对比
+- 金额不一致时黄色警告提示
+
+##### 4. 详情页（`detail.vue`）
+
+- 展示 contract_type tag、甲乙方、金额（含自动汇总对比）、日期
+- **服务行表格**：展示所有 service_lines，列含 category、item_name、规格 chips、vcpu/memory/storage、单价、数量、周期、总价
+- 底部汇总统计：总金额、总 vCPU、总内存 GB、总存储 GB
+- 关联合同卡片：显示关联合同名称、编号、类型、金额，可点击跳转详情
+- 金额差异高亮显示
+
+#### 验收
+
+- ✅ `vue-tsc --noEmit` 零错误
+- ✅ `vite build` 成功
+- ✅ 零 lint 错误
+- ✅ 列表页正确显示合同类型、金额、日期、服务行数
+- ✅ 表单页合同类型切换后甲乙方 label 联动
+- ✅ 服务行编辑器可正常增删改行，总价自动计算
+- ✅ 金额汇总与手动金额不一致时显示黄色提示
+- ✅ 详情页完整展示所有新字段 + 服务行表格 + 汇总统计 + 关联合同
+- ✅ 编辑页加载已有数据（含 service_lines）正确回填
+
+#### 备注
+
+- 路由保持不变：`/contracts/compute-service` (list/create/:id/:id/edit)
+- 金额单位：元（人民币），显示时保留两位小数
+- 不影响其他合同类型（算力租赁、卫星数据）的页面
+
+---
+
 ## 2026-07-17 (Excel 预览从 ExcelJS 替换为 SheetJS)
 
 ### [修改] Excel 预览库从 ExcelJS 替换为 SheetJS (xlsx)
@@ -2941,3 +3420,241 @@ GlobalWorkerOptions.workerSrc = pdfjsWorker
 - `vue-tsc -b` 零错误 ✅
 - `vite build` 成功，worker 文件正确打包至 `dist/assets/pdf.worker.min-*.mjs` ✅
 - PDF 预览不再依赖外网 CDN ✅
+
+---
+
+## 2026-07-23 (导出按钮 ADR-014)
+
+| 2026-07-23 | 新增 | 三大类合同列表导出Excel按钮 + 附件一键导出ZIP按钮(ADR-014) | 列表页 + 附件页 | TASK-014-FE | |
+
+---
+
+## 2026-07-23 (智能解析功能)
+
+### [新增] 算力服务合同新建页智能解析按钮
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 新增 |
+| 范围 | 算力服务合同新建页 |
+| 影响文件 | `frontend/src/views/service-contracts/form.vue` |
+| 关联任务 | TASK-PARSE-FE |
+
+#### 改动
+
+##### 1. 新增导入
+- 导入 `MagicStick` 图标（Element Plus）
+- 导入 `request`（axios 实例）
+
+##### 2. 智能解析按钮（模板）
+- 在 `card-header` 区域新增 `card-header-actions` 容器
+- 仅新建模式（`v-if="!isEdit"`）显示「智能解析」按钮
+- 使用 `el-upload` 包装，`accept=".docx"`，`:http-request` 自定义上传
+- 按钮类型 `warning`（橙色/警告色），带 `MagicStick` 图标和 loading 状态
+
+##### 3. 智能解析逻辑（脚本）
+- `parsing` 响应式状态控制 loading
+- `handleParseUpload` 函数：
+  - 前端校验：仅允许 `.docx`、文件大小 ≤ 10MB
+  - 调用 `POST /contracts/parse`（multipart/form-data，`contract_type=compute_service`）
+  - 自动填充 `form` 中与 `fields` 对应的字段（`name`、`contract_no`、`contract_type`、`party_a_name`、`party_b_name`、`amount`、`start_date`、`end_date`、`project_name`、`contract_content`、`delivery_requirements`、`remark`）
+  - `amount` 自动转为数字
+  - `contract_type` 校验有效性（仅 `sales`/`procurement`）
+  - 成功提示填充字段数，失败显示具体错误信息
+  - 使用 `fieldMap` 白名单映射，仅填充已定义的字段
+
+##### 4. 样式
+- 新增 `.card-header-actions`：flex 布局，`gap: 8px`
+
+#### 验收
+- 新建合同页顶部有橙色「智能解析」按钮 ✅
+- 点击弹出文件选择，仅允许 .docx ✅
+- 上传后显示 loading，解析完成后自动填充表单 ✅
+- 填充后弹出成功提示，告知用户"请核对后提交" ✅
+- 解析失败显示明确错误信息，不影响手动填写 ✅
+- 仅算力服务合同（`contract_type=compute_service`），其他两类合同不添加 ✅
+- 编辑模式不显示智能解析按钮 ✅
+
+## 2026-07-28 (项目管理模块前端完整开发)
+
+### [新增] 项目管理模块 — 完整前端开发
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 新增 |
+| 范围 | 项目管理合同 CRUD + 服务行编辑器 + 附件管理 + 侧边栏菜单 + 路由 |
+| 影响文件 | `frontend/src/api/modules/project.ts`、`frontend/src/views/projects/index.vue`、`frontend/src/views/projects/form.vue`、`frontend/src/views/projects/detail.vue`、`frontend/src/views/projects/AttachmentsPage.vue`、`frontend/src/router/index.ts`、`frontend/src/layouts/MainLayout.vue`、`frontend/src/api/modules/attachment.ts`、`frontend/src/lib/contract.ts`、`frontend/src/views/system/attachment-categories.vue` |
+| 关联任务 | ADR-016 |
+
+#### 改动
+
+##### 1. 新建 API 模块 `frontend/src/api/modules/project.ts`
+- 类型定义：`ProjectContractItem`、`ProjectContractDetail`、`ProjectContractCreatePayload`、`ProjectContractUpdatePayload`、`ProjectServiceLine`、`ProjectServiceLineCreatePayload` 等
+- `COMPANY_MAP`：fengyun→蜂云时代、tianshu→安徽天枢、qianxing→千星控股
+- `CONTRACT_TYPE_LABEL` / `CONTRACT_TYPE_TAG`：sales→销售、procurement→采购
+- API 函数：`listProjectContracts`、`createProjectContract`、`getProjectContract`、`updateProjectContract`、`deleteProjectContract`、`batchSaveServiceLines`
+- 所有接口对应后端 `/api/project-contracts`
+
+##### 2. 新建列表页 `frontend/src/views/projects/index.vue`
+- 顶部 `el-radio-group` 切换三个公司（fengyun/tianshu/qianxing）
+- 列表列：合同名称、合同编号、合同类型、甲方、乙方、金额、日期、项目名称、服务行数、备注、附件状态
+- 列自定义面板（拖拽排序 + 置顶 + 勾选显示，localStorage 持久化）
+- 搜索 + 分页 + 导出 Excel + 新建按钮
+- 行操作：详情、编辑、删除、附件
+- 附件状态汇总（绿/红/灰圆点）
+- 路由监听 `route.params.company` 变化自动刷新
+
+##### 3. 新建创建/编辑页 `frontend/src/views/projects/form.vue`
+- 复用算力服务合同 form.vue 结构
+- 差异：用 `el-input disabled` 显示公司名称（替代客户选择）
+- 关联合同选项来自同公司 project 合同列表
+- 服务行编辑器：分类（计算资源/存储资源/网络资源/软件服务/技术服务/其他）+ 动态表格 + 分组 + GPU 配置
+- 智能解析：`contract_type=project`，拖拽/点击上传 .docx
+- fieldMap 适配 project 字段（无 customer_id 映射）
+- 金额自动汇总与对比提示
+
+##### 4. 新建详情页 `frontend/src/views/projects/detail.vue`
+- `el-descriptions` 展示合同基本信息（含公司名、甲乙方、金额、日期、项目名称）
+- 合同内容、交付要求、过程记录长文本展示
+- 服务行表格 + 汇总统计（总金额/vCPU/内存/存储）
+- 背靠背关联合同链接
+- 附件状态卡片（合同协议/交付材料/过程材料）
+- 操作：编辑、删除、附件管理、返回列表
+
+##### 5. 新建附件管理页 `frontend/src/views/projects/AttachmentsPage.vue`
+- 基于通用 `AttachmentsPage.vue` 独立实现
+- `contract_type` 固定为 `compute_service`
+- 双栏布局：左侧分类树 + 右侧文件列表
+- 文件上传（拖拽 + 进度条）、下载、删除、预览（PDF/DOCX/XLSX/PPTX/图片/文本）
+- 一键导出附件 ZIP
+- 返回按钮跳转到 ProjectDetail
+
+##### 6. 路由配置 `frontend/src/router/index.ts`
+- `/projects` → 重定向到 `/projects/fengyun`
+- `:company` → `ProjectList`（列表页）
+- `:company/create` → `ProjectCreate`（新建）
+- `:company/:id` → `ProjectDetail`（详情）
+- `:company/:id/edit` → `ProjectEdit`（编辑）
+- `:company/:id/attachments` → `ProjectAttachments`（附件管理）
+
+##### 7. 侧边栏菜单 `frontend/src/layouts/MainLayout.vue`
+- 新增「项目管理」父菜单（FolderOpened 图标）
+- 三个子菜单：蜂云时代（/projects/fengyun）、安徽天枢（/projects/tianshu）、千星控股（/projects/qianxing）
+- 面包屑：parentTitle=项目管理，pageTitle 根据路由动态显示公司名/操作名
+- activeMenu：/projects/* → projects 高亮
+- 系统配置新增「项目管理附件配置」菜单项（跳转 /system/attachment-categories?contract_type=project）
+
+##### 8. 类型扩展
+- `attachment.ts`：`ContractType` 新增 `'project'`
+- `lib/contract.ts`：`CONTRACT_TYPE_LABEL` 新增 `project: '项目管理'`，`CONTRACT_TYPE_OPTIONS` 新增项目管理选项
+- `attachment-categories.vue`：支持从 URL query 参数 `contract_type` 初始化 tab
+
+#### 验收
+- 侧边栏「项目管理」→ 三个公司子菜单，点击进入对应列表 ✅
+- 列表按公司过滤，搜索、分页、导出正常 ✅
+- 新建合同表单完整，智能解析 + 拖拽上传正常 ✅
+- 编辑回填正常 ✅
+- 详情展示完整 ✅
+- 附件管理可用，一键导出正常 ✅
+- 三个公司数据完全隔离 ✅
+- 现有合同管理（算力租赁/卫星数据/算力服务）不受影响 ✅
+
+---
+
+### 2026-07-29 · Copilot 面板展示逐页分析进度和耗时
+
+#### 类型：修改
+
+#### 变更内容
+优化项目管理合同表单（`projects/form.vue`）中 Copilot 助手面板的智能解析消息展示，利用后端新增的 `timing` 字段展示逐页分析进度。
+
+#### 影响文件
+- `frontend/src/views/projects/form.vue`：重写 `handleParseUpload` 中 Copilot 消息推送逻辑
+
+#### 变更详情
+
+**Copilot 消息推送顺序（新）：**
+
+1. **文件接收**：`📄 收到文件：xxx.docx（12.3KB）`
+2. **PDF 转换**（如有 `timing.pdf_to_images`）：`📐 PDF 转图片完成：5 页，耗时 2.3 秒`
+   - 回退到 `info.pdf_pages` + `info.extract_seconds` 作为兜底
+3. **逐页分析**（遍历 `timing.per_page`）：`📖 第 1 页分析完成（4.2 秒），识别到：name、party_a_name、contract_no`
+   - 字段超过 5 个时截断为「字段1、字段2、... 等」
+   - 无新增字段时显示「无新增字段」
+4. **最终汇总**（仅 >3 页时出现 `timing.final_summary`）：`🔍 最终汇总校验完成（2.1 秒）`
+5. **总耗时**：`✅ 解析完成！总耗时 12.5 秒`
+6. **资源汇总**：`已填充 8 个字段，资源：vCPU 320核 / 内存 640GB / GPU 16卡，请核对后提交`
+
+**关键改进：**
+- 删除了旧的 `⏳ 正在解析文件...` 占位消息（parse 期间由 `thinking` 动画指示）
+- 删除了旧的 `🖼️ PDF 共 N 页，拆图耗时 X 秒` 和 `🤖 AI 解析完成，总耗时 X 秒` 两条扁平消息
+- 删除了旧的 `✅ 智能解析完成，已填充 N 个字段...` 消息（由新的分步消息替代）
+- 删除了旧的 `📊 提取到 N 条服务清单` 消息
+- 资源汇总措辞从「资源汇总」改为「资源」
+
+**向下兼容：**
+- 旧版后端不返回 `timing` 字段时，走 `info.pdf_pages` + `info.extract_seconds` + `info.elapsed_seconds` 兜底逻辑
+- 字段解析逻辑（`fieldMap` 映射、`service_lines` 填充）完全不变
+
+#### 关联任务
+Copilot 面板展示逐页分析进度和耗时
+
+---
+
+### 2026-07-29 · Copilot 对接 SSE 流式 + 显示图片 + 中文字段标签
+
+#### 类型：修改
+
+#### 变更内容
+将 Copilot 智能解析从一次性 HTTP 请求改为 SSE 流式，实时逐页展示进度、缩略图和识别结果，字段名显示中文。
+
+#### 影响文件
+- `frontend/src/views/projects/form.vue`：重写智能解析逻辑
+
+#### 变更详情
+
+1. **新增中文字段标签映射** `FIELD_LABELS`：将后端返回的英文字段名（`party_a_name`、`contract_no` 等）映射为中文标签（甲方、合同编号等）
+2. **修改 CopilotMessage 接口**：`text` 改为可选，新增 `image`（base64 图片）和 `fields`（中文标签列表）字段
+3. **重写 `handleParseUpload`**：
+   - 改用 `fetch()` 直接请求 `POST /api/contracts/parse/stream?contract_type=project`
+   - 使用 `ReadableStream` 逐块读取 SSE 事件流
+   - 实时处理 `progress`、`page`、`done`、`error` 四种 SSE 事件
+   - 每页完成后推送文字消息（含中文字段标签）+ 缩略图消息
+4. **新增 `fillFormFromFields` 辅助函数**：从原 handleParseUpload 中抽出表单填充逻辑为独立函数，供 SSE 流结束后调用
+5. **修改 Copilot 面板模板**：在 `.msg-bubble` 内增加 `<img>` 标签渲染 base64 图片缩略图
+6. **fieldMap 清理**：删除对已删除字段（vcpu_count 等 7 个）的映射，`specification` 直接整体赋值
+
+#### 验收
+- 上传文件后 Copilot 实时逐行展示 ✅
+- 每页完成后显示缩略图 ✅
+- 字段名显示中文（甲方 而非 party_a_name）✅
+- 解析完成后自动填表 ✅
+
+#### 关联任务
+Copilot 对接 SSE 流式 + 显示图片 + 中文字段标签
+
+---
+
+## 2026-01-20
+
+### 重构：服务行表格改为动态规格列
+
+**类型：** 重构
+
+**变更内容：**
+- `ProjectServiceLine` / `ProjectServiceLineCreatePayload` 接口删除 7 个硬编码字段（`vcpu_count`, `memory_gb`, `storage_gb`, `gpu_count`, `gpu_model`, `gpu_memory_gb`, `gpu_tops`），统一由 `specification` (JSON) 承载
+- 编辑页 `ServiceLineForm` 删除对应字段，保留 `spec_kv` 编辑器作为唯一的规格录入方式
+- 编辑页删除 vCPU/内存/存储条件字段和 GPU 配置区域
+- 详情页服务行表格改为动态规格列：固定列 + 从 `specification` JSON keys 自动生成动态列
+- 智能解析服务行填充逻辑同步更新，不再映射硬编码字段，直接使用 `specification`
+
+**影响文件：**
+- `frontend/src/api/modules/project.ts`
+- `frontend/src/views/projects/form.vue`
+- `frontend/src/views/projects/detail.vue`
+
+**关联任务：**
+服务行表格改为动态规格列
+
+**备注：**
+- ⚠️ Breaking Change：旧数据中硬编码字段（如 `vcpu_count`）的值需要迁移到 `specification` JSON 中，否则详情页不再显示

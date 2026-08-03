@@ -7,12 +7,12 @@
  *  - 仅展示 active 客户（已软删除的 inactive 不显示）
  *  - 新建 / 编辑客户（弹窗表单）
  *  - 软删除（el-popconfirm 二次确认）
- *  - 启用 / 停用切换
  *  - 客户名称 / 「联系人」按钮均跳转联系人管理页
  */
 import { onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
-import { UserFilled, Search } from '@element-plus/icons-vue'
+import { Search } from '@element-plus/icons-vue'
 import {
   createCustomer,
   deleteCustomer,
@@ -22,7 +22,17 @@ import {
   type CustomerCreatePayload,
   type CustomerUpdatePayload,
 } from '@/api/modules/customer'
-import { getRentals } from '@/api/modules/rental'
+import {
+  listContracts,
+  type ContractItem,
+} from '@/api/modules/contract'
+import {
+  CONTRACT_STATUS_LABEL,
+  CONTRACT_STATUS_TAG,
+} from '@/lib/contract'
+import type { ContractStatus } from '@/api/modules/contract'
+
+const router = useRouter()
 
 // ============================================================
 // 列表状态
@@ -96,6 +106,7 @@ const submitting = ref(false)
 
 const form = reactive<CustomerCreatePayload>({
   name: '',
+  business_types: [],
 })
 
 const rules: FormRules = {
@@ -109,20 +120,21 @@ function openCreateDialog() {
   dialogMode.value = 'create'
   editingId.value = null
   form.name = ''
+  form.business_types = []
   dialogVisible.value = true
   // 重置校验状态
   setTimeout(() => formRef.value?.clearValidate(), 0)
 }
 
-/* 编辑功能暂时停用：操作列调整为 联系人 / 启用·停用 / 删除
 function openEditDialog(row: Customer) {
   dialogMode.value = 'edit'
   editingId.value = row.id
   form.name = row.name
+  form.business_types = row.business_types ?? []
   dialogVisible.value = true
   setTimeout(() => formRef.value?.clearValidate(), 0)
 }
-*/
+
 
 async function handleSubmit() {
   if (!formRef.value) return
@@ -136,12 +148,14 @@ async function handleSubmit() {
     if (dialogMode.value === 'create') {
       const payload: CustomerCreatePayload = {
         name: form.name.trim(),
+        business_types: form.business_types?.length ? form.business_types : undefined,
       }
       await createCustomer(payload)
       ElMessage.success('客户创建成功')
     } else if (editingId.value) {
       const payload: CustomerUpdatePayload = {
         name: form.name.trim(),
+        business_types: form.business_types?.length ? form.business_types : undefined,
       }
       await updateCustomer(editingId.value, payload)
       ElMessage.success('客户更新成功')
@@ -169,63 +183,66 @@ async function handleDelete(row: Customer) {
   }
 }
 
-async function toggleStatus(row: Customer) {
-  const newStatus = row.status === 'active' ? 'inactive' : 'active'
-  const actionLabel = newStatus === 'inactive' ? '停用' : '启用'
+// ============================================================
+// 合同统计弹窗
+// ============================================================
+const contractDialogVisible = ref(false)
+const selectedCustomer = ref<Customer | null>(null)
+const customerContracts = ref<ContractItem[]>([])
+const loadingContracts = ref(false)
 
-  // 停用时检查该客户下的活跃租赁（租赁中），有关联则阻断操作
-  if (newStatus === 'inactive') {
-    try {
-      const res = await getRentals({ customer_id: row.id, status: '租赁中', page: 1, page_size: 1 })
-      const activeTotal = res?.total ?? 0
-      if (activeTotal > 0) {
-        await ElMessageBox.alert(
-          `该客户下有 ${activeTotal} 条活跃租赁记录（租赁中），请先处理关联的租赁记录后再停用。`,
-          '无法停用',
-          { confirmButtonText: '知道了', type: 'warning' },
-        )
-        return
-      }
-    } catch (e: any) {
-      // 校验失败时阻断操作，避免漏判导致数据不一致
-      ElMessage.warning('无法校验关联租赁记录，请稍后重试')
-      console.error('[CustomerList] check active rentals failed:', e)
-      return
-    }
-  }
-
-  // 启用 / 停用 二次确认
+async function showContractDialog(customer: Customer) {
+  selectedCustomer.value = customer
+  contractDialogVisible.value = true
+  loadingContracts.value = true
   try {
-    await ElMessageBox.confirm(
-      `确认${actionLabel}客户「${row.name}」？`,
-      `${actionLabel}确认`,
-      {
-        confirmButtonText: actionLabel,
-        cancelButtonText: '取消',
-        type: 'warning',
-      },
-    )
+    const res = await listContracts({ customer_id: customer.id, page_size: 100 })
+    customerContracts.value = res.items
   } catch {
-    // 用户取消
-    return
+    customerContracts.value = []
+  } finally {
+    loadingContracts.value = false
   }
+}
 
-  try {
-    await updateCustomer(row.id, { status: newStatus })
-    row.status = newStatus
-    if (newStatus === 'inactive') {
-      // 停用后从列表移除（与列表只展示 active 一致）
-      list.value = list.value.filter((c) => c.id !== row.id)
-    }
-    ElMessage.success(newStatus === 'active' ? '已启用' : '已停用')
-  } catch (e) {
-    // 错误已统一处理
-  }
+function goContractDetail(contractId: string) {
+  contractDialogVisible.value = false
+  router.push({ name: 'ContractDetail', params: { id: contractId } })
+}
+
+function statusLabel(s?: string | null) {
+  if (!s) return '-'
+  return CONTRACT_STATUS_LABEL[s as ContractStatus] ?? s
+}
+
+function statusTagType(s?: string | null) {
+  if (!s) return 'info'
+  return CONTRACT_STATUS_TAG[s as ContractStatus] ?? 'info'
 }
 
 function formatDateTime(s?: string | null) {
   if (!s) return '-'
   return s.replace('T', ' ').slice(0, 19)
+}
+
+function goContacts(row: Customer) {
+  router.push(`/customers/${row.id}/contacts`)
+}
+
+function handleDeleteConfirm(row: Customer) {
+  ElMessageBox.confirm(
+    `确认删除客户「${row.name}」？此操作会将客户状态置为 inactive。`,
+    '删除确认',
+    {
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+      type: 'warning',
+    },
+  )
+    .then(() => handleDelete(row))
+    .catch(() => {
+      // 用户取消
+    })
 }
 
 onMounted(() => {
@@ -234,13 +251,13 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="page-container">
-    <el-card shadow="never">
+  <div class="page-container customer-page">
+    <el-card shadow="never" class="customer-card">
       <template #header>
         <div class="card-header">
-          <span class="title">
-            <el-icon><UserFilled /></el-icon>
-            客户管理
+          <span class="card-title">
+            <span class="title-bar" />
+            <span>客户管理</span>
           </span>
         </div>
       </template>
@@ -268,55 +285,73 @@ onMounted(() => {
         :data="list"
         border
         stripe
+        class="customer-table"
         style="width: 100%"
         empty-text="暂无客户"
+        :header-cell-style="{
+          background: '#FAFAFA',
+          color: '#303133',
+          fontWeight: 600,
+        }"
       >
-        <el-table-column label="客户名称" min-width="200">
+        <el-table-column label="客户名称" min-width="280" show-overflow-tooltip>
           <template #default="{ row }">
-            <el-link type="primary" :underline="'never'" @click="$router.push(`/customers/${row.id}/contacts`)">
+            <span class="col-customer-name" @click="goContacts(row)">
               {{ row.name }}
-            </el-link>
+            </span>
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="100">
+        <el-table-column label="业务类型" min-width="180" align="center">
           <template #default="{ row }">
-            <el-tag
-              :type="row.status === 'active' ? 'success' : 'info'"
-              effect="light"
-              size="small"
-            >
-              {{ row.status === 'active' ? '启用' : '已停用' }}
-            </el-tag>
+            <div v-if="row.business_types && row.business_types.length" class="business-types">
+              <el-tag
+                v-for="bt in row.business_types"
+                :key="bt"
+                effect="plain"
+                type="primary"
+                size="small"
+              >
+                {{ bt }}
+              </el-tag>
+            </div>
+            <span v-else class="col-muted">-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="contact_count" label="联系人数量" width="120" align="center">
+        <el-table-column prop="contact_count" label="联系人" width="100" align="center">
           <template #default="{ row }">
-            <span>{{ row.contact_count ?? 0 }}</span>
+            <span class="col-number">{{ row.contact_count ?? 0 }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="创建时间" width="180">
+        <el-table-column label="合同统计" min-width="220" align="center">
           <template #default="{ row }">
-            {{ formatDateTime(row.created_at) }}
+            <div class="contract-stat" @click.stop="showContractDialog(row)">
+              <span class="stat-total">{{ row.contract_stats?.total ?? 0 }}</span>
+              <span class="stat-label">合同总数</span>
+              <div class="stat-breakdown">
+                <span class="stat-item">
+                  <span class="dot dot-green" />
+                  生效 {{ row.contract_stats?.active ?? 0 }}
+                </span>
+                <span class="stat-item">
+                  <span class="dot dot-orange" />
+                  临期 {{ row.contract_stats?.expired ?? 0 }}
+                </span>
+              </div>
+            </div>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="180" fixed="right">
+        <el-table-column label="创建时间" width="170" align="center" show-overflow-tooltip>
           <template #default="{ row }">
-            <el-button size="small" type="primary" link @click="$router.push(`/customers/${row.id}/contacts`)">联系人</el-button>
-            <el-button
-              v-if="row.status === 'active'"
-              size="small" type="warning" link
-              @click="toggleStatus(row)"
-            >停用</el-button>
-            <el-button
-              v-else
-              size="small" type="success" link
-              @click="toggleStatus(row)"
-            >启用</el-button>
-            <el-popconfirm title="确认删除？" @confirm="handleDelete(row)">
-              <template #reference>
-                <el-button size="small" type="danger" link>删除</el-button>
-              </template>
-            </el-popconfirm>
+            <span class="col-time">{{ formatDateTime(row.created_at) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" min-width="180" fixed="right" align="center">
+          <template #default="{ row }">
+            <div class="action-buttons">
+              <el-button size="small" link type="primary" @click="openEditDialog(row)">编辑</el-button>
+              <el-button size="small" link type="primary" @click="goContacts(row)">联系人</el-button>
+              <el-button size="small" link type="danger" @click="handleDeleteConfirm(row)">删除</el-button>
+            </div>
           </template>
         </el-table-column>
       </el-table>
@@ -353,6 +388,13 @@ onMounted(() => {
         <el-form-item label="客户名称" prop="name">
           <el-input v-model="form.name" placeholder="请输入客户名称" maxlength="128" show-word-limit />
         </el-form-item>
+        <el-form-item label="业务类型">
+          <el-checkbox-group v-model="form.business_types">
+            <el-checkbox value="算力租赁" label="算力租赁" />
+            <el-checkbox value="算力服务" label="算力服务" />
+            <el-checkbox value="卫星数据" label="卫星数据" />
+          </el-checkbox-group>
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
@@ -361,36 +403,224 @@ onMounted(() => {
         </el-button>
       </template>
     </el-dialog>
+
+    <!-- 合同列表弹窗 -->
+    <el-dialog
+      v-model="contractDialogVisible"
+      :title="'合同列表 - ' + (selectedCustomer?.name ?? '')"
+      width="900px"
+      :close-on-click-modal="false"
+    >
+      <el-table
+        :data="customerContracts"
+        size="small"
+        stripe
+        v-loading="loadingContracts"
+        empty-text="暂无合同"
+        :header-cell-style="{
+          background: '#FAFAFA',
+          color: '#303133',
+          fontWeight: 600,
+        }"
+      >
+        <el-table-column prop="name" label="合同名称" min-width="200" show-overflow-tooltip />
+        <el-table-column prop="contract_no" label="合同编号" width="160">
+          <template #default="{ row }">
+            <span v-if="row.contract_no">{{ row.contract_no }}</span>
+            <span v-else class="col-muted">-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="状态" width="100">
+          <template #default="{ row }">
+            <el-tag :type="statusTagType(row.status)" size="small">
+              {{ statusLabel(row.status) }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="到期日期" width="120">
+          <template #default="{ row }">
+            {{ row.end_date?.slice(0, 10) || '-' }}
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="80">
+          <template #default="{ row }">
+            <el-button size="small" link type="primary" @click="goContractDetail(row.id)">
+              详情
+            </el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-dialog>
   </div>
 </template>
 
 <style scoped>
-.page {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
+/* ============================================================
+   页面容器
+   ============================================================ */
+.customer-page {
+  padding: 4px;
 }
+
+/* ============================================================
+   卡片
+   ============================================================ */
+.customer-card {
+  border-radius: 4px;
+  box-shadow: 0 1px 2px -2px rgba(0, 0, 0, 0.16), 0 3px 6px 0 rgba(0, 0, 0, 0.12);
+  border: none;
+}
+.customer-card :deep(.el-card__header) {
+  padding: 16px 24px;
+  border-bottom: 1px solid #f0f0f0;
+}
+.customer-card :deep(.el-card__body) {
+  padding: 24px;
+}
+
 .card-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
 }
-.card-header .title {
+.card-title {
   font-size: 16px;
   font-weight: 600;
+  color: #262626;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
+.title-bar {
+  display: block;
+  width: 4px;
+  height: 16px;
+  background: #1890ff;
+  border-radius: 2px;
+}
+
+/* ============================================================
+   工具栏
+   ============================================================ */
 .toolbar {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-bottom: 16px;
+  margin-bottom: 20px;
 }
+
+/* ============================================================
+   客户名称列
+   ============================================================ */
+.col-customer-name {
+  color: #303133;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+}
+.col-customer-name:hover {
+  color: #409eff;
+}
+
+/* ============================================================
+   业务类型列
+   ============================================================ */
+.business-types {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  width: 100%;
+}
+.business-types :deep(.el-tag) {
+  font-size: 12px;
+}
+
+/* ============================================================
+   合同统计列（单行展示）
+   ============================================================ */
+.contract-stat {
+  display: flex;
+  flex-direction: row;
+  align-items: baseline;
+  gap: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.stat-total {
+  font-size: 18px;
+  font-weight: bold;
+  color: #262626;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.stat-label {
+  font-size: 12px;
+  color: #bfbfbf;
+  margin-left: 2px;
+}
+.stat-breakdown {
+  display: flex;
+  gap: 8px;
+  font-size: 12px;
+  color: #8c8c8c;
+}
+.stat-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+.dot-green {
+  background: #52c41a;
+}
+.dot-orange {
+  background: #faad14;
+}
+
+/* ============================================================
+   联系人数量列
+   ============================================================ */
+.col-number {
+  font-variant-numeric: tabular-nums;
+  color: #8c8c8c;
+}
+
+/* ============================================================
+   创建时间列
+   ============================================================ */
+.col-time {
+  color: #8c8c8c;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ============================================================
+   操作列
+   ============================================================ */
+.action-buttons {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  white-space: nowrap;
+}
+
+/* ============================================================
+   通用
+   ============================================================ */
+.col-muted {
+  color: #c9cdd4;
+}
+
 .pagination {
   display: flex;
   justify-content: flex-end;
-  margin-top: 16px;
-}
-.muted {
-  color: #c9cdd4;
+  margin-top: 20px;
 }
 </style>

@@ -14,7 +14,7 @@ import { ElMessage } from 'element-plus'
 
 const instance: AxiosInstance = axios.create({
   baseURL: '/api',
-  timeout: 15000,
+  timeout: 180000,  // 3分钟，智能解析等长请求需要
   headers: {
     'Content-Type': 'application/json',
   },
@@ -67,7 +67,9 @@ instance.interceptors.response.use(
     if (status === 400) {
       message = error.response?.data?.detail || '请求参数错误'
     } else if (status === 401) {
-      message = '未登录或登录已过期'
+      // TODO: 后端认证上线后恢复登录逻辑
+      // message = '未登录或登录已过期'
+      message = error.response?.data?.detail || '请求被拒绝，请检查后端服务'
     } else if (status === 403) {
       message = '没有访问权限'
     } else if (status === 404) {

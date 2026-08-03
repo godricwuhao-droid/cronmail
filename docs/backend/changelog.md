@@ -1,6 +1,368 @@
 # CronMail 后端变更日志
 
-## 2026-07-17 (部署) — 后端镜像重新构建部署 (第四次)
+## 2026-07-30 (新增) — SSE 流式逐页推送 + 图片 base64 + Prompt 优化
+
+| 日期 | 类型 | 变更内容 | 影响文件/范围 | 关联任务 | 备注 |
+|------|------|---------|-------------|---------|------|
+| 2026-07-30 | 新增 | 新增 SSE 流式解析端点 `POST /api/contracts/parse/stream` | src/contract_parser/api.py | - | 每页解析完推送一次事件，含 image_base64 |
+| 2026-07-30 | 新增 | 新增 `parse_contract_stream` 异步生成器 | src/contract_parser/services.py | - | 同步操作通过 run_in_executor 执行 |
+| 2026-07-30 | 修改 | Prompt 优化：specification 字段描述改为详细示例格式 | src/contract_parser/prompts.py | - | `{\"CPU\": \"8核\", \"内存\": \"32GB\", ...}` |
+
+### 新增
+- **SSE 流式合同解析**
+  - 影响文件：`backend/src/contract_parser/api.py`, `services.py`
+  - 新端点：`POST /api/contracts/parse/stream`，返回 `text/event-stream`
+  - SSE 事件类型：`progress`（进度）、`page`（单页完成，含 image_base64）、`done`（完成，含完整 fields）、`error`（错误）
+  - 原 `/parse` 端点保持不变
+  - 关联任务：SSE 流式逐页推送 + 图片 + Prompt 优化
+
+### 修改
+- **Prompt 优化**
+  - 影响文件：`backend/src/contract_parser/prompts.py`
+  - `FIELD_TEMPLATES["project"]` 和 `VISION_FIELD_TEMPLATES["project"]` 中 `specification` 字段描述改为详细示例：`{\"CPU\": \"8核\", \"内存\": \"32GB\", \"存储\": \"1TB NVMe SSD\", \"GPU\": \"A100×2 80GB\", \"带宽\": \"1000Mbps\"}`
+  - 关联任务：同上
+
+---
+
+## 2026-07-30 (修改) — 精简 project_service_line 模型，去掉 7 个硬编码规格字段 ⚠️
+
+| 日期 | 类型 | 变更内容 | 影响文件/范围 | 关联任务 | 备注 |
+|------|------|---------|-------------|---------|------|
+| 2026-07-30 | 修改 | ProjectServiceLine 删除 7 个硬编码规格字段 ⚠️ | src/project/models.py, schemas.py, services.py, api.py | - | Breaking Change：所有规格进 specification JSON |
+| 2026-07-30 | 修改 | contract_parser prompts 更新 service_lines / resource_summary 定义 | src/contract_parser/prompts.py | - | 通用化规格描述，去掉硬编码汇总字段 |
+| 2026-07-30 | 修改 | Alembic 迁移 014：DROP COLUMN × 7 | alembic/versions/014_streamline_project_service_line_fields.py | - | 幂等保护 |
+| 2026-07-30 | 修改 | alembic/env.py 新增 import src.project.models | alembic/env.py | - | 确保 autogenerate 能检测到 project 表 |
+
+### 修改 ⚠️
+- **ProjectServiceLine 模型精简**
+  - 影响文件：`backend/src/project/models.py`, `schemas.py`, `services.py`, `api.py`
+  - 删除字段：`vcpu_count`, `memory_gb`, `storage_gb`, `gpu_count`, `gpu_model`, `gpu_memory_gb`, `gpu_tops`
+  - 保留字段（13 列）：id, contract_id, category, item_name, specification(JSON), unit, quantity, period_months, unit_price, total_price, sort_order, service_description, created_at
+  - 所有规格数据统一进 `specification` JSON 字段，不再硬编码列
+  - ⚠️ Breaking Change：API 请求/响应不再包含 7 个规格字段，前端需从 `specification` JSON 中读取
+  - 关联任务：精简 project_service_line 模型
+
+- **contract_parser prompts 更新**
+  - 影响文件：`backend/src/contract_parser/prompts.py`
+  - `FIELD_TEMPLATES["project"]` 中 service_lines 改为通用 specification JSON + 删除硬编码字段
+  - `FIELD_TEMPLATES["project"]` 中 resource_summary 改为通用 summary_text + by_category[{category, resources}]
+  - `VISION_FIELD_TEMPLATES["project"]` 同步更新
+  - 关联任务：同上
+
+- **Alembic 迁移**
+  - 影响文件：`backend/alembic/versions/014_streamline_project_service_line_fields.py`
+  - upgrade: ALTER TABLE project_service_line DROP COLUMN × 7（幂等保护：每列先检查是否存在）
+  - downgrade: ADD COLUMN × 7（nullable=True）
+  - 关联任务：同上
+
+---
+
+## 2026-07-29 (新增) — 独立文档转换服务 + 主后端统一 Vision 管道 ⚠️
+
+| 日期 | 类型 | 变更内容 | 影响文件/范围 | 关联任务 | 备注 |
+|------|------|---------|-------------|---------|------|
+| 2026-07-29 | 新增 | 新建 document-converter 微服务（Flask + LibreOffice） | converter/app.py, converter/requirements.txt, Dockerfile.converter, k8s/converter.yaml | - | 独立服务，Word→PDF 转换 |
+| 2026-07-29 | 修改 | parse_contract 改为统一走 Vision 管道，移除 mode 参数 ⚠️ | src/contract_parser/services.py, api.py | - | Breaking Change |
+| 2026-07-29 | 修改 | 新增 convert_to_pdf() 调用 converter 服务 | src/contract_parser/services.py | - | - |
+
+### 新增
+- **document-converter 微服务**
+  - 影响文件：`converter/app.py`, `converter/requirements.txt`, `Dockerfile.converter`, `k8s/converter.yaml`
+  - 变更内容：
+    1. `POST /convert` — 上传 .doc/.docx/.pdf，返回 PDF 文件流
+    2. `GET /health` — 健康检查
+    3. 基于 Flask + LibreOffice headless，最大 50MB，超时 120s
+    4. PDF 文件直接透传，不做转换
+    5. K8s Deployment + Service（namespace: cronmail, service: document-converter:8080）
+  - 关联任务：独立文档转换服务
+
+### 修改 ⚠️
+- **合同解析统一走 Vision 多模态管道**
+  - 影响文件：`backend/src/contract_parser/services.py`, `api.py`
+  - 变更内容：
+    1. `parse_contract()` 重写：所有格式（.doc/.docx/.pdf）统一走 Vision 多模态图片识别
+    2. .doc/.docx → `convert_to_pdf()` 调用 document-converter 服务 → PDF → Vision LLM
+    3. .pdf → 直接 Vision LLM（与之前一致）
+    4. `parse_contract_vision()` 新增 `processing_info` 可选参数，供 `parse_contract` 传入上下文
+    5. `POST /api/contracts/parse` 移除 `mode` 参数（不再需要 auto/text/vision 选择）
+    6. `extract_text_from_docx`、`extract_text_from_doc` 保留备用但不再被主流程调用
+  - ⚠️ Breaking Change：API 不再接受 `mode` 参数；所有文件格式统一走 Vision 管道；不再支持纯文本 LLM 解析模式
+  - 关联任务：独立文档转换服务 + 统一 Vision 管道
+
+---
+
+## 2026-07-28 (新增) — 智能解析支持 PDF 图片模式（多模态）
+
+| 日期 | 类型 | 变更内容 | 影响文件/范围 | 关联任务 | 备注 |
+|------|------|---------|-------------|---------|------|
+| 2026-07-28 | 新增 | PDF 合同支持多模态 Vision 解析（逐页拆图送 Qwen VL 模型） | src/contract_parser/services.py, prompts.py, api.py | - | PDF 自动走图片模式，docx 不受影响 |
+| 2026-07-28 | 新增 | 新增 pdf2image / Pillow 依赖 | requirements.txt | - | - |
+| 2026-07-28 | 修改 | Dockerfile 安装 poppler-utils（pdf2image 需要 pdftoppm） | Dockerfile.backend | - | - |
+
+### 新增
+- **PDF 多模态合同解析**
+  - 影响文件：`backend/src/contract_parser/services.py`, `prompts.py`, `api.py`
+  - 变更内容：
+    1. `extract_images_from_pdf()` — 将 PDF 逐页转为 base64 PNG（150dpi，最大 20 页）
+    2. `parse_contract_vision()` — 多模态解析主函数：PDF → 图片 → Vision LLM → JSON
+    3. `VISION_SYSTEM_PROMPT` + `VISION_FIELD_TEMPLATES` — 多模态专用 Prompt 模板
+    4. `build_vision_user_prompt()` — 组装多模态 user prompt（文字部分）
+    5. `POST /api/contracts/parse` 新增 `mode` 参数：`auto`（默认，PDF 自动走 vision）/ `text`（强制文本）/ `vision`（强制图片，仅 PDF）
+  - 行为：
+    - PDF 文件上传 → 自动走多模态图片解析（逐页送 Qwen VL）
+    - DOCX 文件上传 → 继续走文本解析（不受影响）
+    - `mode=vision` 对非 PDF 文件返回 400 错误
+  - LLM 调用超时：文本模式 120s，多模态模式 180s
+  - 关联任务：智能解析 PDF 图片模式
+
+### 部署注意
+- 需要在运行环境安装 `poppler-utils`（Dockerfile 已更新）
+- 需要安装 `pdf2image` 和 `Pillow`（requirements.txt 已更新）
+
+---
+
+## 2026-07-28 (新增) — 项目管理合同模块 ADR-016
+
+| 日期 | 类型 | 变更内容 | 影响文件/范围 | 关联任务 | 备注 |
+|------|------|---------|-------------|---------|------|
+| 2026-07-28 | 新增 | 新增 project 模块，支持项目管理合同 CRUD + 服务行 + Excel导出 | src/project/ (新模块) | ADR-016 | 零耦合，不依赖 contract/satellite/compute_service |
+| 2026-07-28 | 新增 | project_contract / project_service_line 两张新表 | alembic/versions/013_add_project_contract_tables_adr016.py | ADR-016 | 含幂等保护 |
+| 2026-07-28 | 修改 | main.py 注册 project_router | main.py | ADR-016 | 新增路由 /api/project-contracts |
+| 2026-07-28 | 修改 | contract_parser 新增 project 合同类型智能解析 | src/contract_parser/prompts.py | ADR-016 | POST /api/contracts/parse?contract_type=project |
+| 2026-07-28 | 修改 | attachment 默认分类新增 project 类型 | src/attachment/services.py | ADR-016 | 三类：合同材料/交付材料/过程材料 |
+
+### 新增
+- **project 模块（项目管理合同）**
+  - 影响文件：`backend/src/project/__init__.py`, `models.py`, `schemas.py`, `services.py`, `api.py`
+  - 变更内容：
+    1. `ProjectContract` 模型 — 项目管理合同表，按 company_code（fengyun/tianshu/qianxing）区分
+    2. `ProjectServiceLine` 模型 — 服务内容行子表，含 GPU 字段，1:N 关联，ON DELETE CASCADE
+    3. `GET /api/project-contracts?company=fengyun&search=&page=&page_size=` — 按公司过滤列表
+    4. `POST /api/project-contracts` — 创建合同，支持内嵌 service_lines，自动汇总 amount
+    5. `GET /api/project-contracts/{id}` — 详情（含 service_lines + related_contract 双向查询 + amount_auto_calc）
+    6. `PUT /api/project-contracts/{id}` — 更新合同，支持 service_lines 全量替换
+    7. `DELETE /api/project-contracts/{id}` — 级联删除
+    8. `GET /api/project-contracts/export?company=xxx` — Excel 导出（14列），company_code 映射中文
+    9. `POST /api/project-contracts/{id}/service-lines/batch` — 批量保存服务行
+    10. 服务行子路由：GET/POST/PUT/DELETE `/api/project-contracts/{id}/service-lines/...`
+  - 零耦合约束：src/project/ 不 import 任何 src/contract/、src/satellite/、src/compute_service/ 的代码
+  - 关联任务：ADR-016
+
+- **contract_parser 新增 project 类型**
+  - 影响文件：`backend/src/contract_parser/prompts.py`
+  - `FIELD_TEMPLATES` 新增 `"project"` 键，提取字段：name/contract_no/party_a_name/party_b_name/amount/start_date/end_date/project_name/contract_content/delivery_requirements/remark
+  - 关联任务：ADR-016
+
+- **attachment 默认分类新增 project**
+  - 影响文件：`backend/src/attachment/services.py`
+  - `DEFAULT_CATEGORIES` 新增 `contract_type: "project"`，含三类：合同材料(合同扫描件)、交付材料(验收单)、过程材料(交付清单)
+  - 关联任务：ADR-016
+
+- **Alembic 迁移**
+  - 影响文件：`backend/alembic/versions/013_add_project_contract_tables_adr016.py`
+  - upgrade: CREATE TABLE project_contract (18列) + CREATE TABLE project_service_line (19列)，含索引和外键
+  - downgrade: DROP TABLE project_service_line, DROP TABLE project_contract
+  - 幂等保护：每张表创建前检查是否已存在
+  - 关联任务：ADR-016
+
+### 约束
+- ⚠️ 现有 contract/mail/scheduler 模块完全未修改，算力租赁功能不受影响
+- project 模块零耦合：不依赖任何其他业务模块
+- 所有新模块遵循项目现有分层：models / schemas / services / api
+
+---
+
+## 2026-07-23 (新增) — 智能合同解析 Agent 模块
+
+| 日期 | 类型 | 变更内容 | 影响文件/范围 | 关联任务 | 备注 |
+|------|------|---------|-------------|---------|------|
+| 2026-07-23 | 新增 | 新增 contract_parser 模块，支持上传 Word 合同文件 AI 自动提取关键字段 | src/contract_parser/ (新模块) | - | 支持 3 种合同类型：compute_service/compute_leasing/satellite_data |
+| 2026-07-23 | 新增 | LLM 配置新增 LLM_BASE_URL/LLM_API_KEY/LLM_MODEL | src/core/config.py | - | 默认值指向 Qwen3.6-27B @ 192.168.180.66:34000 |
+| 2026-07-23 | 新增 | 新增依赖 python-docx, openai | requirements.txt | - | - |
+| 2026-07-23 | 修改 | main.py 注册 parse_router | main.py | - | 新增路由 /api/contracts/parse |
+
+### 新增
+- **contract_parser 模块（智能合同解析）**
+  - 影响文件：`backend/src/contract_parser/__init__.py`, `prompts.py`, `services.py`, `api.py`
+  - 变更内容：
+    1. `POST /api/contracts/parse` — 上传 .docx 合同文件，AI 自动提取关键字段
+    2. 支持 3 种合同类型：`compute_service`（算力服务）、`compute_leasing`（算力租赁）、`satellite_data`（卫星数据）
+    3. 文件限制 10MB，仅支持 .docx 格式
+    4. 非 .docx 文件返回 400，空文件/扫描件返回 400，LLM 不可用时返回 502
+    5. 使用 Qwen3.6-27B 模型（enable_thinking=False），低温度 0.1 确保输出确定性
+    6. 文件仅用于本次解析，不落库、不存盘（读入内存后丢弃）
+    7. JSON 解析失败时有降级策略，返回原始文本供手动处理
+
+- **LLM 配置**
+  - 影响文件：`backend/src/core/config.py`
+  - 新增三个配置项：`LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`
+  - 支持通过环境变量覆盖
+
+## 2026-07-23 (新增) — 三大类合同新增 sort_order 排序序号字段
+
+| 日期 | 类型 | 变更内容 | 影响文件/范围 | 关联任务 | 备注 |
+|------|------|---------|-------------|---------|------|
+| 2026-07-23 | 新增 | Contract 模型新增 sort_order 字段 | contract/models.py, schemas.py, services.py, api.py | - | 默认0，列表按 sort_order ASC, created_at DESC 排序 |
+| 2026-07-23 | 新增 | SatelliteDataContract 模型新增 sort_order 字段 | satellite/models.py, schemas.py, services.py, api.py | - | 同上 |
+| 2026-07-23 | 新增 | ComputeServiceContract 模型新增 sort_order 字段 | compute_service/models.py, schemas.py, services.py, api.py | - | 同上 |
+
+### 新增
+- **Contract（算力租赁）新增 sort_order 字段**
+  - 影响文件：`backend/src/contract/models.py`, `schemas.py`, `services.py`, `api.py`
+  - 变更内容：
+    1. `Contract` ORM 模型新增 `sort_order = Column(Integer, default=0, nullable=False, comment="排序序号")`
+    2. `ContractCreate` 新增 `sort_order: Optional[int] = Field(0)`
+    3. `ContractUpdate` 新增 `sort_order: Optional[int] = None`
+    4. `ContractResponse` 新增 `sort_order: int = 0`
+    5. `list_contracts` order_by 改为 `order_by(Contract.sort_order.asc(), Contract.created_at.desc())`
+    6. `create_contract` 显式设置 `sort_order=data.sort_order if data.sort_order else 0`
+    7. 列表和详情 Response 构造中传入 `sort_order=c.sort_order`
+
+- **SatelliteDataContract（卫星数据）新增 sort_order 字段**
+  - 影响文件：`backend/src/satellite/models.py`, `schemas.py`, `services.py`, `api.py`
+  - 变更内容：
+    1. `SatelliteDataContract` ORM 模型新增 `sort_order = Column(Integer, default=0, nullable=False, comment="排序序号")`
+    2. `SatelliteDataContractCreate` 新增 `sort_order: Optional[int] = Field(0)`
+    3. `SatelliteDataContractUpdate` 新增 `sort_order: Optional[int] = None`
+    4. `SatelliteDataContractResponse` 新增 `sort_order: int = 0`
+    5. `list_contracts` order_by 改为 `order_by(SatelliteDataContract.sort_order.asc(), SatelliteDataContract.created_at.desc())`
+    6. `create_contract` 显式设置 `sort_order`
+    7. 列表/创建/详情/更新 四个端点均传入 `sort_order`
+
+- **ComputeServiceContract（算力服务）新增 sort_order 字段**
+  - 影响文件：`backend/src/compute_service/models.py`, `schemas.py`, `services.py`, `api.py`
+  - 变更内容：
+    1. `ComputeServiceContract` ORM 模型新增 `sort_order = Column(Integer, default=0, nullable=False, comment="排序序号")`
+    2. `ComputeServiceContractCreate` 新增 `sort_order: Optional[int] = Field(0)`
+    3. `ComputeServiceContractUpdate` 新增 `sort_order: Optional[int] = None`
+    4. `ComputeServiceContractListResponse` 新增 `sort_order: int = 0`
+    5. `ComputeServiceContractResponse` 新增 `sort_order: int = 0`
+    6. `list_contracts` order_by 改为 `order_by(ComputeServiceContract.sort_order.asc(), ComputeServiceContract.created_at.desc())`
+    7. `_build_list_item` 和 `_build_detail_response` 传入 `sort_order`
+
+- **Alembic 迁移**
+  - 影响文件：`backend/alembic/versions/012_add_sort_order_to_all_contracts.py`
+  - upgrade: 三张合同表各 ADD COLUMN sort_order (Integer, NOT NULL, DEFAULT 0)
+  - downgrade: DROP COLUMN sort_order
+  - 幂等保护：每列添加前检查是否已存在
+
+---
+
+## 2026-07-23 (TASK-014-ZIP)
+
+| 日期 | 类型 | 变更内容 | 影响文件/范围 | 关联任务 | 备注 |
+|------|------|---------|-------------|---------|------|
+| 2026-07-23 | 新增 | 附件一键ZIP导出端点(ADR-014): GET /api/attachments/export | attachment/api.py | TASK-014-ZIP | |
+
+### 新增
+- **附件一键 ZIP 导出端点 `GET /api/attachments/export`**
+  - 影响文件：`backend/src/attachment/api.py`
+  - 变更内容：
+    1. 新增 `export_attachments_zip` 端点：将指定合同下所有附件按目录结构打包为 ZIP 下载
+    2. 目录结构动态读取 `AttachmentCategory` 和 `AttachmentItem` 表，不硬编码分类名
+    3. 仅包含 `is_active=True` 的分类和子项，无文件的子项跳过
+    4. 重名文件自动加序号后缀（`file.pdf` → `file(2).pdf`）
+    5. 新增三个辅助函数：`_get_contract_name`（多态查合同名）、`_safe_zip_name`（非法字符替换）、`_resolve_duplicate_name`（重名处理）
+    6. 下载文件名格式：`{合同名称}_附件_{日期}.zip`，Content-Disposition 使用 RFC 5987 编码
+  - 关联任务：ADR-014 / TASK-014-ZIP
+
+---
+
+## 2026-07-23 (ADR-013 / TASK-014-EXCEL)
+
+| 日期 | 类型 | 变更内容 | 影响文件/范围 | 关联任务 | 备注 |
+|------|------|---------|-------------|---------|------|
+| 2026-07-23 | 新增 | 卫星数据合同新增10字段(ADR-013): contract_type/project_name/party_a_name/party_b_name/start_date/end_date/amount/contract_content/delivery_requirements/process_records | models/schemas/services/api | TASK-013-SAT | 所有字段 nullable，向后兼容 |
+| 2026-07-23 | 新增 | 算力服务合同新增4字段(ADR-013): project_name/contract_content/delivery_requirements/process_records | models/schemas/services/api | TASK-013-CS | 所有字段 nullable，向后兼容 |
+| 2026-07-23 | 新增 | 三大类合同Excel导出端点(ADR-014): /api/{contracts,satellite-data-contracts,compute-service-contracts}/export | core/export_excel.py + 3个api.py | TASK-014-EXCEL | 新增 openpyxl 依赖 |
+
+### 修改
+- **SatelliteDataContract 模型新增 10 个字段**
+  - 影响文件：`backend/src/satellite/models.py`
+  - 新增字段：`contract_type` (String(30))、`project_name` (String(255))、`party_a_name` (String(255))、`party_b_name` (String(255))、`start_date` (Date)、`end_date` (Date)、`amount` (Numeric(12,2))、`contract_content` (Text)、`delivery_requirements` (Text)、`process_records` (Text)
+  - 所有字段 `nullable=True`，不破坏现有数据
+  - 关联任务：ADR-013
+
+- **Schema 层更新**
+  - 影响文件：`backend/src/satellite/schemas.py`
+  - `SatelliteDataContractCreate`、`SatelliteDataContractUpdate`、`SatelliteDataContractResponse` 均新增以上 10 个 Optional 字段
+  - 关联任务：ADR-013
+
+- **Service 层更新**
+  - 影响文件：`backend/src/satellite/services.py`
+  - `create_contract` 显式设置所有新字段
+  - `update_contract` 通过 `model_dump(exclude_unset=True)` 自动处理，无需额外改动
+  - 关联任务：ADR-013
+
+- **API 层更新**
+  - 影响文件：`backend/src/satellite/api.py`
+  - 列表/创建/详情/更新 四个端点均返回所有新字段
+  - 关联任务：ADR-013
+
+- **Alembic 迁移（卫星数据合同）**
+  - 影响文件：`backend/alembic/versions/010_add_satellite_contract_fields_adr013.py`
+  - upgrade: ALTER TABLE satellite_data_contract ADD COLUMN × 10（幂等保护）
+  - downgrade: DROP COLUMN × 10
+  - 关联任务：ADR-013
+
+- **Alembic 迁移（算力服务合同）**
+  - 影响文件：`backend/alembic/versions/011_add_compute_service_contract_fields_adr013.py`
+  - upgrade: ALTER TABLE compute_service_contract ADD COLUMN × 4（幂等保护）
+  - downgrade: DROP COLUMN × 4
+  - 关联任务：ADR-013
+
+---
+
+## 2026-07-14
+
+| 日期 | 类型 | 变更内容 | 影响文件/范围 | 关联任务 | 备注 |
+|------|------|---------|-------------|---------|------|
+| 2026-07-14 | 新增 | 算力服务合同服务行支持 `manual_total_price` 手动覆盖总价 | `compute_service/schemas.py`, `compute_service/services.py`, `compute_service/api.py` | - | 向后兼容，不传则自动计算 |
+| 2026-07-14 | 修复 | 删除合同编辑后自动纠正 status 逻辑，用户手动设置优先 | `backend/src/contract/services.py` | - | ⚠️ Behavior Change |
+| 2026-07-14 | 修改 | ContractUpdate.status 新增 Literal 枚举校验 | `backend/src/contract/schemas.py` | - | |
+| 2026-07-14 | 修复 | 合同接口响应补上 amount 字段（之前漏传导致前端误以为没保存） | `backend/src/contract/api.py` | - | ⚠️ Bug Fix |
+| 2026-07-14 | 修改 | 客户列表 API 增加 business_type 过滤参数 | customer/api.py, customer/services.py | - | |
+| 2026-07-14 | 修改 | ~~算力服务合同金额/资源字段精度从 2 位升级到 4 位~~（已回退） | compute_service/* | - | |
+| 2026-07-14 | 回退 | 算力服务合同精度回退到 2 位（Numeric(x,4)→Numeric(x,2)），删除 migration 010 | compute_service/models.py, alembic/versions/010_*.py | - | ⚠️ 回退 |
+
+## 2026-07-17 (ADR-012 算力服务合同 - 服务内容模型)
+
+### 新增
+- **ComputeServiceContract 扩展**：算力服务合同新增 8 个字段
+  - 影响文件：`backend/src/compute_service/models.py`, `schemas.py`, `services.py`, `api.py`
+  - 新增字段：`contract_type`（sales/procurement）、`party_a_name`、`party_b_name`、`amount`、`start_date`、`end_date`、`related_contract_id`（背靠背自引用 FK）、`remark`
+  - 所有新增字段均为 NULLABLE（除 contract_type 默认 'sales'），存量数据不受影响
+  - 关联任务：ADR-012
+
+- **ContractServiceLine 模型**：新增算力服务合同 - 服务内容行子表
+  - 影响文件：`backend/src/compute_service/models.py`
+  - 字段：`category`、`item_name`、`specification`（JSON 展示用）、`vcpu_count`、`memory_gb`、`storage_gb`（NULLABLE 数值列，用于跨合同聚合统计）、`unit`、`quantity`、`period_months`、`unit_price`、`total_price`、`sort_order`
+  - 1:N 关联 ComputeServiceContract，ON DELETE CASCADE
+  - 关联任务：ADR-012
+
+- **服务行 CRUD API**：新增 5 个子路由端点
+  - 影响文件：`backend/src/compute_service/api.py`
+  - `GET /{contract_id}/service-lines` — 获取服务行列表
+  - `POST /{contract_id}/service-lines` — 新增单行
+  - `PUT /{contract_id}/service-lines/{line_id}` — 更新单行
+  - `DELETE /{contract_id}/service-lines/{line_id}` — 删除单行
+  - `POST /{contract_id}/service-lines/batch` — 批量保存（全量替换）
+  - 关联任务：ADR-012
+
+### 修改
+- **合同 CRUD 扩展**：创建/编辑/详情/列表接口支持所有新增字段
+  - 详情接口返回 `service_lines` + `related_contract`（双向查询）+ `amount_auto_calc`
+  - 创建/编辑支持内嵌 `service_lines`，保存时自动计算每条 `total_price`
+  - 金额自动汇总：未填 `amount` 时自动 `SUM(service_lines.total_price)`
+  - 关联任务：ADR-012
+
+- **Alembic 迁移**：新增 `006_add_compute_service_contract_fields.py`
+  - 影响文件：`backend/alembic/versions/006_add_compute_service_contract_fields.py`
+  - upgrade: ALTER TABLE compute_service_contract ADD 7 列 + CREATE TABLE contract_service_line
+  - 关联任务：ADR-012
+
+---
+
 
 ### 部署
 - **后端镜像构建 + K8s 滚动更新**

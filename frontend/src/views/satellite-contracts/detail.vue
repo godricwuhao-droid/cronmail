@@ -7,7 +7,7 @@
 import { onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowLeft, Document } from '@element-plus/icons-vue'
+import { ArrowLeft, Document, Paperclip } from '@element-plus/icons-vue'
 import {
   deleteSatelliteContract,
   getSatelliteContract,
@@ -98,7 +98,7 @@ function statusText(confirmed: boolean, fileCount: number): string {
 
 const categoryLabels: Record<string, string> = {
   contract_agreement: '合同协议',
-  delivery_material: '交付材料',
+  acceptance_material: '交付材料',
   process_material: '过程材料',
 }
 
@@ -142,11 +142,46 @@ onMounted(() => {
         <el-descriptions-item label="合同编号">
           {{ record?.contract_no || '-' }}
         </el-descriptions-item>
-        <el-descriptions-item label="创建时间" :span="3">
+        <!-- ADR-013 新增字段 -->
+        <el-descriptions-item label="合同类型">
+          {{ record?.contract_type || '-' }}
+        </el-descriptions-item>
+        <el-descriptions-item label="项目名称">
+          {{ record?.project_name || '-' }}
+        </el-descriptions-item>
+        <el-descriptions-item label="合同金额">
+          <span v-if="record?.amount != null">¥{{ record.amount.toFixed(2) }}</span>
+          <span v-else class="muted">—</span>
+        </el-descriptions-item>
+        <el-descriptions-item label="开始日期">
+          {{ record?.start_date || '-' }}
+        </el-descriptions-item>
+        <el-descriptions-item label="结束日期">
+          {{ record?.end_date || '-' }}
+        </el-descriptions-item>
+        <el-descriptions-item label="甲方名称">
+          {{ record?.party_a_name || '-' }}
+        </el-descriptions-item>
+        <el-descriptions-item label="乙方名称">
+          {{ record?.party_b_name || '-' }}
+        </el-descriptions-item>
+        <el-descriptions-item label="创建时间">
           {{ formatDateTime(record?.created_at) }}
         </el-descriptions-item>
-        <el-descriptions-item label="更新时间" :span="3">
+        <el-descriptions-item label="更新时间">
           {{ formatDateTime(record?.updated_at) }}
+        </el-descriptions-item>
+        <el-descriptions-item label="合同内容" :span="3">
+          <span v-if="record?.contract_content">{{ record.contract_content }}</span>
+          <span v-else class="muted">—</span>
+        </el-descriptions-item>
+        <el-descriptions-item label="交付要求" :span="3">
+          <span v-if="record?.delivery_requirements">{{ record.delivery_requirements }}</span>
+          <span v-else class="muted">—</span>
+        </el-descriptions-item>
+        <el-descriptions-item label="过程记录" :span="3">
+          <span v-if="record?.process_records">{{ record.process_records }}</span>
+          <span v-else class="muted">—</span>
         </el-descriptions-item>
         <el-descriptions-item label="备注" :span="3">
           <span v-if="record?.remark">{{ record.remark }}</span>

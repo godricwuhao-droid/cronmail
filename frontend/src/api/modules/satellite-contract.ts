@@ -17,6 +17,18 @@ export interface SatelliteContractItem {
   name: string
   contract_no?: string | null
   remark?: string | null
+  sort_order?: number
+  // ADR-013 新增字段
+  contract_type?: string | null
+  project_name?: string | null
+  party_a_name?: string | null
+  party_b_name?: string | null
+  start_date?: string | null
+  end_date?: string | null
+  amount?: number | null
+  contract_content?: string | null
+  delivery_requirements?: string | null
+  process_records?: string | null
   created_at?: string | null
   updated_at?: string | null
 }
@@ -43,6 +55,18 @@ export interface SatelliteContractCreatePayload {
   name: string
   contract_no?: string
   remark?: string
+  sort_order?: number
+  // ADR-013 新增字段
+  contract_type?: string
+  project_name?: string
+  party_a_name?: string
+  party_b_name?: string
+  start_date?: string
+  end_date?: string
+  amount?: number
+  contract_content?: string
+  delivery_requirements?: string
+  process_records?: string
 }
 
 /** 卫星数据合同更新载荷 */
@@ -50,6 +74,18 @@ export interface SatelliteContractUpdatePayload {
   name?: string
   contract_no?: string
   remark?: string
+  sort_order?: number
+  // ADR-013 新增字段
+  contract_type?: string
+  project_name?: string
+  party_a_name?: string
+  party_b_name?: string
+  start_date?: string
+  end_date?: string
+  amount?: number
+  contract_content?: string
+  delivery_requirements?: string
+  process_records?: string
 }
 
 // ============================================================

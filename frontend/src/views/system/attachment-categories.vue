@@ -10,6 +10,7 @@
  *  - 软删除
  */
 import { onMounted, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   FolderOpened,
@@ -42,7 +43,17 @@ import { CONTRACT_TYPE_OPTIONS } from '@/lib/contract'
 // ============================================================
 // 状态
 // ============================================================
-const activeTab = ref<ContractType>('compute_leasing')
+const route = useRoute()
+
+function getInitialTab(): ContractType {
+  const qt = route.query.contract_type as string
+  if (qt === 'compute_leasing' || qt === 'satellite_data' || qt === 'compute_service' || qt === 'project') {
+    return qt
+  }
+  return 'compute_leasing'
+}
+
+const activeTab = ref<ContractType>(getInitialTab())
 const loading = ref(false)
 const categories = ref<AttachmentCategoryConfig[]>([])
 const expandedCategories = ref<Set<string>>(new Set())

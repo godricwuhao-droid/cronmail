@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>资产运营管理平台 - 算力租赁合同</title>
+    <style>
+        :root {
+            --primary-color: #1677ff; /* 现代蓝 */
+            --bg-body: #f0f2f5;       /* 浅灰背景 */
+            --bg-sidebar: #001529;    /* 深色侧边栏 */
+            --text-main: #333333;
+            --text-secondary: #666666;
+            --border-color: #e8e8e8;
+            --success-bg: #f6ffed;
+            --success-text: #52c41a;
+            --warning-bg: #fffbe6;
+            --warning-text: #faad14;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background-color: var(--bg-body);
+            color: var(--text-main);
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* --- 侧边栏 --- */
+        .sidebar {
+            width: 220px;
+            background-color: var(--bg-sidebar);
+            color: rgba(255, 255, 255, 0.65);
+            display: flex;
+            flex-direction: column;
+            transition: all 0.3s;
+            flex-shrink: 0;
+        }
+
+        .logo {
+            height: 64px;
+            line-height: 64px;
+            text-align: center;
+            font-size: 18px;
+            font-weight: bold;
+            color: white;
+            background-color: #002140;
+            letter-spacing: 1px;
+        }
+
+        .menu {
+            list-style: none;
+            margin-top: 10px;
+        }
+
+        .menu-item {
+            padding: 0 24px;
+            height: 40px;
+            line-height: 40px;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            font-size: 14px;
+        }
+
+        .menu-item:hover {
+            color: white;
+        }
+
+        .menu-item.active {
+            background-color: var(--primary-color);
+            color: white;
+        }
+
+        .submenu {
+            background-color: #000c17;
+        }
+        
+        .submenu .menu-item {
+            padding-left: 48px;
+            font-size: 13px;
+        }
+
+        /* --- 主体内容 --- */
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* 顶部导航 */
+        .header {
+            height: 64px;
+            background: white;
+            box-shadow: 0 1px 4px rgba(0,21,41,.08);
+            display: flex;
+            align-items: center;
+            padding: 0 24px;
+            justify-content: space-between;
+            z-index: 10;
+        }
+
+        .breadcrumb {
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+        
+        .system-status {
+            font-size: 12px;
+            color: var(--success-text);
+            display: flex;
+            align-items: center;
+            background: var(--success-bg);
+            padding: 4px 10px;
+            border-radius: 12px;
+        }
+        .dot {
+            width: 6px;
+            height: 6px;
+            background-color: var(--success-text);
+            border-radius: 50%;
+            margin-right: 6px;
+        }
+
+        /* 内容区域 */
+        .content-wrapper {
+            padding: 24px;
+            overflow-y: auto;
+            flex: 1;
+        }
+
+        .page-card {
+            background: white;
+            border-radius: 8px; /* 圆角 */
+            padding: 24px;
+            box-shadow: 0 1px 2px 0 rgba(0,0,0,0.03), 0 1px 6px -1px rgba(0,0,0,0.02);
+            min-height: calc(100vh - 112px);
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+            border-bottom: 1px solid #f0f0f0;
+            padding-bottom: 16px;
+        }
+
+        .page-title {
+            font-size: 20px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            color: #262626;
+        }
+        
+        .page-title::before {
+            content: '';
+            display: block;
+            width: 4px;
+            height: 18px;
+            background-color: var(--primary-color);
+            margin-right: 12px;
+            border-radius: 2px;
+        }
+
+        /* 筛选工具栏 */
+        .filter-bar {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .input-group {
+            position: relative;
+        }
+
+        .form-control {
+            height: 36px;
+            padding: 0 12px;
+            border: 1px solid #d9d9d9;
+            border-radius: 6px;
+            outline: none;
+            font-size: 14px;
+            color: var(--text-main);
+            transition: all 0.3s;
+            min-width: 180px;
+            background: #fff;
+        }
+
+        .form-control:focus {
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.2);
+        }
+
+        .btn {
+            height: 36px;
+            padding: 0 16px;
+            border-radius: 6px;
+            border: 1px solid transparent;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 500;
+        }
+
+        .btn-primary {
+            background-color: var(--primary-color);
+            color: white;
+            box-shadow: 0 2px 0 rgba(0,0,0,0.045);
+        }
+
+        .btn-primary:hover {
+            background-color: #4096ff;
+        }
+
+        .btn-default {
+            background-color: white;
+            border-color: #d9d9d9;
+            color: var(--text-main);
+        }
+        
+        .btn-default:hover {
+            color: var(--primary-color);
+            border-color: var(--primary-color);
+        }
+
+        /* --- 表格设计 (重点) --- */
+        .table-container {
+            width: 100%;
+            overflow-x: auto;
+            border: 1px solid #f0f0f0;
+            border-radius: 8px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            text-align: left;
+        }
+
+        th {
+            background-color: #fafafa;
+            color: var(--text-main);
+            font-weight: 600;
+            padding: 16px;
+            border-bottom: 1px solid #f0f0f0;
+            white-space: nowrap;
+            font-size: 14px;
+        }
+
+        td {
+            padding: 16px;
+            border-bottom: 1px solid #f0f0f0;
+            color: var(--text-secondary);
+            font-size: 14px;
+            vertical-align: middle;
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        tr:hover td {
+            background-color: #fafafa;
+        }
+
+        /* 特殊列样式 */
+        .col-name {
+            font-weight: 500;
+            color: var(--text-main);
+            max-width: 300px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        /* 状态胶囊 */
+        .status-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            font-size: 12px;
+            border-radius: 4px;
+            border: 1px solid transparent;
+        }
+
+        .status-active {
+            background-color: var(--success-bg);
+            color: var(--success-text);
+            border-color: #b7eb8f;
+        }
+        
+        .status-expiring {
+             background-color: var(--warning-bg);
+            color: var(--warning-text);
+            border-color: #ffe58f;
+        }
+
+        /* 附件状态点 */
+        .attachment-dots {
+            display: flex;
+            gap: 4px;
+        }
+        .dot-icon {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: #f0f0f0; /* 默认灰色 */
+            border: 1px solid #d9d9d9;
+        }
+        .dot-icon.filled {
+            background-color: var(--success-text); /* 有附件绿色 */
+            border-color: var(--success-text);
+        }
+
+        /* 操作链接 */
+        .action-link {
+            color: var(--primary-color);
+            text-decoration: none;
+            margin-right: 12px;
+            cursor: pointer;
+            font-size: 13px;
+        }
+        .action-link.danger {
+            color: #ff4d4f;
+        }
+        .action-link:hover {
+            text-decoration: underline;
+        }
+
+        /* 分页 */
+        .pagination {
+            display: flex;
+            justify-content: flex-end;
+            margin-top: 20px;
+            align-items: center;
+            gap: 8px;
+        }
+        .page-info {
+            margin-right: auto;
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+        .page-item {
+            min-width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid #d9d9d9;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            background: white;
+            color: var(--text-main);
+        }
+        .page-item:hover {
+            border-color: var(--primary-color);
+            color: var(--primary-color);
+        }
+        .page-item.active {
+            background-color: var(--primary-color);
+            color: white;
+            border-color: var(--primary-color);
+        }
+        .page-item.disabled {
+            color: #d9d9d9;
+            cursor: not-allowed;
+            background: #f5f5f5;
+        }
+
+    </style>
+</head>
+<body>
+
+    <!-- 左侧导航 -->
+    <div class="sidebar">
+        <div class="logo">Asset Ops</div>
+        <ul class="menu">
+            <li class="menu-item">运营概览</li>
+            <li class="menu-item">客户管理</li>
+            <li class="menu-item active-parent">
+                合同管理
+            </li>
+            <div class="submenu">
+                <li class="menu-item active">算力租赁</li>
+                <li class="menu-item">卫星数据</li>
+                <li class="menu-item">算力服务</li>
+            </div>
+            <li class="menu-item">设备管理</li>
+            <li class="menu-item">邮件模板</li>
+            <li class="menu-item">发送日志</li>
+            <li class="menu-item">系统配置</li>
+        </ul>
+    </div>
+
+    <!-- 右侧内容 -->
+    <div class="main-content">
+        <!-- 头部 -->
+        <div class="header">
+            <div class="breadcrumb">首页 / 算力租赁合同 / <span style="color:#333; font-weight:500;">列表</span></div>
+            <div class="system-status"><div class="dot"></div>系统运行正常</div>
+        </div>
+
+        <!-- 主内容区 -->
+        <div class="content-wrapper">
+            <div class="page-card">
+                
+                <!-- 标题与操作 -->
+                <div class="card-header">
+                    <div class="page-title">算力租赁合同</div>
+                    <div style="display:flex; gap:10px;">
+                        <button class="btn btn-default">
+                            <span style="margin-right:5px;">⚙️</span> 列设置
+                        </button>
+                        <button class="btn btn-primary">+ 新建合同</button>
+                    </div>
+                </div>
+
+                <!-- 筛选栏 -->
+                <div class="filter-bar">
+                    <select class="form-control">
+                        <option>全部状态</option>
+                        <option>生效中</option>
+                        <option>已过期</option>
+                        <option>待签署</option>
+                    </select>
+                    <select class="form-control">
+                        <option>全部客户</option>
+                        <option>成都天弈科技</option>
+                        <option>浙江华兮云</option>
+                    </select>
+                    <div class="input-group" style="flex:1; max-width: 300px;">
+                        <input type="text" class="form-control" placeholder="搜索合同名称或编号..." style="width:100%;">
+                    </div>
+                    <button class="btn btn-default">🔍 查询</button>
+                    <button class="btn btn-default">↻ 重置</button>
+                </div>
+
+                <!-- 数据表格 -->
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>合同名称</th>
+                                <th>客户名称</th>
+                                <th>到期日期</th>
+                                <th>当前状态</th>
+                                <th>附件完整性</th>
+                                <th style="text-align:right;">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <!-- 行 1 -->
+                            <tr>
+                                <td class="col-name" title="双章成都弘景智心&星辰 5090 裸金属">双章成都弘景智心&星辰 5090 裸金属</td>
+                                <td>成都天弈科技有限公司</td>
+                                <td>2026-07-21</td>
+                                <td><span class="status-badge status-active">生效中</span></td>
+                                <td>
+                                    <div class="attachment-dots">
+                                        <div class="dot-icon filled" title="主合同已上传"></div>
+                                        <div class="dot-icon filled" title="技术协议已上传"></div>
+                                        <div class="dot-icon" title="其他附件缺失"></div>
+                                    </div>
+                                </td>
+                                <td style="text-align:right;">
+                                    <a class="action-link">详情</a>
+                                    <a class="action-link">编辑</a>
+                                    <a class="action-link danger">删除</a>
+                                    <a class="action-link">附件</a>
+                                </td>
+                            </tr>
+                            <!-- 行 2 -->
+                            <tr>
+                                <td class="col-name" title="【华兮云-盖亚】1台4090租赁">【华兮云-盖亚】1台4090租赁</td>
+                                <td>浙江华兮云科技有限公司</td>
+                                <td>2026-10-21</td>
+                                <td><span class="status-badge status-active">生效中</span></td>
+                                <td>
+                                    <div class="attachment-dots">
+                                        <div class="dot-icon filled"></div>
+                                        <div class="dot-icon filled"></div>
+                                        <div class="dot-icon filled"></div>
+                                    </div>
+                                </td>
+                                <td style="text-align:right;">
+                                    <a class="action-link">详情</a>
+                                    <a class="action-link">编辑</a>
+                                    <a class="action-link danger">删除</a>
+                                    <a class="action-link">附件</a>
+                                </td>
+                            </tr>
+                             <!-- 行 3 -->
+                             <tr>
+                                <td class="col-name" title="【汇能-星瀚】4090租赁">【汇能-星瀚】4090租赁</td>
+                                <td>新疆汇能博友软件技术有限公司</td>
+                                <td>2026-08-17</td>
+                                <td><span class="status-badge status-active">生效中</span></td>
+                                <td>
+                                    <div class="attachment-dots">
+                                        <div class="dot-icon filled"></div>
+                                        <div class="dot-icon"></div>
+                                        <div class="dot-icon"></div>
+                                    </div>
+                                </td>
+                                <td style="text-align:right;">
+                                    <a class="action-link">详情</a>
+                                    <a class="action-link">编辑</a>
+                                    <a class="action-link danger">删除</a>
+                                    <a class="action-link">附件</a>
+                                </td>
+                            </tr>
+                             <!-- 行 4 -->
+                             <tr>
+                                <td class="col-name" title="极云4090租赁-6月28日">极云4090租赁-6月28日</td>
+                                <td>深圳极云科技有限公司</td>
+                                <td style="color: #faad14;">2024-06-28</td>
+                                <td><span class="status-badge status-expiring">即将到期</span></td>
+                                <td>
+                                    <div class="attachment-dots">
+                                        <div class="dot-icon filled"></div>
+                                        <div class="dot-icon filled"></div>
+                                        <div class="dot-icon filled"></div>
+                                    </div>
+                                </td>
+                                <td style="text-align:right;">
+                                    <a class="action-link">详情</a>
+                                    <a class="action-link">续期</a>
+                                    <a class="action-link danger">归档</a>
+                                    <a class="action-link">附件</a>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- 分页 -->
+                <div class="pagination">
+                    <div class="page-info">共 4 条记录</div>
+                    <div class="page-item disabled">&lt;</div>
+                    <div class="page-item active">1</div>
+                    <div class="page-item">2</div>
+                    <div class="page-item">3</div>
+                    <div class="page-item">&gt;</div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+</body>
+</html>

@@ -1,9 +1,9 @@
 <template>
   <el-container style="height: 100vh">
     <!-- 侧边栏 -->
-    <el-aside :width="isCollapse ? '64px' : '220px'" style="background: linear-gradient(180deg, #0d1b3e 0%, #1a3270 40%, #1a5cb0 100%); transition: width 0.2s; overflow: hidden;">
+    <el-aside :width="isCollapse ? '64px' : '220px'" style="background: linear-gradient(180deg, #0d1b3e 0%, #1a3270 40%, #1a5cb0 100%); transition: width 0.2s; overflow-y: auto; overflow-x: hidden;">
       <div class="sidebar-logo">
-        <span v-if="!isCollapse" class="logo-text">盖亚纪元</span>
+        <span v-if="!isCollapse" class="logo-text">资产运营管理平台</span>
         <span v-else class="logo-icon">
           <el-icon :size="22"><Promotion /></el-icon>
         </span>
@@ -17,10 +17,14 @@
         active-text-color="#ffffff"
         style="border-right: none;"
       >
-        <el-menu-item index="/dashboard">
-          <el-icon><Odometer /></el-icon>
-          <template #title><span>运营概览</span></template>
-        </el-menu-item>
+        <el-sub-menu index="data-report">
+          <template #title>
+            <el-icon><DataAnalysis /></el-icon>
+            <span>数据报表</span>
+          </template>
+          <el-menu-item index="/data-report/overview">运营概览</el-menu-item>
+          <el-menu-item index="/data-report/rental-overview">租赁概览</el-menu-item>
+        </el-sub-menu>
         <el-menu-item index="/customers">
           <el-icon><UserFilled /></el-icon>
           <template #title><span>客户管理</span></template>
@@ -42,6 +46,15 @@
             <el-icon><Cpu /></el-icon>
             <span>算力服务</span>
           </el-menu-item>
+        </el-sub-menu>
+        <el-sub-menu index="projects">
+          <template #title>
+            <el-icon><FolderOpened /></el-icon>
+            <span>项目管理</span>
+          </template>
+          <el-menu-item index="/projects/fengyun">蜂云时代</el-menu-item>
+          <el-menu-item index="/projects/tianshu">安徽天枢</el-menu-item>
+          <el-menu-item index="/projects/qianxing">千星控股</el-menu-item>
         </el-sub-menu>
         <el-menu-item index="/rentals">
           <el-icon><Document /></el-icon>
@@ -65,6 +78,7 @@
           <el-menu-item index="/system/colleagues">内部同事</el-menu-item>
           <el-menu-item index="/system/config">系统配置</el-menu-item>
           <el-menu-item index="/system/attachment-categories">附件分类管理</el-menu-item>
+          <el-menu-item index="/system/attachment-categories-project" @click.prevent="goProjectAttachmentCategories">项目管理附件配置</el-menu-item>
         </el-sub-menu>
       </el-menu>
     </el-aside>
@@ -100,9 +114,8 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import {
-  Odometer,
   UserFilled,
   Document,
   Message,
@@ -116,26 +129,38 @@ import {
   Monitor,
   DataAnalysis,
   Cpu,
+  FolderOpened,
 } from '@element-plus/icons-vue'
 
 const route = useRoute()
+const router = useRouter()
 const isCollapse = ref(false)
+
+function goProjectAttachmentCategories() {
+  router.push({ path: '/system/attachment-categories', query: { contract_type: 'project' } })
+}
 
 const activeMenu = computed(() => {
   // /system/* 路由时高亮 /system 父菜单
   if (route.path.startsWith('/system')) return 'system'
   // /contracts/* 路由时高亮 contracts 父菜单
   if (route.path.startsWith('/contracts')) return 'contracts'
+  // /projects/* 路由时高亮 projects 父菜单
+  if (route.path.startsWith('/projects')) return 'projects'
+  // /data-report/* 路由时高亮 data-report 父菜单
+  if (route.path.startsWith('/data-report')) return 'data-report'
   return route.path
 })
 
 /** 面包屑：父级标题（可点击跳转到列表页） */
 const parentTitle = computed(() => {
+  if (route.path.startsWith('/data-report/')) return '数据报表'
   if (route.path.startsWith('/customers/') && route.path.endsWith('contacts')) return '客户管理'
-  if (route.path.startsWith('/contracts/compute-leasing')) return '合同管理'
-  if (route.path.startsWith('/contracts/satellite-data')) return '合同管理'
-  if (route.path.startsWith('/contracts/compute-service')) return '合同管理'
+  if (route.path.startsWith('/contracts/compute-leasing')) return '算力租赁合同'
+  if (route.path.startsWith('/contracts/satellite-data')) return '卫星数据合同'
+  if (route.path.startsWith('/contracts/compute-service')) return '算力服务合同'
   if (route.path.startsWith('/contracts')) return '合同管理'
+  if (route.path.startsWith('/projects')) return '项目管理'
   if (route.path.startsWith('/rentals/create')) return '设备管理'
   if (route.path.startsWith('/rentals/') && route.path.endsWith('edit')) return '设备管理'
   if (route.path.startsWith('/rentals/')) return '设备管理'
@@ -147,11 +172,17 @@ const parentTitle = computed(() => {
 
 /** 面包屑：父级跳转路径 */
 const parentPath = computed(() => {
+  if (route.path.startsWith('/data-report/')) return '/data-report/overview'
   if (route.path.startsWith('/customers/')) return '/customers'
   if (route.path.startsWith('/contracts/compute-leasing')) return '/contracts/compute-leasing'
   if (route.path.startsWith('/contracts/satellite-data')) return '/contracts/satellite-data'
   if (route.path.startsWith('/contracts/compute-service')) return '/contracts/compute-service'
   if (route.path.startsWith('/contracts')) return '/contracts/compute-leasing'
+  if (route.path.startsWith('/projects')) {
+    // 返回对应公司的列表页
+    const company = route.params.company || 'fengyun'
+    return `/projects/${company}`
+  }
   if (route.path.startsWith('/rentals/')) return '/rentals'
   if (route.path.startsWith('/templates/')) return '/templates'
   if (route.path.startsWith('/system/')) return '/system/smtp'
@@ -166,9 +197,10 @@ const breadcrumbHomePath = computed(() => {
 
 const pageTitle = computed(() => {
   const map: Record<string, string> = {
-    '/dashboard': '运营概览',
+    '/data-report/overview': '运营概览',
+    '/data-report/rental-overview': '租赁概览',
     '/customers': '客户管理',
-    '/contracts/compute-leasing': '算力租赁',
+    '/contracts/compute-leasing': '算力租赁合同',
     '/contracts/satellite-data': '卫星数据',
     '/contracts/compute-service': '算力服务',
     '/rentals': '设备管理',
@@ -181,10 +213,10 @@ const pageTitle = computed(() => {
     '/system/attachment-categories': '附件分类管理',
   }
   if (route.path.startsWith('/customers/') && route.path.endsWith('contacts')) return '联系人管理'
-  if (route.path.startsWith('/contracts/compute-leasing/create')) return '新建合同'
-  if (route.path.startsWith('/contracts/compute-leasing/') && route.path.endsWith('edit')) return '编辑合同'
+  if (route.path.startsWith('/contracts/compute-leasing/create')) return '新建算力租赁合同'
+  if (route.path.startsWith('/contracts/compute-leasing/') && route.path.endsWith('edit')) return '编辑算力租赁合同'
   if (route.path.startsWith('/contracts/compute-leasing/') && route.path.endsWith('attachments')) return '附件管理'
-  if (route.path.startsWith('/contracts/compute-leasing/')) return '合同详情'
+  if (route.path.startsWith('/contracts/compute-leasing/')) return '算力租赁合同详情'
   if (route.path.startsWith('/contracts/satellite-data/create')) return '新建卫星数据合同'
   if (route.path.startsWith('/contracts/satellite-data/') && route.path.endsWith('edit')) return '编辑卫星数据合同'
   if (route.path.startsWith('/contracts/satellite-data/') && route.path.endsWith('attachments')) return '附件管理'
@@ -193,6 +225,16 @@ const pageTitle = computed(() => {
   if (route.path.startsWith('/contracts/compute-service/') && route.path.endsWith('edit')) return '编辑算力服务合同'
   if (route.path.startsWith('/contracts/compute-service/') && route.path.endsWith('attachments')) return '附件管理'
   if (route.path.startsWith('/contracts/compute-service/')) return '算力服务合同详情'
+  if (route.path.startsWith('/projects/:company/create') || route.path.match(/\/projects\/[^/]+\/create/)) return '新建合同'
+  if (route.path.match(/\/projects\/[^/]+\/[^/]+\/edit/)) return '编辑合同'
+  if (route.path.match(/\/projects\/[^/]+\/[^/]+\/attachments/)) return '附件管理'
+  if (route.path.match(/\/projects\/[^/]+\/[^/]+/)) return '合同详情'
+  // /projects/fengyun 等列表页
+  const projectCompanyMatch = route.path.match(/^\/projects\/(fengyun|tianshu|qianxing)$/)
+  if (projectCompanyMatch) {
+    const names: Record<string, string> = { fengyun: '蜂云时代', tianshu: '安徽天枢', qianxing: '千星控股' }
+    return names[projectCompanyMatch[1]] || projectCompanyMatch[1]
+  }
   if (route.path.startsWith('/rentals/create')) return '创建设备'
   if (route.path.startsWith('/rentals/') && route.path.endsWith('edit')) return '编辑设备'
   if (route.path.startsWith('/rentals/')) return '设备详情'

@@ -2,7 +2,7 @@
 客户模块数据模型
 """
 import uuid
-from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey
+from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, JSON
 from sqlalchemy.orm import relationship
 
 from src.core.database import Base, UUIDColumn
@@ -23,6 +23,7 @@ class Customer(Base):
     name = Column(String(128), nullable=False, comment="客户名称")
     code = Column(String(64), unique=True, nullable=False, default=generate_uuid, comment="客户编码（自动生成）")
     status = Column(String(16), default="active", comment="状态: active / inactive")
+    business_types = Column(JSON, nullable=True, comment="业务类型: ['算力租赁','算力服务','卫星数据']")
     created_at = Column(DateTime, default=local_now, nullable=False)
     updated_at = Column(DateTime, default=local_now, onupdate=local_now, nullable=False)
 

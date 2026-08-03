@@ -24,7 +24,7 @@ def list_contracts(
 
     total = query.count()
     items = (
-        query.order_by(SatelliteDataContract.created_at.desc())
+        query.order_by(SatelliteDataContract.sort_order.asc(), SatelliteDataContract.created_at.desc())
         .offset((page - 1) * page_size)
         .limit(page_size)
         .all()
@@ -46,6 +46,18 @@ def create_contract(db: Session, data: SatelliteDataContractCreate) -> Satellite
         name=data.name,
         contract_no=data.contract_no,
         remark=data.remark,
+        # ADR-013: 新增 10 个字段
+        contract_type=data.contract_type,
+        project_name=data.project_name,
+        party_a_name=data.party_a_name,
+        party_b_name=data.party_b_name,
+        start_date=data.start_date,
+        end_date=data.end_date,
+        amount=data.amount,
+        contract_content=data.contract_content,
+        delivery_requirements=data.delivery_requirements,
+        process_records=data.process_records,
+        sort_order=data.sort_order if data.sort_order else 0,
     )
     db.add(contract)
     db.commit()

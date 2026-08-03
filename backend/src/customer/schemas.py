@@ -15,6 +15,7 @@ class CustomerCreate(BaseModel):
     """创建客户请求"""
     name: str = Field(..., min_length=1, max_length=128, description="客户名称")
     code: Optional[str] = Field(None, max_length=64, description="客户编码（留空自动生成）")
+    business_types: Optional[list[str]] = Field(None, description="业务类型: 算力租赁/算力服务/卫星数据")
 
     @field_validator("name")
     @classmethod
@@ -27,6 +28,7 @@ class CustomerUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=128)
     code: Optional[str] = Field(None, min_length=1, max_length=64)
     status: Optional[str] = Field(None, pattern="^(active|inactive)$")
+    business_types: Optional[list[str]] = Field(None, description="业务类型: 算力租赁/算力服务/卫星数据")
 
     @field_validator("name", "code")
     @classmethod
@@ -36,13 +38,22 @@ class CustomerUpdate(BaseModel):
         return v
 
 
+class ContractStats(BaseModel):
+    """合同统计"""
+    total: int = 0
+    active: int = 0
+    expired: int = 0
+
+
 class CustomerResponse(BaseModel):
     """客户响应"""
     id: str
     name: str
     code: str
     status: str
+    business_types: Optional[list[str]] = None
     contact_count: int = 0
+    contract_stats: ContractStats = ContractStats()
     created_at: datetime
     updated_at: Optional[datetime] = None
 

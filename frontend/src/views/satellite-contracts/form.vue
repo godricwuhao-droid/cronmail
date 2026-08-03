@@ -34,6 +34,18 @@ interface SatelliteContractForm {
   name: string
   contract_no: string
   remark: string
+  sort_order: number
+  // ADR-013 新增字段
+  contract_type: string
+  project_name: string
+  party_a_name: string
+  party_b_name: string
+  start_date: string
+  end_date: string
+  amount: number | null
+  contract_content: string
+  delivery_requirements: string
+  process_records: string
 }
 
 const form = reactive<SatelliteContractForm>({
@@ -41,6 +53,17 @@ const form = reactive<SatelliteContractForm>({
   name: '',
   contract_no: '',
   remark: '',
+  sort_order: 0,
+  contract_type: '',
+  project_name: '',
+  party_a_name: '',
+  party_b_name: '',
+  start_date: '',
+  end_date: '',
+  amount: null,
+  contract_content: '',
+  delivery_requirements: '',
+  process_records: '',
 })
 
 // ============================================================
@@ -50,7 +73,7 @@ const customerOptions = ref<Customer[]>([])
 
 async function loadCustomers() {
   try {
-    const res = await getCustomers({ page: 1, page_size: 100 })
+    const res = await getCustomers({ business_type: '卫星数据', page: 1, page_size: 100 })
     customerOptions.value = res.items.filter((c) => c.status === 'active')
   } catch {
     // 错误已统一处理
@@ -73,6 +96,18 @@ async function loadDetail() {
     form.name = data.name
     form.contract_no = data.contract_no ?? ''
     form.remark = data.remark ?? ''
+    form.sort_order = data.sort_order ?? 0
+    // ADR-013 新增字段回填
+    form.contract_type = data.contract_type ?? ''
+    form.project_name = data.project_name ?? ''
+    form.party_a_name = data.party_a_name ?? ''
+    form.party_b_name = data.party_b_name ?? ''
+    form.start_date = data.start_date ?? ''
+    form.end_date = data.end_date ?? ''
+    form.amount = data.amount ?? null
+    form.contract_content = data.contract_content ?? ''
+    form.delivery_requirements = data.delivery_requirements ?? ''
+    form.process_records = data.process_records ?? ''
   } catch {
     // 错误已统一处理
   } finally {
@@ -110,6 +145,17 @@ async function handleSubmit() {
         name: form.name.trim(),
         contract_no: form.contract_no.trim() || undefined,
         remark: form.remark.trim() || undefined,
+        sort_order: form.sort_order,
+        contract_type: form.contract_type.trim() || undefined,
+        project_name: form.project_name.trim() || undefined,
+        party_a_name: form.party_a_name.trim() || undefined,
+        party_b_name: form.party_b_name.trim() || undefined,
+        start_date: form.start_date || undefined,
+        end_date: form.end_date || undefined,
+        amount: form.amount ?? undefined,
+        contract_content: form.contract_content.trim() || undefined,
+        delivery_requirements: form.delivery_requirements.trim() || undefined,
+        process_records: form.process_records.trim() || undefined,
       }
       await updateSatelliteContract(contractId.value, payload)
       ElMessage.success('保存成功')
@@ -120,6 +166,17 @@ async function handleSubmit() {
         name: form.name.trim(),
         contract_no: form.contract_no.trim() || undefined,
         remark: form.remark.trim() || undefined,
+        sort_order: form.sort_order,
+        contract_type: form.contract_type.trim() || undefined,
+        project_name: form.project_name.trim() || undefined,
+        party_a_name: form.party_a_name.trim() || undefined,
+        party_b_name: form.party_b_name.trim() || undefined,
+        start_date: form.start_date || undefined,
+        end_date: form.end_date || undefined,
+        amount: form.amount ?? undefined,
+        contract_content: form.contract_content.trim() || undefined,
+        delivery_requirements: form.delivery_requirements.trim() || undefined,
+        process_records: form.process_records.trim() || undefined,
       }
       const created = await createSatelliteContract(payload)
       ElMessage.success('创建成功')
@@ -194,9 +251,111 @@ onMounted(async () => {
         <el-form-item label="合同编号" prop="contract_no">
           <el-input v-model="form.contract_no" placeholder="可选，如 WX-2026-001" maxlength="100" show-word-limit />
         </el-form-item>
+        <el-form-item label="序号">
+          <el-input-number v-model="form.sort_order" :min="0" :step="1" placeholder="序号" />
+        </el-form-item>
+
+        <!-- ADR-013 新增：基本信息扩展 -->
+        <el-divider />
+        <div class="section-title">
+          <el-icon><Document /></el-icon>
+          合同扩展信息
+        </div>
+        <el-form-item label="合同类型">
+          <el-input v-model="form.contract_type" placeholder="如 销售合同、采购合同" maxlength="100" show-word-limit />
+        </el-form-item>
+        <el-form-item label="项目名称">
+          <el-input v-model="form.project_name" placeholder="项目名称" maxlength="255" show-word-limit />
+        </el-form-item>
+
+        <!-- ADR-013 新增：日期与金额 -->
+        <el-divider />
+        <div class="section-title">
+          <el-icon><Document /></el-icon>
+          日期与金额
+        </div>
+        <el-form-item label="开始日期">
+          <el-date-picker
+            v-model="form.start_date"
+            type="date"
+            placeholder="选择开始日期"
+            value-format="YYYY-MM-DD"
+            style="width: 100%"
+          />
+        </el-form-item>
+        <el-form-item label="结束日期">
+          <el-date-picker
+            v-model="form.end_date"
+            type="date"
+            placeholder="选择结束日期"
+            value-format="YYYY-MM-DD"
+            style="width: 100%"
+          />
+        </el-form-item>
+        <el-form-item label="合同金额">
+          <el-input-number
+            v-model="form.amount"
+            :min="0"
+            :precision="2"
+            placeholder="合同金额"
+            :controls="false"
+            style="width: 100%"
+          />
+        </el-form-item>
+
+        <!-- ADR-013 新增：甲乙方 -->
+        <el-divider />
+        <div class="section-title">
+          <el-icon><Document /></el-icon>
+          签约方信息
+        </div>
+        <el-form-item label="甲方名称">
+          <el-input v-model="form.party_a_name" placeholder="甲方名称" maxlength="255" show-word-limit />
+        </el-form-item>
+        <el-form-item label="乙方名称">
+          <el-input v-model="form.party_b_name" placeholder="乙方名称" maxlength="255" show-word-limit />
+        </el-form-item>
+
+        <!-- ADR-013 新增：长文本区 -->
+        <el-divider />
+        <div class="section-title">
+          <el-icon><Document /></el-icon>
+          合同内容与要求
+        </div>
+        <el-form-item label="合同内容">
+          <el-input
+            v-model="form.contract_content"
+            type="textarea"
+            :rows="4"
+            placeholder="合同主要内容"
+            maxlength="2000"
+            show-word-limit
+          />
+        </el-form-item>
+        <el-form-item label="交付要求">
+          <el-input
+            v-model="form.delivery_requirements"
+            type="textarea"
+            :rows="4"
+            placeholder="交付要求"
+            maxlength="2000"
+            show-word-limit
+          />
+        </el-form-item>
+        <el-form-item label="过程记录">
+          <el-input
+            v-model="form.process_records"
+            type="textarea"
+            :rows="4"
+            placeholder="过程记录"
+            maxlength="2000"
+            show-word-limit
+          />
+        </el-form-item>
 
         <!-- 备注 -->
-        <el-form-item label="备注" style="margin-top: 8px;">
+        <el-divider />
+        <el-form-item label="备注">
           <el-input
             v-model="form.remark"
             type="textarea"

@@ -10,7 +10,7 @@ import request from '@/api'
 // ============================================================
 
 /** 合同类型 */
-export type ContractType = 'compute_leasing' | 'satellite_data' | 'compute_service'
+export type ContractType = 'compute_leasing' | 'satellite_data' | 'compute_service' | 'project'
 
 /** 附件文件 */
 export interface AttachmentFile {

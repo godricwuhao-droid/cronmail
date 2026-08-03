@@ -41,7 +41,7 @@ def list_contracts(
         query = query.filter(Contract.name.ilike(f"%{search}%"))
 
     total = query.count()
-    items = query.order_by(Contract.created_at.desc()).offset((page - 1) * page_size).limit(page_size).all()
+    items = query.order_by(Contract.sort_order.asc(), Contract.created_at.desc()).offset((page - 1) * page_size).limit(page_size).all()
     return items, total
 
 
@@ -51,7 +51,7 @@ def get_contract(db: Session, contract_id: str) -> Optional[Contract]:
 
 
 def create_contract(db: Session, data: ContractCreate) -> Contract:
-    """创建合同，可选关联设备和联系人"""
+    """创建合同，可选关联设备和联系人；支持续期"""
     contract = Contract(
         customer_id=data.customer_id,
         name=data.name,
@@ -59,11 +59,37 @@ def create_contract(db: Session, data: ContractCreate) -> Contract:
         start_date=data.start_date,
         end_date=data.end_date,
         billing_model=data.billing_model,
+        amount=data.amount,
         remark=data.remark,
         status="active",
+        renewed_from_id=data.renewed_from_id,
+        sort_order=data.sort_order if data.sort_order else 0,
     )
     db.add(contract)
     db.flush()
+
+    # 续期：先保存旧合同设备快照 + 标记回收，再迁移设备到新合同
+    if data.renewed_from_id and data.rental_ids:
+        old_contract = db.query(Contract).filter(Contract.id == data.renewed_from_id).first()
+        if old_contract:
+            # 快照旧合同当前关联的所有设备 ID（含本次迁移的 + 可能残留的）
+            old_rows = db.execute(
+                contract_rental.select().where(
+                    contract_rental.c.contract_id == data.renewed_from_id
+                )
+            ).fetchall()
+            old_rental_ids = [row[1] for row in old_rows]  # row[1] = rental_id
+            # 合并去重
+            all_old_ids = list(set(old_rental_ids + data.rental_ids))
+            old_contract.history_rental_ids = all_old_ids
+            old_contract.status = "reclaimed"
+        # 删除旧合同的关联
+        db.execute(
+            contract_rental.delete().where(
+                contract_rental.c.contract_id == data.renewed_from_id,
+                contract_rental.c.rental_id.in_(data.rental_ids),
+            )
+        )
 
     # 关联设备
     if data.rental_ids:
@@ -101,12 +127,6 @@ def update_contract(db: Session, contract: Contract, data: ContractUpdate) -> Co
 
     if contacts_data is not None:
         _replace_contract_contacts(db, contract.id, contacts_data)
-
-    # expired 状态合同编辑后，根据 end_date 自动判定状态
-    if contract.status == 'expired':
-        today = local_today()
-        if contract.end_date and contract.end_date > today:
-            contract.status = 'active'
 
     db.commit()
     db.refresh(contract)

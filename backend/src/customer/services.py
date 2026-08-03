@@ -3,7 +3,7 @@
 """
 from typing import Optional
 
-from sqlalchemy import func
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 from src.customer.models import Customer, Contact, generate_uuid
@@ -15,6 +15,10 @@ from src.customer.schemas import (
 )
 
 
+# 业务类型白名单
+VALID_BUSINESS_TYPES = ('算力租赁', '卫星数据', '算力服务')
+
+
 # ============================================================
 # Customer Services
 # ============================================================
@@ -22,13 +26,27 @@ from src.customer.schemas import (
 def list_customers(
     db: Session,
     search: Optional[str] = None,
+    business_type: Optional[str] = None,
+    status: Optional[str] = None,
     page: int = 1,
     page_size: int = 20,
 ) -> tuple[list[Customer], int]:
-    """查询客户列表，支持模糊搜索和分页"""
+    """
+    查询客户列表，支持模糊搜索、业务类型过滤、状态过滤和分页
+    - business_type: JSON 数组包含匹配（MySQL JSON_CONTAINS）
+    - status: 精确匹配
+    """
     query = db.query(Customer)
     if search:
         query = query.filter(Customer.name.ilike(f"%{search}%"))
+    if status:
+        query = query.filter(Customer.status == status)
+    if business_type and business_type in VALID_BUSINESS_TYPES:
+        # JSON 字段包含查询：匹配 business_types 数组中是否包含目标值
+        # MySQL: JSON_CONTAINS(business_types, '"算力租赁"') > 0
+        query = query.filter(
+            text("JSON_CONTAINS(business_types, :bt)").bindparams(bt=f'"{business_type}"')
+        )
     total = query.count()
     offset = (page - 1) * page_size
     items = query.order_by(Customer.created_at.desc()).offset(offset).limit(page_size).all()
@@ -51,6 +69,7 @@ def create_customer(db: Session, data: CustomerCreate) -> Customer:
         name=data.name,
         code=data.code or generate_uuid(),
         status="active",
+        business_types=data.business_types,
     )
     db.add(customer)
     db.commit()

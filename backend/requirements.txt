@@ -11,3 +11,8 @@ celery[redis]
 blinker
 python-multipart
 requests
+openpyxl
+python-docx
+openai
+pdf2image
+Pillow

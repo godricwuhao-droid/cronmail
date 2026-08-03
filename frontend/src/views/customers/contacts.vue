@@ -6,11 +6,12 @@
  *  - 页面顶部展示客户名称
  *  - 表格列出该客户下的联系人（is_active=true）
  *  - 支持新增 / 编辑 / 软删除
+ *  - 展示该客户下的三类合同列表
  */
 import { onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
-import { UserFilled, Back } from '@element-plus/icons-vue'
+import { UserFilled, Back, Notebook } from '@element-plus/icons-vue'
 import {
   createContact,
   deleteContact,
@@ -21,6 +22,9 @@ import {
   type ContactUpdatePayload,
 } from '@/api/modules/contact'
 import { getCustomer, type Customer } from '@/api/modules/customer'
+import { listContracts, type ContractItem } from '@/api/modules/contract'
+import { listSatelliteContracts, type SatelliteContractItem } from '@/api/modules/satellite-contract'
+import { listServiceContracts, type ServiceContractItem } from '@/api/modules/service-contract'
 
 const route = useRoute()
 const router = useRouter()
@@ -52,9 +56,74 @@ watch(
       customerId.value = String(val)
       fetchCustomer()
       fetchList()
+      fetchContracts()
     }
   },
 )
+
+// ============================================================
+// 合同列表
+// ============================================================
+interface UnifiedContract {
+  id: string
+  name: string
+  contract_type: '算力租赁' | '卫星数据' | '算力服务'
+  contract_no: string | null
+  status: string
+  start_date: string | null
+  end_date: string | null
+  route_name: string
+}
+
+const customerContracts = ref<UnifiedContract[]>([])
+const contractsLoading = ref(false)
+
+async function fetchContracts() {
+  if (!customerId.value) return
+  contractsLoading.value = true
+  const result: UnifiedContract[] = []
+  try {
+    const leasing = await listContracts({ customer_id: customerId.value, page_size: 100 })
+    result.push(...leasing.items.map((c: ContractItem) => ({
+      id: c.id,
+      name: c.name,
+      contract_type: '算力租赁' as const,
+      contract_no: c.contract_no ?? null,
+      status: c.status,
+      start_date: c.start_date,
+      end_date: c.end_date,
+      route_name: 'ContractDetail',
+    })))
+  } catch { /* 静默处理 */ }
+  try {
+    const satellite = await listSatelliteContracts({ customer_id: customerId.value, page_size: 100 })
+    result.push(...satellite.items.map((c: SatelliteContractItem) => ({
+      id: c.id,
+      name: c.name,
+      contract_type: '卫星数据' as const,
+      contract_no: c.contract_no ?? null,
+      status: '-',
+      start_date: null,
+      end_date: null,
+      route_name: 'SatelliteContractDetail',
+    })))
+  } catch { /* 静默处理 */ }
+  try {
+    const service = await listServiceContracts({ customer_id: customerId.value, page_size: 100 })
+    result.push(...service.items.map((c: ServiceContractItem) => ({
+      id: c.id,
+      name: c.name,
+      contract_type: '算力服务' as const,
+      contract_no: c.contract_no ?? null,
+      status: '-',
+      start_date: c.start_date,
+      end_date: c.end_date,
+      route_name: 'ServiceContractDetail',
+    })))
+  } catch { /* 静默处理 */ }
+  customerContracts.value = result
+  contractsLoading.value = false
+}
 
 // ============================================================
 // 列表状态
@@ -210,6 +279,7 @@ function goBack() {
 onMounted(() => {
   fetchCustomer()
   fetchList()
+  fetchContracts()
 })
 </script>
 
@@ -224,10 +294,21 @@ onMounted(() => {
               <el-icon><UserFilled /></el-icon>
               联系人管理
             </span>
-            <el-tag v-if="customer" type="info" effect="plain">
-              客户：{{ customer.name }}
-            </el-tag>
+            <span v-if="customer" class="customer-subtitle">
+              — {{ customer.name }}
+            </span>
             <el-tag v-else-if="!customerLoading" type="danger" effect="plain">客户不存在</el-tag>
+            <template v-if="customer?.business_types?.length">
+              <el-tag
+                v-for="bt in customer.business_types"
+                :key="bt"
+                size="small"
+                effect="plain"
+                type="primary"
+              >
+                {{ bt }}
+              </el-tag>
+            </template>
           </div>
           <el-button type="primary" :disabled="!customer" @click="openCreateDialog">
             + 新建联系人
@@ -297,6 +378,65 @@ onMounted(() => {
       </div>
     </el-card>
 
+    <!-- 合同列表 -->
+    <el-card shadow="never" style="margin-top: 16px;" v-loading="contractsLoading">
+      <template #header>
+        <span class="title">
+          <el-icon><Notebook /></el-icon>
+          合同列表
+        </span>
+      </template>
+      <el-table
+        :data="customerContracts"
+        border
+        stripe
+        style="width: 100%"
+        empty-text="该客户下暂无合同"
+        size="small"
+      >
+        <el-table-column prop="name" label="合同名称" min-width="200" show-overflow-tooltip />
+        <el-table-column label="合同类型" width="110" align="center">
+          <template #default="{ row }">
+            <el-tag
+              size="small"
+              effect="plain"
+              :type="row.contract_type === '算力租赁' ? 'primary' : row.contract_type === '算力服务' ? 'success' : 'warning'"
+            >
+              {{ row.contract_type }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="contract_no" label="合同编号" min-width="140" show-overflow-tooltip />
+        <el-table-column label="状态" width="100" align="center">
+          <template #default="{ row }">
+            <el-tag
+              v-if="row.status && row.status !== '-'"
+              size="small"
+              :type="row.status === 'active' ? 'success' : row.status === 'expiring' ? 'warning' : row.status === 'expired' ? 'danger' : 'info'"
+            >
+              {{ row.status === 'active' ? '生效中' : row.status === 'expiring' ? '临期' : row.status === 'expired' ? '已到期' : row.status === 'reclaimed' ? '已回收' : row.status }}
+            </el-tag>
+            <span v-else class="muted">-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="起止日期" min-width="200" align="center">
+          <template #default="{ row }">
+            <span v-if="row.start_date || row.end_date">
+              {{ row.start_date ? row.start_date.slice(0, 10) : '-' }} ~ {{ row.end_date ? row.end_date.slice(0, 10) : '-' }}
+            </span>
+            <span v-else class="muted">-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="80" align="center" fixed="right">
+          <template #default="{ row }">
+            <el-button size="small" link type="primary" @click="$router.push({ name: row.route_name, params: { id: row.id } })">
+              详情
+            </el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-card>
+
     <!-- 新建 / 编辑弹窗 -->
     <el-dialog
       v-model="dialogVisible"
@@ -354,6 +494,11 @@ onMounted(() => {
 .title {
   font-size: 16px;
   font-weight: 600;
+}
+.customer-subtitle {
+  font-size: 15px;
+  font-weight: 500;
+  color: #303133;
 }
 .pagination {
   display: flex;

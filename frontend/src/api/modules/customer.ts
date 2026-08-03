@@ -9,12 +9,20 @@ import request from '@/api'
 // 类型定义
 // ============================================================
 
+export interface ContractStats {
+  total: number
+  active: number
+  expired: number
+}
+
 export interface Customer {
   id: string
   name: string
   code?: string
   status: 'active' | 'inactive'
+  business_types?: string[]
   contact_count?: number
+  contract_stats?: ContractStats
   created_at: string
   updated_at?: string | null
 }
@@ -29,16 +37,20 @@ export interface CustomerListResponse {
 export interface CustomerCreatePayload {
   name: string
   code?: string
+  business_types?: string[]
 }
 
 export interface CustomerUpdatePayload {
   name?: string
   code?: string
   status?: 'active' | 'inactive'
+  business_types?: string[]
 }
 
 export interface CustomerListParams {
   search?: string
+  /** 业务类型过滤: 算力租赁 / 卫星数据 / 算力服务 */
+  business_type?: string
   page?: number
   page_size?: number
 }

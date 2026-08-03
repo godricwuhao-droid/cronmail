@@ -113,7 +113,7 @@ function attStatusText(confirmed: boolean, fileCount: number): string {
 
 const attCategoryLabels: Record<string, string> = {
   contract_agreement: '合同协议',
-  delivery_material: '交付材料',
+  acceptance_material: '交付材料',
   process_material: '过程材料',
 }
 
@@ -192,6 +192,31 @@ async function handleReclaim() {
 }
 
 // ============================================================
+// 续期
+// ============================================================
+function handleRenew() {
+  if (!record.value) return
+  router.push({
+    name: 'ContractCreate',
+    query: { renew_from: record.value.id },
+  })
+}
+
+function goContractDetail(id: string) {
+  router.push({ name: 'ContractDetail', params: { id } })
+}
+
+function renewalRowClass({ row }: { row: { is_current?: boolean } }) {
+  return row.is_current ? 'renewal-row-current' : 'renewal-row-clickable'
+}
+
+function handleRenewalRowClick(row: { id: string; is_current?: boolean }) {
+  if (!row.is_current) {
+    goContractDetail(row.id)
+  }
+}
+
+// ============================================================
 // 关联设备弹窗
 // ============================================================
 const linkDialogVisible = ref(false)
@@ -219,7 +244,7 @@ async function openLinkDialog() {
     const res = await getRentals({
       unlinked_only: true,
       page: 1,
-      page_size: 200,
+      page_size: 100,
     })
     availableRentals.value = res.items
   } catch {
@@ -351,6 +376,16 @@ function formatChangelogTime(s?: string | null) {
 onMounted(() => {
   fetchRecord().then(() => loadChangeLogs())
 })
+
+// 监听路由参数变化，同一组件内切换合同时重新加载
+watch(
+  () => route.params.id,
+  (newId) => {
+    if (newId) {
+      fetchRecord().then(() => loadChangeLogs())
+    }
+  },
+)
 </script>
 
 <template>
@@ -384,6 +419,7 @@ onMounted(() => {
           <el-button type="warning" :disabled="acting" @click="handleSendExpiry">发送临期提醒</el-button>
           <el-button type="danger" :disabled="acting" @click="handleReclaim">标记回收</el-button>
         </template>
+        <el-button type="success" :disabled="acting || record?.has_renewal" @click="handleRenew">续期</el-button>
         <el-button @click="scrollToChangeLogs">变更记录</el-button>
         <el-button type="primary" @click="goAttachments">
           <el-icon style="margin-right:4px"><Paperclip /></el-icon>附件管理
@@ -411,6 +447,9 @@ onMounted(() => {
           >{{ statusLabel(record.status) }}</el-tag>
           <span v-else>-</span>
         </el-descriptions-item>
+        <el-descriptions-item label="合同金额">
+          {{ record?.amount != null ? `¥${record.amount.toFixed(2)}` : '-' }}
+        </el-descriptions-item>
         <el-descriptions-item label="设备数">{{ record?.rental_count ?? 0 }} 台</el-descriptions-item>
         <el-descriptions-item label="联系人数">{{ record?.contact_count ?? 0 }} 人</el-descriptions-item>
         <el-descriptions-item label="创建时间" :span="3">
@@ -424,6 +463,43 @@ onMounted(() => {
           <span v-else class="muted">—</span>
         </el-descriptions-item>
       </el-descriptions>
+    </section>
+
+    <!-- 续期链路 -->
+    <section v-if="record?.renewal_chain && record.renewal_chain.length > 1" class="detail-section">
+      <h3 class="section-title">续期链路</h3>
+      <el-table
+        :data="record.renewal_chain"
+        :show-header="false"
+        :border="false"
+        size="small"
+        style="width: 100%"
+        :row-class-name="renewalRowClass"
+        @row-click="handleRenewalRowClick"
+      >
+        <el-table-column width="120">
+          <template #default="{ row }">
+            <el-tag
+              :type="row.is_current ? 'primary' : 'info'"
+              effect="plain"
+              size="small"
+            >
+              <template v-if="row.renewal_seq === 0">📄 原合同</template>
+              <template v-else>🔄 续期{{ row.renewal_seq }}</template>
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column min-width="200">
+          <template #default="{ row }">
+            <span :class="{ 'renewal-name-current': row.is_current }">{{ row.name }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column width="220">
+          <template #default="{ row }">
+            <span class="renewal-date">{{ formatDate(row.start_date) }} ~ {{ formatDate(row.end_date) }}</span>
+          </template>
+        </el-table-column>
+      </el-table>
     </section>
 
     <!-- 关联设备 -->
@@ -764,5 +840,23 @@ onMounted(() => {
 .status-stat {
   font-size: 14px;
   color: var(--text-secondary);
+}
+
+/* 续期链路表格 */
+.renewal-row-current {
+  background-color: #ecf5ff;
+}
+.renewal-row-clickable {
+  cursor: pointer;
+}
+.renewal-row-clickable:hover > td {
+  background-color: #f5f7fa !important;
+}
+.renewal-name-current {
+  font-weight: 600;
+}
+.renewal-date {
+  font-size: 13px;
+  color: #606266;
 }
 </style>

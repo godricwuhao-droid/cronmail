@@ -23,6 +23,7 @@ import src.attachment.models      # noqa: E402, F401
 import src.satellite.models       # noqa: E402, F401
 import src.compute_service.models # noqa: E402, F401
 import src.contract.models        # noqa: E402, F401
+import src.project.models         # noqa: E402, F401
 
 # Alembic Config 对象
 config = context.config

@@ -38,8 +38,8 @@ const total = ref(0)
 
 // 筛选条件（query 中下拉类筛选用 '' 表示「全部」，发送时跳过）
 const searchText = ref('')
-/** 当前搜索字段（默认机器型号） */
-const searchField = ref<SearchField>('machine_model')
+/** 当前搜索字段（默认机架位置） */
+const searchField = ref<SearchField>('rack_location')
 const statusFilter = ref<RentalStatus | ''>('')
 const customerFilter = ref('')
 
@@ -56,10 +56,10 @@ const STATUS_OPTIONS: Array<{ label: string; value: RentalStatus }> = [
 
 /** 搜索字段标签选项 */
 const SEARCH_FIELD_OPTIONS: Array<{ label: string; value: SearchField }> = [
+  { label: '机架位置', value: 'rack_location' },
   { label: '机器型号', value: 'machine_model' },
   { label: '内网 IP', value: 'private_ip' },
   { label: '公网 IP', value: 'public_ip' },
-  { label: '机架位置', value: 'rack_location' },
 ]
 
 // 客户下拉
@@ -219,8 +219,8 @@ function billingLabel(model?: string | null) {
 // ============================================================
 // 排序
 // ============================================================
-const sortField = ref('created_at')
-const sortOrder = ref<'asc' | 'desc'>('desc')
+const sortField = ref('rack_location')
+const sortOrder = ref<'asc' | 'desc'>('asc')
 
 function handleSort({ prop, order }: any) {
   if (order) {
@@ -493,11 +493,13 @@ function getColumnProps(col: ColumnDef): ColumnProps {
     base.prop = 'customer.name'
     base.label = '客户'
     base['min-width'] = 130
+    base['show-overflow-tooltip'] = true
   } else if (key === 'machine_model') {
     base.prop = 'machine_model'
     base.label = '机器型号'
     base['min-width'] = 130
     base.sortable = 'custom'
+    base['show-overflow-tooltip'] = true
   } else if (key === 'cpu_model') {
     base.prop = 'cpu_model'
     base.label = 'CPU 型号'
@@ -523,6 +525,7 @@ function getColumnProps(col: ColumnDef): ColumnProps {
     base.prop = 'private_ip'
     base.label = '内网 IP'
     base['min-width'] = 140
+    base['show-overflow-tooltip'] = true
   } else if (key === 'start_date') {
     base.prop = 'start_date'
     base.label = '开通时间'

@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from src.core.database import get_db
+from src.contract.models import Contract
 from src.customer import schemas, services
 
 # ============================================================
@@ -16,30 +17,61 @@ from src.customer import schemas, services
 customer_router = APIRouter(prefix="/api/customers", tags=["Customer"])
 
 
+def _get_contract_stats(db: Session, customer_id: str) -> schemas.ContractStats:
+    """获取客户的合同统计"""
+    from sqlalchemy import func, case
+
+    stats = db.query(
+        func.count(Contract.id).label('total'),
+        func.sum(case((Contract.status == 'active', 1), else_=0)).label('active'),
+        func.sum(case((Contract.status.in_(['expired', 'expiring']), 1), else_=0)).label('expired'),
+    ).filter(Contract.customer_id == customer_id).first()
+    return schemas.ContractStats(
+        total=stats.total or 0,
+        active=(stats.active or 0),
+        expired=(stats.expired or 0),
+    )
+
+
+def _build_customer_response(db: Session, customer) -> schemas.CustomerResponse:
+    """构建 CustomerResponse，附加联系人数量和合同统计"""
+    contact_count = services.get_customer_contact_count(db, customer.id)
+    contract_stats = _get_contract_stats(db, customer.id)
+    return schemas.CustomerResponse(
+        id=customer.id,
+        name=customer.name,
+        code=customer.code,
+        status=customer.status,
+        business_types=customer.business_types,
+        contact_count=contact_count,
+        contract_stats=contract_stats,
+        created_at=customer.created_at,
+        updated_at=customer.updated_at,
+    )
+
+
 @customer_router.get("", response_model=schemas.CustomerListResponse)
 def list_customers(
     search: Optional[str] = Query(None, description="按名称模糊搜索"),
+    business_type: Optional[str] = Query(
+        None,
+        description="业务类型过滤: 算力租赁 / 卫星数据 / 算力服务",
+    ),
+    status: Optional[str] = Query(None, description="状态过滤: active / inactive"),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页条数"),
     db: Session = Depends(get_db),
 ):
-    """获取客户列表，支持模糊搜索和分页"""
-    items, total = services.list_customers(db, search=search, page=page, page_size=page_size)
-    # 组装响应，附加联系人数量
-    result_items = []
-    for customer in items:
-        contact_count = services.get_customer_contact_count(db, customer.id)
-        result_items.append(
-            schemas.CustomerResponse(
-                id=customer.id,
-                name=customer.name,
-                code=customer.code,
-                status=customer.status,
-                contact_count=contact_count,
-                created_at=customer.created_at,
-                updated_at=customer.updated_at,
-            )
-        )
+    """获取客户列表，支持模糊搜索、业务类型过滤、状态过滤和分页"""
+    items, total = services.list_customers(
+        db,
+        search=search,
+        business_type=business_type,
+        status=status,
+        page=page,
+        page_size=page_size,
+    )
+    result_items = [_build_customer_response(db, c) for c in items]
     return schemas.CustomerListResponse(
         items=result_items,
         total=total,
@@ -60,15 +92,7 @@ def create_customer(
         if existing:
             raise HTTPException(status_code=400, detail=f"客户编码 '{data.code}' 已存在")
     customer = services.create_customer(db, data)
-    return schemas.CustomerResponse(
-        id=customer.id,
-        name=customer.name,
-        code=customer.code,
-        status=customer.status,
-        contact_count=0,
-        created_at=customer.created_at,
-        updated_at=customer.updated_at,
-    )
+    return _build_customer_response(db, customer)
 
 
 @customer_router.get("/{customer_id}", response_model=schemas.CustomerResponse)
@@ -80,16 +104,7 @@ def get_customer(
     customer = services.get_customer(db, customer_id)
     if not customer:
         raise HTTPException(status_code=404, detail="客户不存在")
-    contact_count = services.get_customer_contact_count(db, customer_id)
-    return schemas.CustomerResponse(
-        id=customer.id,
-        name=customer.name,
-        code=customer.code,
-        status=customer.status,
-        contact_count=contact_count,
-        created_at=customer.created_at,
-        updated_at=customer.updated_at,
-    )
+    return _build_customer_response(db, customer)
 
 
 @customer_router.put("/{customer_id}", response_model=schemas.CustomerResponse)
@@ -108,16 +123,7 @@ def update_customer(
         if existing and existing.id != customer_id:
             raise HTTPException(status_code=400, detail=f"客户编码 '{data.code}' 已存在")
     customer = services.update_customer(db, customer, data)
-    contact_count = services.get_customer_contact_count(db, customer_id)
-    return schemas.CustomerResponse(
-        id=customer.id,
-        name=customer.name,
-        code=customer.code,
-        status=customer.status,
-        contact_count=contact_count,
-        created_at=customer.created_at,
-        updated_at=customer.updated_at,
-    )
+    return _build_customer_response(db, customer)
 
 
 @customer_router.delete("/{customer_id}", response_model=dict)

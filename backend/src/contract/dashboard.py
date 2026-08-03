@@ -1,10 +1,12 @@
 """
 合同模块仪表盘统计
 """
+import datetime
 from datetime import timedelta
 from sqlalchemy.orm import Session
+from sqlalchemy import func, extract
 
-from src.contract.models import Contract
+from src.contract.models import Contract, contract_rental
 from src.contract.services import get_contract_rentals
 from src.core.timezone import local_today
 
@@ -75,3 +77,109 @@ def get_expiring_contracts_with_rentals(db: Session, limit: int = 10) -> list[di
         if len(result) >= limit:
             break
     return result
+
+
+def get_overview_stats(db: Session) -> dict:
+    """获取运营概览图表的统计数据
+
+    返回:
+        - rental_by_customer: 各客户租赁中设备二维细分（TOP 10，每客户下按机型细分）
+        - rental_by_model: 机器型号分布（TOP 10）
+        - contract_trend: 近 12 个月合同新签/到期趋势
+    """
+    from src.rental.models import RentalRecord
+    from src.customer.models import Customer
+
+    # 1. 客户设备细分：按客户+机型分组（仅统计租赁中的设备）
+    rows = (
+        db.query(
+            Customer.name.label('customer_name'),
+            RentalRecord.machine_model,
+            func.count(RentalRecord.id).label('count'),
+        )
+        .join(RentalRecord, RentalRecord.customer_id == Customer.id)
+        .filter(RentalRecord.status == '租赁中')
+        .group_by(Customer.id, Customer.name, RentalRecord.machine_model)
+        .order_by(Customer.name, func.count(RentalRecord.id).desc())
+        .all()
+    )
+
+    # 组装嵌套结构
+    customer_model_map: dict[str, list] = {}
+    for row in rows:
+        cname = row.customer_name or '未知'
+        model = row.machine_model or '未知'
+        cnt = row.count
+        if cname not in customer_model_map:
+            customer_model_map[cname] = []
+        customer_model_map[cname].append({"machine_model": model, "count": cnt})
+
+    # 按总设备数排序取 TOP 10 客户
+    sorted_customers = sorted(
+        customer_model_map.items(),
+        key=lambda x: sum(m['count'] for m in x[1]),
+        reverse=True
+    )[:10]
+
+    rental_by_customer = [
+        {"customer_name": name, "models": models}
+        for name, models in sorted_customers
+    ]
+
+    # 2. 机器型号分布（所有租赁中设备，TOP 10）
+    rental_by_model = (
+        db.query(
+            RentalRecord.machine_model,
+            func.count(RentalRecord.id).label('count'),
+        )
+        .filter(RentalRecord.status == '租赁中')
+        .group_by(RentalRecord.machine_model)
+        .order_by(func.count(RentalRecord.id).desc())
+        .limit(10)
+        .all()
+    )
+    rental_by_model = [
+        {"machine_model": r.machine_model, "count": r.count}
+        for r in rental_by_model
+    ]
+
+    # 3. 近 12 个月合同趋势（新签 / 到期）
+    today = datetime.date.today()
+    months = []
+    for i in range(11, -1, -1):
+        y = today.year
+        m = today.month - i
+        if m <= 0:
+            y -= 1
+            m += 12
+        months.append((y, m))
+
+    contract_trend = []
+    for y, m in months:
+        created_count = (
+            db.query(func.count(Contract.id))
+            .filter(
+                extract('year', Contract.start_date) == y,
+                extract('month', Contract.start_date) == m,
+            )
+            .scalar()
+        ) or 0
+        expired_count = (
+            db.query(func.count(Contract.id))
+            .filter(
+                extract('year', Contract.end_date) == y,
+                extract('month', Contract.end_date) == m,
+            )
+            .scalar()
+        ) or 0
+        contract_trend.append({
+            "month": f"{y}-{m:02d}",
+            "created_count": created_count,
+            "expired_count": expired_count,
+        })
+
+    return {
+        "rental_by_customer": rental_by_customer,
+        "rental_by_model": rental_by_model,
+        "contract_trend": contract_trend,
+    }

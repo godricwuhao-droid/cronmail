@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>客户管理 - 现代化重构</title>
+    <style>
+        /* --- 全局变量与重置 --- */
+        :root {
+            --primary-color: #1890ff;
+            --success-color: #52c41a;
+            --warning-color: #faad14;
+            --danger-color: #ff4d4f;
+            --text-main: #262626;
+            --text-secondary: #8c8c8c;
+            --border-color: #f0f0f0;
+            --bg-body: #f5f7fa;
+            --bg-card: #ffffff;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background-color: var(--bg-body);
+            color: var(--text-main);
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* --- 布局结构 --- */
+        .sidebar {
+            width: 220px;
+            background: #001529;
+            color: rgba(255,255,255,0.65);
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .logo-area {
+            height: 64px;
+            line-height: 64px;
+            text-align: center;
+            font-size: 20px;
+            font-weight: bold;
+            color: white;
+            background: #002140;
+        }
+
+        .menu-item {
+            padding: 14px 24px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .menu-item:hover, .menu-item.active {
+            color: white;
+            background: var(--primary-color);
+        }
+
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .header {
+            height: 64px;
+            background: var(--bg-card);
+            box-shadow: 0 1px 4px rgba(0,21,41,.08);
+            display: flex;
+            align-items: center;
+            padding: 0 24px;
+            justify-content: space-between;
+            z-index: 10;
+        }
+
+        .breadcrumb { font-size: 14px; color: var(--text-secondary); }
+        .system-status { font-size: 12px; color: var(--success-color); display: flex; align-items: center; gap: 6px; }
+        .status-dot { width: 6px; height: 6px; background: var(--success-color); border-radius: 50%; }
+
+        .content-body {
+            padding: 24px;
+            overflow-y: auto;
+        }
+
+        /* --- 卡片容器 --- */
+        .card {
+            background: var(--bg-card);
+            border-radius: 4px; /* 轻微圆角 */
+            padding: 24px;
+            box-shadow: 0 1px 2px -2px rgba(0,0,0,.16), 0 3px 6px 0 rgba(0,0,0,.12);
+        }
+
+        .page-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 16px;
+        }
+
+        .page-title { font-size: 16px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+        .page-title::before {
+            content: ''; display: block; width: 4px; height: 16px; background: var(--primary-color); border-radius: 2px;
+        }
+
+        /* --- 筛选工具栏 --- */
+        .toolbar {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        .input-group {
+            position: relative;
+            width: 240px;
+        }
+        .input-group input {
+            width: 100%;
+            padding: 8px 12px 8px 32px;
+            border: 1px solid #d9d9d9;
+            border-radius: 4px;
+            outline: none;
+            transition: all 0.3s;
+        }
+        .input-group input:focus { border-color: var(--primary-color); box-shadow: 0 0 0 2px rgba(24,144,255,0.2); }
+        .search-icon {
+            position: absolute; left: 10px; top: 50%; transform: translateY(-50%);
+            color: #bfbfbf; font-size: 14px;
+        }
+
+        .btn {
+            padding: 8px 16px;
+            border-radius: 4px;
+            border: 1px solid transparent;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .btn-primary { background: var(--primary-color); color: white; }
+        .btn-primary:hover { background: #40a9ff; }
+
+        /* --- 表格样式 (重点优化) --- */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            text-align: left;
+        }
+
+        th {
+            background: #fafafa;
+            color: var(--text-main);
+            font-weight: 600;
+            padding: 16px;
+            border-bottom: 1px solid #f0f0f0;
+            font-size: 14px;
+        }
+
+        td {
+            padding: 16px;
+            border-bottom: 1px solid #f0f0f0;
+            color: var(--text-secondary);
+            font-size: 14px;
+            vertical-align: middle;
+        }
+
+        tr:hover td { background: #e6f7ff; } /* 悬停高亮 */
+
+        /* 特定列样式 */
+        .col-name {
+            color: var(--primary-color);
+            font-weight: 500;
+            cursor: pointer;
+        }
+        
+        .tag {
+            display: inline-block;
+            padding: 2px 8px;
+            font-size: 12px;
+            border-radius: 4px;
+            border: 1px solid;
+        }
+        .tag-green { background: #f6ffed; border-color: #b7eb8f; color: #52c41a; }
+        .tag-blue { background: #e6f7ff; border-color: #91d5ff; color: #1890ff; }
+
+        /* 合同统计列的核心设计 */
+        .contract-stat {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .stat-total {
+            font-size: 18px;
+            font-weight: bold;
+            color: var(--text-main);
+            line-height: 1;
+        }
+        .stat-label { font-size: 12px; color: #bfbfbf; }
+        .stat-breakdown {
+            display: flex;
+            gap: 8px;
+            font-size: 12px;
+            margin-top: 2px;
+        }
+        .stat-item { display: flex; align-items: center; gap: 4px; }
+        .dot { width: 6px; height: 6px; border-radius: 50%; }
+        .dot-green { background: var(--success-color); }
+        .dot-orange { background: var(--warning-color); }
+
+        /* 操作列 */
+        .actions { display: flex; gap: 12px; }
+        .action-link { color: var(--primary-color); cursor: pointer; text-decoration: none; }
+        .action-link.danger { color: var(--danger-color); }
+        .action-link:hover { text-decoration: underline; }
+
+        /* 分页 */
+        .pagination {
+            display: flex;
+            justify-content: flex-end;
+            margin-top: 20px;
+            gap: 8px;
+            align-items: center;
+        }
+        .page-item {
+            min-width: 32px; height: 32px;
+            display: flex; align-items: center; justify-content: center;
+            border: 1px solid #d9d9d9; border-radius: 4px;
+            cursor: pointer; font-size: 14px;
+        }
+        .page-item.active { border-color: var(--primary-color); color: var(--primary-color); font-weight: 500; }
+        
+    </style>
+</head>
+<body>
+
+    <!-- 左侧导航 -->
+    <div class="sidebar">
+        <div class="logo-area">资产运营平台</div>
+        <div class="menu-item active">客户管理</div>
+        <div class="menu-item">算力租赁</div>
+        <div class="menu-item">设备管理</div>
+        <div class="menu-item">系统配置</div>
+    </div>
+
+    <!-- 右侧主体 -->
+    <div class="main-content">
+        <!-- 顶部通栏 -->
+        <div class="header">
+            <div class="breadcrumb">首页 / 客户管理</div>
+            <div class="system-status"><span class="status-dot"></span>系统运行中</div>
+        </div>
+
+        <div class="content-body">
+            <div class="card">
+                <!-- 页面标题 -->
+                <div class="page-header">
+                    <div class="page-title">客户管理</div>
+                </div>
+
+                <!-- 工具栏 -->
+                <div class="toolbar">
+                    <div class="input-group">
+                        <span class="search-icon">🔍</span>
+                        <input type="text" placeholder="按客户名称搜索">
+                    </div>
+                    <button class="btn btn-primary">+ 新建客户</button>
+                </div>
+
+                <!-- 数据表格 -->
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="width: 25%">客户名称</th>
+                            <th style="width: 10%">状态</th>
+                            <th style="width: 12%">业务类型</th>
+                            <th style="width: 10%">联系人</th>
+                            <th style="width: 18%">合同统计</th> <!-- 重点优化列 -->
+                            <th style="width: 15%">创建时间</th>
+                            <th style="width: 10%">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <!-- Row 1 -->
+                        <tr>
+                            <td class="col-name">苏州登临科技股份有限公司</td>
+                            <td><span class="tag tag-green">启用</span></td>
+                            <td><span class="tag tag-blue">算力租赁</span></td>
+                            <td>0</td>
+                            <td>
+                                <!-- 优化后的合同统计展示 -->
+                                <div class="contract-stat">
+                                    <div><span class="stat-total">3</span> <span class="stat-label">合同总数</span></div>
+                                    <div class="stat-breakdown">
+                                        <span class="stat-item"><span class="dot dot-green"></span>生效 1</span>
+                                        <span class="stat-item"><span class="dot dot-orange"></span>临期 0</span>
+                                    </div>
+                                </div>
+                            </td>
+                            <td>2026-07-10 15:32:31</td>
+                            <td>
+                                <div class="actions">
+                                    <a class="action-link">编辑</a>
+                                    <a class="action-link danger">停用</a>
+                                </div>
+                            </td>
+                        </tr>
+
+                        <!-- Row 2 -->
+                        <tr>
+                            <td class="col-name">浙江华兮云科技有限公司</td>
+                            <td><span class="tag tag-green">启用</span></td>
+                            <td>-</td>
+                            <td>0</td>
+                            <td>
+                                <div class="contract-stat">
+                                    <div><span class="stat-total">1</span> <span class="stat-label">合同总数</span></div>
+                                    <div class="stat-breakdown">
+                                        <span class="stat-item"><span class="dot dot-green"></span>生效 1</span>
+                                    </div>
+                                </div>
+                            </td>
+                            <td>2026-07-08 10:32:17</td>
+                            <td>
+                                <div class="actions">
+                                    <a class="action-link">编辑</a>
+                                    <a class="action-link danger">停用</a>
+                                </div>
+                            </td>
+                        </tr>
+
+                        <!-- Row 3 -->
+                        <tr>
+                            <td class="col-name">成都天弈科技有限公司</td>
+                            <td><span class="tag tag-green">启用</span></td>
+                            <td>-</td>
+                            <td>0</td>
+                            <td>
+                                <div class="contract-stat">
+                                    <div><span class="stat-total">1</span> <span class="stat-label">合同总数</span></div>
+                                    <div class="stat-breakdown">
+                                        <span class="stat-item"><span class="dot dot-orange"></span>临期 1</span>
+                                    </div>
+                                </div>
+                            </td>
+                            <td>2026-07-08 10:32:03</td>
+                            <td>
+                                <div class="actions">
+                                    <a class="action-link">编辑</a>
+                                    <a class="action-link danger">停用</a>
+                                </div>
+                            </td>
+                        </tr>
+                        
+                         <!-- Row 4 -->
+                        <tr>
+                            <td class="col-name">成都极云天下科技有限公司</td>
+                            <td><span class="tag tag-green">启用</span></td>
+                            <td>-</td>
+                            <td>0</td>
+                            <td>
+                                <div class="contract-stat">
+                                    <div><span class="stat-total">3</span> <span class="stat-label">合同总数</span></div>
+                                    <div class="stat-breakdown">
+                                        <span class="stat-item"><span class="dot dot-green"></span>生效 2</span>
+                                        <span class="stat-item"><span class="dot dot-orange"></span>临期 1</span>
+                                    </div>
+                                </div>
+                            </td>
+                            <td>2026-07-08 10:31:54</td>
+                            <td>
+                                <div class="actions">
+                                    <a class="action-link">编辑</a>
+                                    <a class="action-link danger">停用</a>
+                                </div>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <!-- 分页 -->
+                <div class="pagination">
+                    <div style="font-size: 13px; color: #666; margin-right: 10px;">共 10 条</div>
+                    <div class="page-item">&lt;</div>
+                    <div class="page-item active">1</div>
+                    <div class="page-item">2</div>
+                    <div class="page-item">&gt;</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

@@ -10,14 +10,32 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/',
     component: MainLayout,
-    redirect: '/dashboard',
+    redirect: '/data-report/overview',
     children: [
-      // ---------- 仪表盘 ----------
+      // ---------- 数据报表 ----------
+      {
+        path: 'data-report',
+        redirect: '/data-report/overview',
+        children: [
+          {
+            path: 'overview',
+            name: 'DataOverview',
+            component: () => import('@/views/data-report/overview.vue'),
+            meta: { title: '运营概览', icon: 'DataAnalysis', parent: 'data-report' },
+          },
+          {
+            path: 'rental-overview',
+            name: 'RentalOverview',
+            component: () => import('@/views/data-report/rental-overview.vue'),
+            meta: { title: '租赁概览', icon: 'TrendCharts', parent: 'data-report' },
+          },
+        ],
+      },
+
+      // ---------- 兼容旧路由 /dashboard 重定向 ----------
       {
         path: 'dashboard',
-        name: 'Dashboard',
-        component: () => import('@/views/dashboard/index.vue'),
-        meta: { title: '仪表盘', icon: 'Odometer' },
+        redirect: '/data-report/rental-overview',
       },
 
       // ---------- 客户管理 ----------
@@ -137,6 +155,44 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '附件管理', icon: 'Cpu', hidden: true, parent: 'contracts' },
       },
 
+      // ---------- 项目管理 ----------
+      {
+        path: 'projects',
+        redirect: '/projects/fengyun',
+        children: [
+          {
+            path: ':company',
+            name: 'ProjectList',
+            component: () => import('@/views/projects/index.vue'),
+            meta: { title: '项目管理', icon: 'FolderOpened', parent: 'projects' },
+          },
+          {
+            path: ':company/create',
+            name: 'ProjectCreate',
+            component: () => import('@/views/projects/form.vue'),
+            meta: { title: '新建合同', icon: 'FolderOpened', hidden: true, parent: 'projects' },
+          },
+          {
+            path: ':company/:id',
+            name: 'ProjectDetail',
+            component: () => import('@/views/projects/detail.vue'),
+            meta: { title: '合同详情', icon: 'FolderOpened', hidden: true, parent: 'projects' },
+          },
+          {
+            path: ':company/:id/edit',
+            name: 'ProjectEdit',
+            component: () => import('@/views/projects/form.vue'),
+            meta: { title: '编辑合同', icon: 'FolderOpened', hidden: true, parent: 'projects' },
+          },
+          {
+            path: ':company/:id/attachments',
+            name: 'ProjectAttachments',
+            component: () => import('@/views/projects/AttachmentsPage.vue'),
+            meta: { title: '附件管理', icon: 'FolderOpened', hidden: true, parent: 'projects' },
+          },
+        ],
+      },
+
       // ---------- 设备管理 ----------
       {
         path: 'rentals',
@@ -238,7 +294,7 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/:pathMatch(.*)*',
     name: 'NotFound',
-    redirect: '/dashboard',
+    redirect: '/data-report/overview',
   },
 ]
 

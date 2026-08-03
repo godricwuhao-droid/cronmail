@@ -2,7 +2,7 @@
 合同模块 ORM 模型
 """
 import uuid
-from sqlalchemy import Column, String, Date, Text, DateTime, ForeignKey, UniqueConstraint, Table, JSON
+from sqlalchemy import Column, String, Date, Text, DateTime, ForeignKey, Numeric, UniqueConstraint, Table, JSON, Integer
 from sqlalchemy.orm import relationship
 
 from src.core.database import Base, UUIDColumn
@@ -112,7 +112,16 @@ class Contract(Base):
         comment="状态: active / expiring / expired / reclaimed",
     )
     remark = Column(Text, nullable=True, comment="备注")
+    amount = Column(Numeric(12, 2), nullable=True, comment="合同金额")
     history_rental_ids = Column(JSON, nullable=True, comment="回收时快照的设备ID列表，方便复盘")
+    renewed_from_id = Column(
+        UUIDColumn(),
+        ForeignKey("contract.id"),
+        nullable=True,
+        index=True,
+        comment="续期来源合同ID，NULL 表示非续期合同",
+    )
+    sort_order = Column(Integer, default=0, nullable=False, comment="排序序号")
     created_at = Column(DateTime, default=local_now, nullable=False)
     updated_at = Column(
         DateTime,
@@ -135,6 +144,12 @@ class Contract(Base):
         "src.customer.models.Contact",
         secondary=contract_contact,
         backref="contracts",
+    )
+    renewed_from = relationship(
+        "Contract",
+        remote_side="Contract.id",
+        foreign_keys=[renewed_from_id],
+        backref="renewals",
     )
 
     def __repr__(self):

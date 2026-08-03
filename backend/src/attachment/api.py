@@ -1,12 +1,16 @@
 """
 附件管理模块 API 路由
 """
+import io
 import os
+import re
+import zipfile
 import urllib.parse
+from datetime import date
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
 from src.core.database import get_db
@@ -58,6 +62,101 @@ def upload_attachments(
         ))
 
     return schemas.AttachmentUploadResponse(attachments=result)
+
+
+# /export 必须在 /{attachment_id}/download 之前注册，否则 export 会被当作 attachment_id
+@attachment_router.get("/export")
+def export_attachments_zip(
+    contract_type: str = Query(..., description="合同类型: compute_leasing/satellite_data/compute_service"),
+    contract_id: str = Query(..., description="合同ID"),
+    db: Session = Depends(get_db),
+):
+    """一键导出合同所有附件为 ZIP 包
+
+    目录结构（动态生成）：
+    {合同名称}/
+    ├── {category.name}/      ← 运行时动态，可能被管理员改名或新增
+    │   ├── {item.name}/
+    │   │   ├── file1.pdf
+    │   │   └── file2.docx
+    │   └── ...
+    └── ...
+    """
+    # 1. 获取合同名称
+    contract_name = _get_contract_name(db, contract_type, contract_id)
+    if not contract_name:
+        raise HTTPException(status_code=404, detail="合同不存在")
+
+    # 2. 获取该合同类型下的活跃分类（动态，不硬编码）
+    categories = (
+        db.query(AttachmentCategory)
+        .filter(
+            AttachmentCategory.contract_type == contract_type,
+            AttachmentCategory.is_active == True,  # noqa: E712
+        )
+        .order_by(AttachmentCategory.sort_order)
+        .all()
+    )
+
+    if not categories:
+        raise HTTPException(status_code=404, detail="该合同类型下无附件分类，请先在系统配置中配置")
+
+    # 3. 组装 ZIP
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+        has_any_file = False
+        for cat in categories:
+            for item in cat.items:
+                if not item.is_active:
+                    continue
+                # 获取该 item 下该合同的附件
+                files = (
+                    db.query(Attachment)
+                    .filter(
+                        Attachment.contract_type == contract_type,
+                        Attachment.contract_id == contract_id,
+                        Attachment.item_id == item.id,
+                    )
+                    .order_by(Attachment.uploaded_at)
+                    .all()
+                )
+                if not files:
+                    continue  # 无文件的子项跳过
+
+                has_any_file = True
+                # 目录路径: 合同名称/category名称/item名称/
+                dir_prefix = f"{_safe_zip_name(contract_name)}/{_safe_zip_name(cat.name)}/{_safe_zip_name(item.name)}"
+
+                # 处理重名文件
+                used_names: dict[str, int] = {}
+                for att in files:
+                    full_path = os.path.join(UPLOAD_BASE_DIR, att.file_path)
+                    if not os.path.exists(full_path):
+                        continue
+
+                    original_name = att.filename or "unnamed"
+                    zip_name = _resolve_duplicate_name(original_name, used_names)
+
+                    arcname = f"{dir_prefix}/{zip_name}"
+                    zf.write(full_path, arcname)
+
+        if not has_any_file:
+            raise HTTPException(status_code=404, detail="该合同下无附件文件")
+
+    zip_buffer.seek(0)
+
+    today_str = date.today().strftime("%Y-%m-%d")
+    safe_name = _safe_zip_name(contract_name)
+    filename = f"{safe_name}_附件_{today_str}.zip"
+    encoded = urllib.parse.quote(filename)
+
+    return StreamingResponse(
+        zip_buffer,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{encoded}",
+        },
+    )
 
 
 @attachment_router.get("/{attachment_id}/download")
@@ -275,3 +374,41 @@ def reorder_item(
         raise HTTPException(status_code=404, detail="附件子项不存在")
     services.reorder_item(db, item, data.sort_order)
     return {"detail": "排序已更新"}
+
+
+# ============================================================
+# 辅助函数（供 export_attachments_zip 使用）
+# ============================================================
+
+def _get_contract_name(db: Session, contract_type: str, contract_id: str) -> Optional[str]:
+    """根据合同类型查询合同名称"""
+    if contract_type == "compute_leasing":
+        from src.contract.models import Contract
+        c = db.query(Contract).filter(Contract.id == contract_id).first()
+        return c.name if c else None
+    elif contract_type == "satellite_data":
+        from src.satellite.models import SatelliteDataContract
+        c = db.query(SatelliteDataContract).filter(SatelliteDataContract.id == contract_id).first()
+        return c.name if c else None
+    elif contract_type == "compute_service":
+        from src.compute_service.models import ComputeServiceContract
+        c = db.query(ComputeServiceContract).filter(ComputeServiceContract.id == contract_id).first()
+        return c.name if c else None
+    return None
+
+
+def _safe_zip_name(name: str) -> str:
+    """清理文件名中的非法字符（用于 ZIP 内路径）"""
+    # 替换路径分隔符和非法字符
+    safe = re.sub(r'[\\/:*?"<>|]', '_', name)
+    return safe.strip() or "unnamed"
+
+
+def _resolve_duplicate_name(filename: str, used: dict[str, int]) -> str:
+    """处理重名：file.pdf → file(2).pdf"""
+    if filename not in used:
+        used[filename] = 1
+        return filename
+    used[filename] += 1
+    name, ext = os.path.splitext(filename)
+    return f"{name}({used[filename]}){ext}"

@@ -22,6 +22,7 @@ import {
   type ContractCreatePayload,
   type ContractDetail,
   type ContractUpdatePayload,
+  type ContractStatus,
 } from '@/api/modules/contract'
 import { getCustomers, type Customer } from '@/api/modules/customer'
 import { getContacts, type Contact } from '@/api/modules/contact'
@@ -35,6 +36,60 @@ const isEdit = computed(() => !!route.params.id)
 const contractId = computed(() => (route.params.id as string) || '')
 
 // ============================================================
+// 续期模式
+// ============================================================
+const renewFromId = computed(() => (route.query.renew_from as string) || '')
+const isRenewal = computed(() => !!renewFromId.value)
+
+async function loadRenewalSource() {
+  if (!renewFromId.value) return
+  _loadingDetail.value = true
+  try {
+    const original = await getContract(renewFromId.value)
+    if (!original) {
+      ElMessage.warning('续期来源合同不存在')
+      return
+    }
+    // 回填表单
+    form.customer_id = original.customer_id
+    form.billing_model = (original.billing_model as ContractBillingModel) || 'monthly'
+    form.name = original.name + '(续期)'
+    form.start_date = original.end_date
+    // 建议 end_date：原合同时长
+    if (original.start_date && original.end_date) {
+      const duration = new Date(original.end_date).getTime() - new Date(original.start_date).getTime()
+      const newEnd = new Date(new Date(original.end_date).getTime() + 86400000 + duration)
+      form.end_date = newEnd.toISOString().slice(0, 10)
+    }
+    form.renewed_from_id = original.id
+    form.amount = original.amount ?? undefined
+    form.remark = original.remark ?? ''
+    form.sort_order = original.sort_order ?? 0
+    // 预选原合同设备
+    if (original.rentals?.length) {
+      form.rental_ids = original.rentals.map((r: any) => r.id)
+    }
+    // 预选原合同联系人
+    if (original.contacts?.length) {
+      form.contacts = original.contacts.map((c) => ({
+        contact_id: c.contact_id,
+        recipient_type: c.recipient_type,
+      }))
+    }
+    // 加载客户联系人 & 可用设备，重建设备列表
+    await Promise.all([
+      loadCustomerContacts(original.customer_id),
+      loadAvailableRentals(),
+    ])
+    buildLinkedDetails()
+  } catch {
+    ElMessage.warning('加载续期来源合同失败')
+  } finally {
+    _loadingDetail.value = false
+  }
+}
+
+// ============================================================
 // 表单数据
 // ============================================================
 interface ContractForm {
@@ -44,9 +99,13 @@ interface ContractForm {
   start_date: string
   end_date: string
   billing_model: ContractBillingModel
+  amount?: number
   remark: string
   rental_ids: string[]
   contacts: Array<{ contact_id: string; recipient_type: 'to' | 'cc' }>
+  renewed_from_id?: string
+  status?: string
+  sort_order: number
 }
 
 const form = reactive<ContractForm>({
@@ -56,9 +115,12 @@ const form = reactive<ContractForm>({
   start_date: '',
   end_date: '',
   billing_model: 'monthly',
+  amount: undefined,
   remark: '',
   rental_ids: [],
   contacts: [],
+  status: undefined,
+  sort_order: 0,
 })
 
 // ============================================================
@@ -77,7 +139,7 @@ const allContactOptions = computed(() => {
 
 async function loadCustomers() {
   try {
-    const res = await getCustomers({ page: 1, page_size: 100 })
+    const res = await getCustomers({ business_type: '算力租赁', page: 1, page_size: 100 })
     customerOptions.value = res.items.filter((c) => c.status === 'active')
   } catch {
     // 错误已统一处理
@@ -155,36 +217,44 @@ const candidateRentals = computed<RentalListItem[]>(() => {
 
 /** 从 detail 重建设备列表 */
 function buildLinkedDetails() {
-  if (!detail.value) {
-    linkedRentalDetails.value = []
-    return
-  }
-  const ids = new Set(form.rental_ids)
   const result: typeof linkedRentalDetails.value = []
-  // 先加入已关联的旧设备
-  for (const r of detail.value.rentals || []) {
-    if (ids.has(r.id)) {
-      result.push({
-        id: r.id,
-        customer: { id: form.customer_id, name: '' },
-        machine_model: r.machine_model,
-        rack_location: r.rack_location || null,
-        private_ip: r.private_ip || '',
-        start_date: '',
-        end_date: '',
-        status: '空闲中' as const,
-        created_at: '',
-      })
-      ids.delete(r.id)
+
+  if (detail.value) {
+    const ids = new Set(form.rental_ids)
+    // 先加入已关联的旧设备
+    for (const r of detail.value.rentals || []) {
+      if (ids.has(r.id)) {
+        result.push({
+          id: r.id,
+          customer: { id: form.customer_id, name: '' },
+          machine_model: r.machine_model,
+          rack_location: r.rack_location || null,
+          private_ip: r.private_ip || '',
+          start_date: '',
+          end_date: '',
+          status: '空闲中' as const,
+          created_at: '',
+        })
+        ids.delete(r.id)
+      }
+    }
+    // 再加入新选的设备（从 availableRentals 匹配）
+    for (const id of ids) {
+      const found = availableRentals.value.find((r) => r.id === id)
+      if (found) {
+        result.push({ ...found, isNew: true })
+      }
+    }
+  } else {
+    // 新建模式：直接从 availableRentals 匹配 form.rental_ids
+    for (const id of form.rental_ids) {
+      const found = availableRentals.value.find((r) => r.id === id)
+      if (found) {
+        result.push({ ...found, isNew: true })
+      }
     }
   }
-  // 再加入新选的设备（从 availableRentals 匹配）
-  for (const id of ids) {
-    const found = availableRentals.value.find((r) => r.id === id)
-    if (found) {
-      result.push({ ...found, isNew: true })
-    }
-  }
+
   linkedRentalDetails.value = result
 }
 
@@ -194,7 +264,7 @@ async function loadAvailableRentals() {
     const res = await getRentals({
       unlinked_only: true,
       page: 1,
-      page_size: 200,
+      page_size: 100,
     })
     availableRentals.value = res.items
   } catch {
@@ -293,7 +363,10 @@ async function loadDetail() {
     form.start_date = data.start_date
     form.end_date = data.end_date
     form.billing_model = (data.billing_model as ContractBillingModel) || 'monthly'
+    form.amount = data.amount ?? undefined
     form.remark = data.remark ?? ''
+    form.status = data.status ?? undefined
+    form.sort_order = data.sort_order ?? 0
     form.rental_ids = (data.rentals || []).map((r) => r.id)
     form.contacts = (data.contacts || []).map((c) => ({
       contact_id: c.contact_id,
@@ -337,9 +410,12 @@ function buildCreatePayload(): ContractCreatePayload {
     start_date: form.start_date,
     end_date: form.end_date,
     billing_model: form.billing_model,
+    amount: form.amount,
     remark: form.remark.trim() || undefined,
     rental_ids: form.rental_ids.length ? form.rental_ids : undefined,
     contacts: form.contacts.length ? form.contacts : undefined,
+    renewed_from_id: form.renewed_from_id || undefined,
+    sort_order: form.sort_order,
   }
 }
 
@@ -350,7 +426,10 @@ function buildUpdatePayload(): ContractUpdatePayload {
   payload.start_date = form.start_date
   payload.end_date = form.end_date
   payload.billing_model = form.billing_model
+  payload.amount = form.amount
   payload.remark = form.remark.trim() || undefined
+  payload.status = form.status as ContractStatus | undefined
+  payload.sort_order = form.sort_order
   // contacts 全量替换（后端约定：传则替换，不传则保留）
   payload.contacts = form.contacts
   return payload
@@ -408,9 +487,15 @@ function cancel() {
 }
 
 onMounted(async () => {
-  await Promise.all([loadCustomers(), loadColleagues()])
-  if (isEdit.value) {
+  await loadCustomers()
+  if (isRenewal.value) {
+    await loadColleagues()
+    await loadRenewalSource()
+  } else if (isEdit.value) {
+    await loadColleagues()
     await loadDetail()
+  } else {
+    await loadColleagues()
   }
 })
 </script>
@@ -421,7 +506,7 @@ onMounted(async () => {
       <template #header>
         <div class="card-header">
           <span class="title">
-            {{ isEdit ? '编辑合同' : '新建合同' }}
+            {{ isRenewal ? '续期合同' : (isEdit ? '编辑合同' : '新建合同') }}
           </span>
           <el-button link @click="cancel">返回</el-button>
         </div>
@@ -461,6 +546,19 @@ onMounted(async () => {
         <el-form-item label="合同编号" prop="contract_no">
           <el-input v-model="form.contract_no" placeholder="可选，如 CT-2026-001" maxlength="100" show-word-limit />
         </el-form-item>
+        <el-form-item label="序号">
+          <el-input-number v-model="form.sort_order" :min="0" :step="1" placeholder="序号" />
+        </el-form-item>
+
+        <!-- 状态（仅编辑模式） -->
+        <el-form-item v-if="isEdit" label="合同状态" prop="status">
+          <el-select v-model="form.status" placeholder="请选择状态" style="width: 200px">
+            <el-option label="生效中" value="active" />
+            <el-option label="临期" value="expiring" />
+            <el-option label="已到期" value="expired" />
+            <el-option label="已回收" value="reclaimed" />
+          </el-select>
+        </el-form-item>
 
         <!-- 服务周期 -->
         <div class="section-title">
@@ -495,6 +593,16 @@ onMounted(async () => {
               {{ opt.label }}
             </el-radio-button>
           </el-radio-group>
+        </el-form-item>
+        <el-form-item label="合同金额">
+          <el-input-number
+            v-model="form.amount"
+            :precision="2"
+            :min="0"
+            :controls="false"
+            placeholder="可选，单位元"
+            style="width: 100%"
+          />
         </el-form-item>
 
         <!-- 关联设备 -->

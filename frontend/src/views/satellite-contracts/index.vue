@@ -10,7 +10,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { DataAnalysis, Search } from '@element-plus/icons-vue'
+import { DataAnalysis, Download, Search } from '@element-plus/icons-vue'
 import {
   deleteSatelliteContract,
   listSatelliteContracts,
@@ -44,7 +44,7 @@ const pagination = reactive({
 const customerOptions = ref<Customer[]>([])
 async function loadCustomerOptions() {
   try {
-    const res = await getCustomers({ page: 1, page_size: 100 })
+    const res = await getCustomers({ business_type: '卫星数据', page: 1, page_size: 100 })
     customerOptions.value = res.items.filter((c) => c.status === 'active')
   } catch {
     // 错误已统一处理
@@ -171,6 +171,16 @@ function getSummary(row: SatelliteContractItem): AttachmentSummary | undefined {
   return summaryMap.value[row.id]
 }
 
+// ============================================================
+// 导出 Excel
+// ============================================================
+function handleExport() {
+  const params = new URLSearchParams()
+  if (customerFilter.value) params.append('customer_id', customerFilter.value)
+  if (searchText.value.trim()) params.append('search', searchText.value.trim())
+  window.open(`/api/satellite-data-contracts/export?${params.toString()}`, '_blank')
+}
+
 onMounted(() => {
   loadCustomerOptions()
   fetchList()
@@ -186,6 +196,7 @@ onMounted(() => {
             <el-icon><DataAnalysis /></el-icon>
             卫星数据合同
           </span>
+          <el-button :icon="Download" @click="handleExport" :disabled="loading">导出</el-button>
           <el-button type="primary" @click="goCreate">+ 新建合同</el-button>
         </div>
       </template>
@@ -244,10 +255,15 @@ onMounted(() => {
             <span v-else class="muted">-</span>
           </template>
         </el-table-column>
+        <el-table-column label="序号" width="70" align="center">
+          <template #default="{ row }">
+            {{ row.sort_order ?? 0 }}
+          </template>
+        </el-table-column>
         <el-table-column label="附件状态" width="140" align="center">
           <template #default="{ row }">
             <el-tooltip
-              v-for="code in ['contract_agreement', 'delivery_material', 'process_material']"
+              v-for="code in ['contract_agreement', 'acceptance_material', 'process_material']"
               :key="code"
               :content="statusDotTitle(getSummary(row), code)"
               placement="top"
@@ -289,7 +305,7 @@ onMounted(() => {
                     合同协议
                   </el-dropdown-item>
                   <el-dropdown-item>
-                    <span class="status-dot-sm" :style="{ backgroundColor: statusDotColor(getSummary(row), 'delivery_material') }" />
+                    <span class="status-dot-sm" :style="{ backgroundColor: statusDotColor(getSummary(row), 'acceptance_material') }" />
                     交付材料
                   </el-dropdown-item>
                   <el-dropdown-item>

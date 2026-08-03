@@ -20,6 +20,171 @@ HTTP 状态码：200
 
 ---
 
+## 智能合同解析 (Contract Parser)
+
+### POST /api/contracts/parse
+
+上传合同文件，AI 自动提取关键字段。**所有格式统一走 Vision 多模态图片识别。**
+
+**支持的文件格式：**
+- `.doc` / `.docx` — Word 文档（通过 document-converter 服务转为 PDF → 逐页拆图 → Vision LLM）
+- `.pdf` — PDF 文档（逐页拆图 → Vision LLM）
+
+**处理流程：**
+```
+.doc/.docx → document-converter (LibreOffice) → PDF → pdf2image 逐页拆图 → Vision LLM → JSON
+.pdf → pdf2image 逐页拆图 → Vision LLM → JSON
+```
+
+请求：`POST /api/contracts/parse?contract_type=project`
+
+请求参数：
+- `file`（form-data, file, 必填）：上传的合同文件（最大 10MB）
+- `contract_type`（query, string, 必填）：合同类型，`compute_leasing` / `satellite_data` / `compute_service` / `project`
+
+**处理模式：累进式 Vision 管道**（逐页分析 + 上下文累积 + 最终汇总）
+
+响应（PDF 实际测试结果）：
+```json
+{
+  "fields": {
+    "name": "Smart City AI Computing Platform Contract",
+    "contract_no": "TEST-2025-001",
+    "party_a_name": "Fengyun Times Technology Co., Ltd.",
+    "party_b_name": "Anhui Tianshu Technology Co., Ltd.",
+    "amount": "1500000.00",
+    "start_date": "2025-01-01",
+    "end_date": "2025-12-31",
+    "project_name": "Smart City AI Computing Platform",
+    "contract_content": "Computing services including CPU and GPU containers",
+    "service_lines": [
+      {
+        "category": "Computing Service",
+        "item_name": "General CPU Container",
+        "vcpu_count": 32,
+        "memory_gb": 64,
+        "gpu_count": 0,
+        "unit": "unit/month",
+        "quantity": 10,
+        "unit_price": 5000
+      }
+    ]
+  },
+  "processing_info": {
+    "file_size_kb": 2.1,
+    "mode": "vision",
+    "file_type": "pdf",
+    "pdf_pages": 2,
+    "extract_seconds": 0.4
+  },
+  "timing": {
+    "pdf_to_images": {"seconds": 0.4, "pages": 2},
+    "per_page": [
+      {"page": 1, "seconds": 1.5, "found_fields": ["name", "contract_no", "party_a_name", "party_b_name", "amount", "start_date", "end_date", "project_name"]},
+      {"page": 2, "seconds": 1.8, "found_fields": ["contract_content", "service_lines"]}
+    ],
+    "total_vision": {"seconds": 3.7}
+  },
+  "page_results": [
+    {"page": 1, "seconds": 1.5, "found_fields": ["name", "contract_no", "party_a_name", "party_b_name", "amount", "start_date", "end_date", "project_name"]},
+    {"page": 2, "seconds": 1.8, "found_fields": ["contract_content", "service_lines"]}
+  ]
+}
+```
+
+HTTP 状态码：200
+
+关键字段：
+- `fields.name`（string|null）：合同名称
+- `fields.contract_no`（string|null）：合同编号
+- `fields.party_a_name`（string|null）：甲方名称
+- `fields.party_b_name`（string|null）：乙方名称
+- `fields.amount`（number）：合同总金额，仅数字
+- `fields.start_date`（string|null）：合同开始日期 YYYY-MM-DD
+- `fields.end_date`（string|null）：合同结束日期 YYYY-MM-DD
+- `fields.project_name`（string|null）：所属项目名称
+- `fields.contract_content`（string|null）：合同主要内容概述
+- `fields.delivery_requirements`（string|null）：交付要求
+- `fields.remark`（string|null）：备注
+- `fields.service_lines`（array）：服务行列表（表格数据），每行含 category/item_name/specification(JSON，含vcpu/内存/存储/GPU/带宽等规格参数)/unit/quantity/period_months/unit_price/service_description
+- `fields.resource_summary`（object）：资源汇总，含 summary_text（总体概述）和 by_category[{category, resources}] 分组汇总描述
+- `processing_info.mode`（string）：固定为 `"vision"`
+- `processing_info.file_type`（string）：原始文件类型（doc/docx/pdf）
+- `processing_info.converted_from`（string，仅 Word 文件）：原始格式（doc/docx），表示经过了转换
+- `processing_info.pdf_pages`（int）：PDF 页数
+- `processing_info.extract_seconds`（number）：PDF 转图片耗时（秒）
+- `timing.pdf_to_images`（object）：PDF 转图片耗时 `{seconds, pages}`
+- `timing.per_page`（array）：逐页 LLM 调用耗时，每项含 `page`（页码）、`seconds`（该页耗时）、`found_fields`（该页发现的字段名列表）
+- `timing.final_summary`（object，仅 >3 页时出现）：最终汇总耗时 `{seconds}`
+- `timing.total_vision`（object）：Vision 管道总耗时 `{seconds}`
+- `page_results`（array）：每页分析记录，同 `timing.per_page`，方便前端展示逐页进度
+
+错误：
+- 400：`{"detail": "不支持的文件格式: .xxx，支持 .doc / .docx / .pdf"}` — 不支持的文件类型
+- 400：`{"detail": "PDF 图片转换失败: ..."}` — PDF 转换图片失败
+- 400：`{"detail": "PDF 无有效页面"}` — PDF 为空
+- 413：`{"detail": "文件大小超过 10MB 限制"}`
+- 502：`{"detail": "文档转换失败: ..."}` — document-converter 服务不可用或转换失败
+- 502：`{"detail": "AI 解析服务暂时不可用: ..."}` — LLM 调用失败
+
+---
+
+### POST /api/contracts/parse/stream
+
+SSE 流式解析合同：每完成一页推送一次事件（含图片 base64），前端实时展示。
+
+请求：`POST /api/contracts/parse/stream?contract_type=project`
+
+请求参数：
+- `file`（form-data, file, 必填）：上传的合同文件（最大 10MB）
+- `contract_type`（query, string, 必填）：合同类型，`compute_leasing` / `satellite_data` / `compute_service` / `project`
+
+响应类型：`text/event-stream`（SSE）
+
+SSE 事件流示例：
+```
+event: progress
+data: {"step":"pdf_to_images","pages":5,"seconds":1.2}
+
+event: page
+data: {"page":1,"total":5,"seconds":2.3,"found_fields":["name","contract_no","party_a_name"],"image_base64":"/9j/4AAQ..."}
+
+event: page
+data: {"page":2,"total":5,"seconds":1.8,"found_fields":["amount","start_date"],"image_base64":"/9j/4AAQ..."}
+
+...
+
+event: progress
+data: {"step":"final_summary","seconds":2.1}
+
+event: done
+data: {"fields":{"name":"合同名称","contract_no":"C-2025-001","party_a_name":"甲方公司","party_b_name":"乙方公司","amount":"1500000.00","start_date":"2025-01-01","end_date":"2025-12-31","project_name":"项目名","contract_content":"...","service_lines":[...],"resource_summary":{...},"_processing_info":{"mode":"vision","file_size_kb":120.5,"file_type":"pdf","elapsed_seconds":15.3}}}
+```
+
+SSE 事件类型说明：
+| 事件类型 | 说明 |
+|---------|------|
+| `progress` | 处理进度通知，`data.step` 为 `pdf_to_images`（PDF 转图片完成）或 `final_summary`（最终汇总完成） |
+| `page` | 单页分析完成，含 `page`（页码）、`total`（总页数）、`seconds`（该页耗时）、`found_fields`（本页发现的字段）、`image_base64`（该页 JPEG base64 图片） |
+| `done` | 全部分析完成，`data.fields` 含完整提取结果 |
+| `error` | 处理出错，`data.message` 含错误信息 |
+
+关键字段：
+- `page` 事件中 `image_base64`（string）：该页的 JPEG 图片 base64 编码，可直接用于 `<img src="data:image/jpeg;base64,...">`
+- `page` 事件中 `found_fields`（array）：本页新发现的字段名列表
+- `done` 事件中 `data.fields`（object）：完整的合同字段提取结果，结构与 `/parse` 接口的 `fields` 一致
+- `done` 事件中 `data.fields._processing_info`（object）：处理元信息，含 `mode`、`file_size_kb`、`file_type`、`elapsed_seconds`
+
+HTTP 状态码：200（SSE 流），413（文件过大）
+
+错误事件示例：
+```
+event: error
+data: {"message":"不支持的文件格式: .txt，支持 .doc / .docx / .pdf"}
+```
+
+---
+
 ## 客户管理 (Customer)
 
 ### GET /api/customers
@@ -1317,20 +1482,24 @@ HTTP 状态码：200
 {
   "items": [
     {
-      "id": "e5ac205c-dc6b-40c6-b081-1654ba76de2d",
-      "customer_id": "ab512a89-7cc8-4d9d-8349-c616f46a1bab",
-      "customer_name": "测试客户",
-      "name": "主合同-2026",
-      "contract_no": "CT-2026-001",
-      "start_date": "2026-06-01",
-      "end_date": "2026-12-31",
+      "id": "660fb9b1-7e84-4371-8cbe-80ae307a9bad",
+      "customer_id": "dccb2936-081a-4f64-9c85-4d10cde5419e",
+      "customer_name": "测试客户公司",
+      "name": "测试原合同",
+      "contract_no": null,
+      "start_date": "2026-01-01",
+      "end_date": "2026-06-30",
       "billing_model": "monthly",
-      "status": "active",
-      "remark": "测试合同",
-      "rental_count": 1,
-      "contact_count": 1,
-      "created_at": "2026-06-25T10:05:48.646038",
-      "updated_at": "2026-06-25T10:05:48.646044"
+      "status": "reclaimed",
+      "amount": null,
+      "remark": null,
+      "rental_count": 0,
+      "contact_count": 0,
+      "renewed_from_id": null,
+      "renewal_seq": 0,
+      "has_renewal": true,
+      "created_at": "2026-07-10T17:43:32.534350",
+      "updated_at": "2026-07-10T17:43:37.252320"
     }
   ],
   "total": 1,
@@ -1347,61 +1516,82 @@ HTTP 状态码：200
 - `items[].contact_count`（int）：关联联系人数量
 - `items[].billing_model`（string）：计费方式 monthly / quarterly / yearly
 - `items[].status`（string）：合同状态 active / expiring / expired / reclaimed
+- `items[].renewed_from_id`（string|null）：续期来源合同ID，null 表示非续期合同
+- `items[].renewal_seq`（int|null）：续期序号（列表固定为 0，详情返回真实值）
+- `items[].has_renewal`（bool）：是否已被后续合同续期
 
 ---
 
 ### POST /api/contracts
 
-创建合同，可同时关联设备和联系人。
+创建合同，可同时关联设备和联系人。支持续期（传入 `renewed_from_id`）。
 
-请求：`POST /api/contracts`
+请求（普通创建）：`POST /api/contracts`
 ```json
 {
-  "customer_id": "ab512a89-7cc8-4d9d-8349-c616f46a1bab",
-  "name": "主合同-2026",
-  "contract_no": "CT-2026-001",
-  "start_date": "2026-06-01",
+  "customer_id": "dccb2936-081a-4f64-9c85-4d10cde5419e",
+  "name": "测试原合同",
+  "start_date": "2026-01-01",
+  "end_date": "2026-06-30",
+  "billing_model": "monthly",
+  "amount": 10000
+}
+```
+
+请求（续期创建）：`POST /api/contracts`
+```json
+{
+  "customer_id": "dccb2936-081a-4f64-9c85-4d10cde5419e",
+  "name": "测试续期合同-第1次",
+  "start_date": "2026-07-01",
   "end_date": "2026-12-31",
   "billing_model": "monthly",
-  "remark": "测试合同",
-  "rental_ids": ["58b18fe0-0470-4b9d-bd1c-372e9e917ce5"],
-  "contacts": [{"contact_id": "07971a25-01f7-4493-94b3-b39094882790", "recipient_type": "to"}]
+  "amount": 12000,
+  "renewed_from_id": "660fb9b1-7e84-4371-8cbe-80ae307a9bad"
 }
 ```
 
 响应（201）：
 ```json
 {
-  "id": "e5ac205c-dc6b-40c6-b081-1654ba76de2d",
-  "customer_id": "ab512a89-7cc8-4d9d-8349-c616f46a1bab",
-  "customer_name": "测试客户",
-  "name": "主合同-2026",
-  "contract_no": "CT-2026-001",
-  "start_date": "2026-06-01",
+  "id": "5321c249-d262-4513-b48d-94b29b68167e",
+  "customer_id": "dccb2936-081a-4f64-9c85-4d10cde5419e",
+  "customer_name": "测试客户公司",
+  "name": "测试续期合同-第1次",
+  "contract_no": null,
+  "start_date": "2026-07-01",
   "end_date": "2026-12-31",
   "billing_model": "monthly",
   "status": "active",
-  "remark": "测试合同",
-  "rental_count": 1,
-  "contact_count": 1,
-  "created_at": "2026-06-25T10:05:48.646038",
-  "updated_at": "2026-06-25T10:05:48.646044",
-  "rentals": [
+  "amount": null,
+  "remark": null,
+  "rental_count": 0,
+  "contact_count": 0,
+  "renewed_from_id": "660fb9b1-7e84-4371-8cbe-80ae307a9bad",
+  "renewal_seq": 1,
+  "has_renewal": false,
+  "created_at": "2026-07-10T17:43:37.253120",
+  "updated_at": "2026-07-10T17:43:37.253133",
+  "rentals": [],
+  "contacts": [],
+  "renewal_chain": [
     {
-      "id": "58b18fe0-0470-4b9d-bd1c-372e9e917ce5",
-      "machine_model": "Dell R740",
-      "private_ip": null,
-      "public_ips": [],
-      "os_version": null,
-      "status": "运行中"
-    }
-  ],
-  "contacts": [
+      "id": "660fb9b1-7e84-4371-8cbe-80ae307a9bad",
+      "name": "测试原合同",
+      "status": "reclaimed",
+      "start_date": "2026-01-01",
+      "end_date": "2026-06-30",
+      "is_current": false,
+      "renewal_seq": 0
+    },
     {
-      "contact_id": "07971a25-01f7-4493-94b3-b39094882790",
-      "name": "张三",
-      "email": "zhang@test.com",
-      "recipient_type": "to"
+      "id": "5321c249-d262-4513-b48d-94b29b68167e",
+      "name": "测试续期合同-第1次",
+      "status": "active",
+      "start_date": "2026-07-01",
+      "end_date": "2026-12-31",
+      "is_current": true,
+      "renewal_seq": 1
     }
   ]
 }
@@ -1416,21 +1606,33 @@ HTTP 状态码：201
 - `billing_model`（string，默认 "monthly"）：monthly / quarterly / yearly
 - `contract_no`（string，可选，最长 100）
 - `remark`（string，可选）
+- `renewed_from_id`（string，可选）：续期来源合同ID，传入即表示续期创建
 - `rental_ids`（array，可选）：创建时关联的设备 ID 列表
 - `contacts`（array，可选）：创建时关联的联系人列表，每项含 `contact_id` 和 `recipient_type`（"to"/"cc"）。后端自动按 `(contact_id, recipient_type)` 去重，重复项只保留第一条
+- `renewed_from_id`（string|null）：续期来源合同ID，null 表示非续期
+- `renewal_seq`（int）：续期序号，0=原合同，1=第一次续期，...
+- `has_renewal`（bool）：是否已被后续合同续期
+- `renewal_chain`（array）：续期链路，从原始合同到当前合同的所有节点
+
+续期行为：
+1. 传入 `renewed_from_id` 时，校验原合同存在且未被续期
+2. 原合同自动标记为 `reclaimed`
+3. 若传入 `rental_ids`，设备关联从原合同迁移到新合同，原合同保留设备ID快照
 
 错误：
 - 404：`{"detail": "客户不存在"}`
+- 404：`{"detail": "续期来源合同不存在"}`
+- 409：`{"detail": "该合同已被续期"}` — 同一合同只能被续期一次
 
 ---
 
 ### GET /api/contracts/{id}
 
-获取合同详情，包含关联设备和联系人列表。
+获取合同详情，包含关联设备、联系人列表、续期链路。
 
-请求：`GET /api/contracts/e5ac205c-dc6b-40c6-b081-1654ba76de2d`
+请求：`GET /api/contracts/660fb9b1-7e84-4371-8cbe-80ae307a9bad`
 
-响应：同 POST 响应格式，包含 `rentals` 和 `contacts` 数组。
+响应：同 POST 响应格式，包含 `rentals`、`contacts`、`renewal_chain` 数组。
 
 HTTP 状态码：200
 
@@ -1575,6 +1777,44 @@ HTTP 状态码：200
 - `expiring`（int）：临期数量（end_date <= today+max_days 且 >= today，max_days 从 system_config.expiry_warning_days 读取，默认 7）
 - `reclaimed`（int）：已回收数量（status == 'reclaimed'）
 - `expiring_contracts`（array）：临期合同详情列表（最多 10 条），含关联设备
+
+---
+
+### GET /api/contracts/dashboard/overview-stats
+
+获取运营概览图表统计数据（客户设备二维细分、机器型号分布、近12个月合同趋势）。
+
+请求：`GET /api/contracts/dashboard/overview-stats`
+
+响应：
+```json
+{
+  "rental_by_customer": [
+    {
+      "customer_name": "A公司",
+      "models": [
+        {"machine_model": "4090", "count": 8},
+        {"machine_model": "CPU6133", "count": 2}
+      ]
+    }
+  ],
+  "rental_by_model": [
+    {"machine_model": "Dell R740", "count": 8}
+  ],
+  "contract_trend": [
+    {"month": "2025-08", "created_count": 3, "expired_count": 1}
+  ]
+}
+```
+
+HTTP 状态码：200
+
+关键字段：
+- `rental_by_customer`（array）：各客户租赁中设备 TOP 10（按总设备数降序），每项含：
+  - `customer_name`（string）：客户名称
+  - `models`（array）：该客户下各机型的设备数量，每项含 `machine_model`（string）和 `count`（int）
+- `rental_by_model`（array）：机器型号分布 TOP 10，每项含 `machine_model`（string）和 `count`（int）
+- `contract_trend`（array）：近 12 个月合同趋势，每项含 `month`（string，格式 YYYY-MM）、`created_count`（int，当月新签合同数）、`expired_count`（int，当月到期合同数）
 
 ---
 
@@ -1744,72 +1984,6 @@ HTTP 状态码：200
 
 ---
 
-## 合同管理 (Contract)
-
-### POST /api/contracts
-
-创建合同，可同时关联设备和联系人。
-
-请求：`POST /api/contracts`
-```json
-{
-  "customer_id": "1b995881-437b-4295-a4d3-0084c70dbf5c",
-  "name": "4090算力租赁",
-  "contract_no": "GYJY-001",
-  "start_date": "2026-06-29",
-  "end_date": "2026-07-06",
-  "billing_model": "monthly",
-  "rental_ids": ["e8fa71bd-82bd-4e2f-b6dd-b459d80e18b0", "44dc99cb-de64-4156-bb84-6e45b450cd5f"],
-  "contacts": [
-    {"contact_id": "3ce064c5-5d08-4d19-999f-aadffe99b335", "recipient_type": "to"},
-    {"contact_id": "3ce064c5-5d08-4d19-999f-aadffe99b335", "recipient_type": "cc"}
-  ]
-}
-```
-
-响应（201 Created）：
-```json
-{
-  "id": "0f94afd6-a801-4712-9121-96c0e95e41d3",
-  "customer_id": "1b995881-437b-4295-a4d3-0084c70dbf5c",
-  "customer_name": "江苏东蓝信息技术有限公司",
-  "name": "4090算力租赁",
-  "contract_no": "GYJY-001",
-  "start_date": "2026-06-29",
-  "end_date": "2026-07-06",
-  "billing_model": "monthly",
-  "status": "active",
-  "remark": null,
-  "rental_count": 2,
-  "contact_count": 1,
-  "created_at": "2026-06-29T20:10:46",
-  "updated_at": "2026-06-29T20:10:46",
-  "rentals": [
-    {"id": "44dc99cb-de64-4156-bb84-6e45b450cd5f", "machine_model": "R8428A12", "private_ip": "192.168.100.125", "public_ips": ["116.169.215.245"], "os_version": "Ubuntu 22.04 TLS", "status": "租赁中", "rack_location": "E09-18U"},
-    {"id": "e8fa71bd-82bd-4e2f-b6dd-b459d80e18b0", "machine_model": "R8428A12", "private_ip": "192.168.100.124", "public_ips": ["116.169.215.244"], "os_version": "Ubuntu 22.04 TLS", "status": "租赁中", "rack_location": "E09-24U"}
-  ],
-  "contacts": [
-    {"contact_id": "3ce064c5-5d08-4d19-999f-aadffe99b335", "name": "吴浩", "email": "wuhao@xhwltech.com", "recipient_type": "cc"},
-    {"contact_id": "3ce064c5-5d08-4d19-999f-aadffe99b335", "name": "吴浩", "email": "wuhao@xhwltech.com", "recipient_type": "to"}
-  ]
-}
-```
-
-HTTP 状态码：201
-
-关键字段：
-- `rental_ids`（array, optional）：关联设备 ID 列表，创建后设备状态自动变为"租赁中"
-- `contacts`（array, optional）：联系人列表，支持同一联系人在同一合同中同时作为 to 和 cc（`recipient_type` 区分）
-- `billing_model`（string）：计费方式，枚举 `monthly | quarterly | yearly`
-- 设备关联去重：同一设备只能关联一个合同（`contract_rental.rental_id` 有唯一约束），重复关联会跳过
-- 联系人去重：按 `(contact_id, recipient_type)` 去重，同一联系人 + 同一角色只存一条
-
-错误：
-- 409：`{"detail": "设备 xxx 已被其他合同关联"}`
-- 422：`{"detail": "..."}`（参数校验失败）
-
----
-
 ## 卫星数据合同 (SatelliteDataContract)
 
 ### GET /api/satellite-data-contracts
@@ -1822,7 +1996,26 @@ HTTP 状态码：201
 ```json
 {
   "items": [
-    {"id": "55ddb5f9-343f-40bc-bb05-65887d53ac2d", "customer_id": "b2e9b24d-ed5b-42c9-9fdb-d5b9a358fcc7", "customer_name": "测试客户A", "name": "卫星数据合同-001", "contract_no": "WX-2026-001", "remark": "测试", "created_at": "2026-07-03T17:20:04.572277", "updated_at": null}
+    {
+      "id": "55ddb5f9-343f-40bc-bb05-65887d53ac2d",
+      "customer_id": "b2e9b24d-ed5b-42c9-9fdb-d5b9a358fcc7",
+      "customer_name": "测试客户A",
+      "name": "卫星数据合同-001",
+      "contract_no": "WX-2026-001",
+      "remark": "测试",
+      "contract_type": null,
+      "project_name": null,
+      "party_a_name": null,
+      "party_b_name": null,
+      "start_date": null,
+      "end_date": null,
+      "amount": null,
+      "contract_content": null,
+      "delivery_requirements": null,
+      "process_records": null,
+      "created_at": "2026-07-03T17:20:04.572277",
+      "updated_at": null
+    }
   ],
   "total": 1,
   "page": 1,
@@ -1835,24 +2028,76 @@ HTTP 状态码：200
 关键字段：
 - `items`（array）：合同列表，含 `customer_name`（关联查询）
 - `total`（int）：总数
+- `contract_type`（string|null，ADR-013 新增）：合同子类型
+- `project_name`（string|null，ADR-013 新增）：所属项目
+- `party_a_name`（string|null，ADR-013 新增）：甲方名称
+- `party_b_name`（string|null，ADR-013 新增）：乙方名称
+- `start_date`（date|null，ADR-013 新增）：服务开始日期
+- `end_date`（date|null，ADR-013 新增）：服务结束日期
+- `amount`（decimal|null，ADR-013 新增）：合同金额
+- `contract_content`（string|null，ADR-013 新增）：合同内容
+- `delivery_requirements`（string|null，ADR-013 新增）：合同交付要求
+- `process_records`（string|null，ADR-013 新增）：过程记录
 
 ### POST /api/satellite-data-contracts
 
-请求：
+请求（所有 ADR-013 新增字段均为可选）：
 ```json
-{"customer_id": "uuid", "name": "卫星数据合同-001", "contract_no": "WX-2026-001", "remark": ""}
+{
+  "customer_id": "uuid",
+  "name": "卫星数据合同-001",
+  "contract_no": "WX-2026-001",
+  "remark": "",
+  "contract_type": "data_purchase",
+  "project_name": "项目Alpha",
+  "party_a_name": "甲方公司",
+  "party_b_name": "乙方公司",
+  "start_date": "2026-01-01",
+  "end_date": "2026-12-31",
+  "amount": "100000.00",
+  "contract_content": "合同内容描述",
+  "delivery_requirements": "交付要求描述",
+  "process_records": "过程记录"
+}
 ```
 
-响应：
+响应（201）：
 ```json
-{"id": "55ddb5f9-343f-40bc-bb05-65887d53ac2d", "customer_id": "b2e9b24d-ed5b-42c9-9fdb-d5b9a358fcc7", "customer_name": "测试客户A", "name": "卫星数据合同-001", "contract_no": "WX-2026-001", "remark": "测试", "created_at": "2026-07-03T17:20:04.572277", "updated_at": null}
+{
+  "id": "55ddb5f9-343f-40bc-bb05-65887d53ac2d",
+  "customer_id": "b2e9b24d-ed5b-42c9-9fdb-d5b9a358fcc7",
+  "customer_name": "测试客户A",
+  "name": "卫星数据合同-001",
+  "contract_no": "WX-2026-001",
+  "remark": "测试",
+  "contract_type": "data_purchase",
+  "project_name": "项目Alpha",
+  "party_a_name": "甲方公司",
+  "party_b_name": "乙方公司",
+  "start_date": "2026-01-01",
+  "end_date": "2026-12-31",
+  "amount": "100000.00",
+  "contract_content": "合同内容描述",
+  "delivery_requirements": "交付要求描述",
+  "process_records": "过程记录",
+  "created_at": "2026-07-03T17:20:04.572277",
+  "updated_at": null
+}
 ```
 
 HTTP 状态码：201
 
 ### GET /api/satellite-data-contracts/{id}
 
+响应格式同 POST 响应，包含所有 ADR-013 新增字段。
+
+HTTP 状态码：200
+
 ### PUT /api/satellite-data-contracts/{id}
+
+请求：所有字段均为可选，只更新传入的字段。ADR-013 新增的 10 个字段同样支持部分更新。
+
+HTTP 状态码：200
 
 ### DELETE /api/satellite-data-contracts/{id}
 
@@ -1901,6 +2146,173 @@ HTTP 状态码：201
 ### PUT /api/compute-service-contracts/{id}
 
 ### DELETE /api/compute-service-contracts/{id}
+
+---
+
+## 合同 Excel 导出
+
+三类合同均支持全量导出为 Excel 文件（.xlsx），复用列表筛选条件，不分页。
+
+### GET /api/contracts/export
+
+导出算力租赁合同列表为 Excel。
+
+请求：`GET /api/contracts/export?customer_id=&status=active&search=算力`
+
+查询参数：
+- `customer_id`（string，可选）：按客户过滤
+- `status`（string，可选）：`active | expiring | expired | reclaimed`
+- `search`（string，可选）：按合同名称模糊搜索
+
+响应：`.xlsx` 文件流，表头为 14 列中文标题，含浅蓝色背景和边框。
+
+Content-Type: `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`
+Content-Disposition: `attachment; filename*=UTF-8''...`
+
+Excel 表头：序号 | 所属类型 | 合同名称 | 合同类型 | 所属项目 | 甲方 | 乙方 | 服务开始 | 服务结束 | 合同金额（元） | 合同编号 | 合同内容 | 合同交付要求 | 过程记录
+
+关键字段映射：
+- `合同类型`：billing_model → 月付/季付/年付
+- `所属类型`：固定值 "算力租赁"
+- 所属项目/甲方/乙方/合同内容/合同交付要求/过程记录：算力租赁暂无，导出为空
+
+HTTP 状态码：200
+
+---
+
+### GET /api/satellite-data-contracts/export
+
+导出卫星数据合同列表为 Excel。
+
+请求：`GET /api/satellite-data-contracts/export?customer_id=&search=卫星`
+
+查询参数：
+- `customer_id`（string，可选）
+- `search`（string，可选）
+
+响应：`.xlsx` 文件流，14 列，同上述表头。
+
+关键字段映射：
+- `所属类型`：固定值 "卫星数据"
+
+HTTP 状态码：200
+
+---
+
+### GET /api/compute-service-contracts/export
+
+导出算力服务合同列表为 Excel。
+
+请求：`GET /api/compute-service-contracts/export?customer_id=&search=服务`
+
+查询参数：
+- `customer_id`（string，可选）
+- `search`（string，可选）
+
+响应：`.xlsx` 文件流，14 列，同上述表头。
+
+关键字段映射：
+- `合同类型`：contract_type → 销售/采购
+- `所属类型`：固定值 "算力服务"
+
+HTTP 状态码：200
+
+---
+
+## 算力服务合同 - 服务行 (Service Lines)
+
+### GET /api/compute-service-contracts/{contract_id}/service-lines
+
+获取合同的服务行列表。
+
+请求：`GET /api/compute-service-contracts/{contract_id}/service-lines`
+
+响应：
+```json
+[
+  {
+    "id": "uuid",
+    "contract_id": "uuid",
+    "category": "计算服务",
+    "item_name": "GPU服务器",
+    "specification": null,
+    "vcpu_count": null,
+    "memory_gb": null,
+    "storage_gb": null,
+    "unit": "台",
+    "quantity": "2",
+    "period_months": 12,
+    "unit_price": "1000.00",
+    "total_price": "24000.00",
+    "manual_total_price": null,
+    "sort_order": 0,
+    "service_description": null,
+    "gpu_count": null,
+    "gpu_model": null,
+    "gpu_memory_gb": null,
+    "gpu_tops": null,
+    "created_at": "2026-07-03T17:20:04.579058"
+  }
+]
+```
+
+HTTP 状态码：200
+
+关键字段：
+- `manual_total_price`（decimal|null）：手动覆盖总价，null 表示自动计算
+- `total_price`（decimal）：最终总价（手动值或自动计算结果）
+
+### POST /api/compute-service-contracts/{contract_id}/service-lines
+
+新增服务行。`manual_total_price` 不传则自动计算（quantity × period_months × unit_price），传入则使用手动值。
+
+请求：
+```json
+{
+  "category": "计算服务",
+  "item_name": "GPU服务器",
+  "unit": "台",
+  "quantity": "2",
+  "period_months": 12,
+  "unit_price": "1000.00",
+  "manual_total_price": null,
+  "sort_order": 0
+}
+```
+
+HTTP 状态码：201
+
+### PUT /api/compute-service-contracts/{contract_id}/service-lines/{line_id}
+
+更新服务行。传 `manual_total_price` 为非 null 值则手动覆盖；传 `null` 则清回自动计算；不传该字段则自动重算（基于 quantity/period_months/unit_price）。
+
+请求：
+```json
+{
+  "manual_total_price": "9999.00"
+}
+```
+
+HTTP 状态码：200
+
+### DELETE /api/compute-service-contracts/{contract_id}/service-lines/{line_id}
+
+HTTP 状态码：200
+
+### POST /api/compute-service-contracts/{contract_id}/service-lines/batch
+
+批量保存（全量替换）。`ContractServiceLineCreate` 数组中每项的 `manual_total_price` 同样支持手动覆盖。
+
+请求：
+```json
+{
+  "lines": [
+    {"category": "...", "item_name": "...", "unit": "台", "quantity": "2", "period_months": 12, "unit_price": "1000.00", "manual_total_price": null}
+  ]
+}
+```
+
+HTTP 状态码：201
 
 ---
 
@@ -2058,6 +2470,49 @@ HTTP 状态码：200
 
 ---
 
+### GET /api/attachments/export
+
+一键导出合同所有附件为 ZIP 包。目录结构从数据库动态读取分类和子项名称，不硬编码。
+
+请求：`GET /api/attachments/export?contract_type=compute_leasing&contract_id={contract_id}`
+
+查询参数：
+- `contract_type`（string，必填）：合同类型，枚举 `compute_leasing` | `satellite_data` | `compute_service`
+- `contract_id`（string，必填）：合同 ID
+
+响应：
+- 成功：返回 ZIP 文件流，`Content-Type: application/zip`，`Content-Disposition` 使用 RFC 5987 编码
+- 下载文件名格式：`{合同名称}_附件_{YYYY-MM-DD}.zip`
+
+ZIP 内部目录结构（动态）：
+```
+{合同名称}/
+├── {分类名1}/          ← 来自 AttachmentCategory.name，运行时动态
+│   ├── {子项名1}/       ← 来自 AttachmentItem.name
+│   │   ├── file1.pdf
+│   │   └── file2.docx
+│   └── {子项名2}/
+│       └── report.xlsx
+└── {分类名2}/
+    └── ...
+```
+
+HTTP 状态码：200
+
+错误码：
+- `404`：`{"detail": "合同不存在"}` — contract_type + contract_id 在对应合同表中未找到
+- `404`：`{"detail": "该合同类型下无附件分类，请先在系统配置中配置"}` — AttachmentCategory 表中无该类型的活跃分类
+- `404`：`{"detail": "该合同下无附件文件"}` — 所有分类/子项下均无附件文件
+
+关键行为：
+- 仅包含 `is_active=True` 的分类和子项
+- 无文件的子项自动跳过（不创建空目录）
+- 同一子项下重名文件自动加序号后缀：`file.pdf` → `file(2).pdf`、`file(3).pdf`
+- 文件名含非法字符（`\ / : * ? " < > |`）时自动替换为下划线 `_`
+- 磁盘上已不存在的文件自动跳过
+
+---
+
 ## 附件完成确认
 
 ### GET /api/attachments/status/summary?contract_type={type}&contract_id={id}
@@ -2105,3 +2560,256 @@ HTTP 状态码：200
 ### POST /api/attachments/status/{item_id}/unconfirm
 
 同上，响应 `{"confirmed": false}`。
+
+---
+
+## 项目管理合同 (Project Contract)
+
+### GET /api/project-contracts
+
+获取项目管理合同列表，按公司代码过滤。
+
+请求：`GET /api/project-contracts?company=fengyun&search=&page=1&page_size=20`
+
+响应：
+```json
+{
+  "items": [
+    {
+      "id": "2bf33d62-08d3-44b1-bed6-242d475742b4",
+      "company_code": "fengyun",
+      "name": "风云项目测试合同",
+      "contract_no": "FY-2026-001",
+      "contract_type": "sales",
+      "party_a_name": "甲方公司",
+      "party_b_name": "乙方公司",
+      "amount": "100000.00",
+      "start_date": "2026-01-01",
+      "end_date": "2026-12-31",
+      "related_contract_id": null,
+      "project_name": "风云一号项目",
+      "contract_content": null,
+      "delivery_requirements": null,
+      "process_records": null,
+      "remark": null,
+      "sort_order": 0,
+      "service_lines_count": 0,
+      "created_at": "2026-07-28T09:00:37.731681",
+      "updated_at": "2026-07-28T09:00:37.731700"
+    }
+  ],
+  "total": 1,
+  "page": 1,
+  "page_size": 20
+}
+```
+
+HTTP 状态码：200
+
+关键字段：
+- `company`（query）：公司代码，必填，fengyun/tianshu/qianxing
+- `search`（query）：按合同名称/编号模糊搜索
+- `items[].service_lines_count`（int）：服务行数量
+
+---
+
+### POST /api/project-contracts
+
+创建项目管理合同，支持内嵌 service_lines。
+
+请求：`POST /api/project-contracts`
+```json
+{
+  "company_code": "fengyun",
+  "name": "风云项目测试合同",
+  "contract_no": "FY-2026-001",
+  "contract_type": "sales",
+  "party_a_name": "甲方公司",
+  "party_b_name": "乙方公司",
+  "amount": 100000.00,
+  "start_date": "2026-01-01",
+  "end_date": "2026-12-31",
+  "project_name": "风云一号项目",
+  "service_lines": [
+    {
+      "category": "计算资源",
+      "item_name": "GPU服务器",
+      "specification": {"gpu_count": 8, "gpu_model": "A100", "vcpu": 64, "memory_gb": 512},
+      "unit": "台",
+      "quantity": 10,
+      "period_months": 12,
+      "unit_price": 5000.00
+    }
+  ]
+}
+```
+
+响应：
+```json
+{
+  "id": "2bf33d62-...",
+  "company_code": "fengyun",
+  "name": "风云项目测试合同",
+  "contract_no": "FY-2026-001",
+  "contract_type": "sales",
+  "party_a_name": "甲方公司",
+  "party_b_name": "乙方公司",
+  "amount": "600000.00",
+  "start_date": "2026-01-01",
+  "end_date": "2026-12-31",
+  "related_contract_id": null,
+  "project_name": "风云一号项目",
+  "contract_content": null,
+  "delivery_requirements": null,
+  "process_records": null,
+  "remark": null,
+  "sort_order": 0,
+  "service_lines": [
+    {
+      "id": "...",
+      "contract_id": "...",
+      "category": "计算资源",
+      "item_name": "GPU服务器",
+      "specification": {"gpu_count": 8, "gpu_model": "A100", "vcpu": 64, "memory_gb": 512},
+      "unit": "台",
+      "quantity": "10",
+      "period_months": 12,
+      "unit_price": "5000.00",
+      "total_price": "600000.00",
+      "sort_order": 0,
+      "service_description": null,
+      "created_at": "..."
+    }
+  ],
+  "related_contract": null,
+  "amount_auto_calc": "600000.00",
+  "created_at": "...",
+  "updated_at": "..."
+}
+```
+
+HTTP 状态码：201
+
+关键字段：
+- `amount`：可选，不填则自动 SUM(service_lines.total_price)
+- `service_lines`：可选，创建时内嵌服务行
+- `amount_auto_calc`：自动汇总金额（response only）
+
+---
+
+### GET /api/project-contracts/{id}
+
+获取项目管理合同详情。
+
+请求：`GET /api/project-contracts/2bf33d62-...`
+
+响应格式同 POST 创建响应，HTTP 状态码：200
+
+---
+
+### PUT /api/project-contracts/{id}
+
+更新项目管理合同，支持 service_lines 全量替换。
+
+请求：`PUT /api/project-contracts/2bf33d62-...`
+```json
+{
+  "project_name": "风云一号项目-更新",
+  "service_lines": [...]
+}
+```
+
+响应格式同 POST 创建响应，HTTP 状态码：200
+
+---
+
+### DELETE /api/project-contracts/{id}
+
+删除项目管理合同（级联删除 service_lines）。
+
+请求：`DELETE /api/project-contracts/2bf33d62-...`
+
+响应：
+```json
+{"detail": "合同已删除"}
+```
+
+HTTP 状态码：200
+
+---
+
+### GET /api/project-contracts/export
+
+导出项目管理合同列表为 Excel（14列）。
+
+请求：`GET /api/project-contracts/export?company=fengyun`
+
+响应：Excel 文件流（`.xlsx`），Content-Type: `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`
+
+HTTP 状态码：200
+
+---
+
+### POST /api/project-contracts/{id}/service-lines/batch
+
+批量保存服务行（全量替换：先删后插）。
+
+请求：`POST /api/project-contracts/{id}/service-lines/batch`
+```json
+{
+  "lines": [
+    {
+      "category": "计算资源",
+      "item_name": "GPU服务器",
+      "specification": {"gpu_count": 8, "gpu_model": "A100", "vcpu": 64},
+      "unit": "台",
+      "quantity": 10,
+      "period_months": 12,
+      "unit_price": 5000.00,
+      "sort_order": 0
+    }
+  ]
+}
+```
+
+响应：`[ProjectServiceLineResponse, ...]`，HTTP 状态码：201
+
+---
+
+### GET /api/project-contracts/{id}/service-lines
+
+获取合同的所有服务行列表。
+
+请求：`GET /api/project-contracts/{id}/service-lines`
+
+响应：`[ProjectServiceLineResponse, ...]`，HTTP 状态码：200
+
+---
+
+### POST /api/project-contracts/{id}/service-lines
+
+新增单条服务行。
+
+请求：`POST /api/project-contracts/{id}/service-lines`，body 同 ProjectServiceLineCreate
+
+响应：`ProjectServiceLineResponse`，HTTP 状态码：201
+
+---
+
+### PUT /api/project-contracts/{id}/service-lines/{line_id}
+
+更新单条服务行。
+
+请求：`PUT /api/project-contracts/{id}/service-lines/{line_id}`，body 同 ProjectServiceLineUpdate
+
+响应：`ProjectServiceLineResponse`，HTTP 状态码：200
+
+---
+
+### DELETE /api/project-contracts/{id}/service-lines/{line_id}
+
+删除单条服务行。
+
+请求：`DELETE /api/project-contracts/{id}/service-lines/{line_id}`
+
+响应：`{"detail": "服务行已删除"}`，HTTP 状态码：200

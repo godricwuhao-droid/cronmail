@@ -22,6 +22,7 @@ import {
   Loading,
   Document,
   Folder,
+  WarningFilled,
 } from '@element-plus/icons-vue'
 import {
   getAttachments,
@@ -170,6 +171,8 @@ async function handleUnconfirm(item: AttachmentItem) {
 // 上传
 // ============================================================
 const uploadRefs = ref<Record<string, any>>({})
+const uploadProgressMap = ref<Record<string, number>>({}) // itemId → 百分比
+const uploadErrorMap = ref<Record<string, string>>({})     // itemId → 错误信息
 
 function handleBeforeUpload(file: File, itemId: string) {
   // 自动上传
@@ -179,22 +182,38 @@ function handleBeforeUpload(file: File, itemId: string) {
 
 async function handleUpload(file: File, itemId: string) {
   uploadingMap.value[itemId] = true
+  uploadProgressMap.value[itemId] = 0
+  uploadErrorMap.value[itemId] = ''
+
   try {
     const formData = new FormData()
     formData.append('files', file)
-    // 通过 URL 参数传递 contract_type, contract_id, item_id
     const url = `/attachments/upload?contract_type=${contractType.value}&contract_id=${contractId.value}&item_id=${itemId}`
-    // 需要直接使用 axios 实例以支持 FormData
     const { default: request } = await import('@/api')
     await request.post(url, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 600_000, // 10 分钟超时（大文件）
+      onUploadProgress: (progressEvent) => {
+        if (progressEvent.total) {
+          const pct = Math.round((progressEvent.loaded * 100) / progressEvent.total)
+          uploadProgressMap.value[itemId] = pct
+        }
+      },
     })
     ElMessage.success(`文件 "${file.name}" 上传成功`)
+    uploadProgressMap.value[itemId] = 100
     fetchAttachments()
-  } catch {
-    // 错误已统一处理
+  } catch (err: any) {
+    const msg = err?.response?.data?.detail || err?.message || '上传失败'
+    uploadErrorMap.value[itemId] = msg
+    ElMessage.error(`上传失败：${msg}`)
   } finally {
     uploadingMap.value[itemId] = false
+    // 3 秒后清除进度和错误（让用户看到最终状态）
+    setTimeout(() => {
+      delete uploadProgressMap.value[itemId]
+      delete uploadErrorMap.value[itemId]
+    }, 3000)
   }
 }
 
@@ -203,6 +222,16 @@ async function handleUpload(file: File, itemId: string) {
 // ============================================================
 function handleDownload(file: AttachmentFile) {
   window.open(`/api/attachments/${file.id}/download`, '_blank')
+}
+
+// ============================================================
+// 一键导出附件 ZIP
+// ============================================================
+function handleExportAllAttachments() {
+  window.open(
+    `/api/attachments/export?contract_type=${contractType.value}&contract_id=${contractId.value}`,
+    '_blank',
+  )
 }
 
 // ============================================================
@@ -549,6 +578,9 @@ onMounted(() => {
         <h1 class="title-text">附件管理</h1>
         <div class="title-sub">{{ CONTRACT_TYPE_LABEL[contractType] || contractType }}合同</div>
       </div>
+      <el-button :icon="Download" @click="handleExportAllAttachments" :disabled="loading">
+        一键导出附件
+      </el-button>
     </div>
 
     <!-- 空状态 -->
@@ -671,13 +703,23 @@ onMounted(() => {
               class="upload-drag-wrap"
             >
               <div class="upload-zone" :class="{ 'is-uploading': uploadingMap[selectedItem!.item_id] }">
-                <template v-if="!uploadingMap[selectedItem!.item_id]">
+                <template v-if="!uploadingMap[selectedItem!.item_id] && uploadErrorMap[selectedItem!.item_id]">
+                  <el-icon class="upload-icon" style="color: #f56c6c"><WarningFilled /></el-icon>
+                  <span class="upload-text" style="color: #f56c6c">{{ uploadErrorMap[selectedItem!.item_id] }}</span>
+                </template>
+                <template v-else-if="!uploadingMap[selectedItem!.item_id]">
                   <el-icon class="upload-icon"><Plus /></el-icon>
                   <span class="upload-text">拖拽文件到此处 或 点击上传</span>
                 </template>
                 <template v-else>
                   <el-icon class="upload-icon is-loading"><Loading /></el-icon>
-                  <span class="upload-text">上传中...</span>
+                  <span class="upload-text">上传中 {{ uploadProgressMap[selectedItem!.item_id] ?? 0 }}%</span>
+                  <el-progress
+                    :percentage="uploadProgressMap[selectedItem!.item_id] ?? 0"
+                    :show-text="false"
+                    :stroke-width="6"
+                    style="width: 80%; max-width: 300px; margin-top: 12px"
+                  />
                 </template>
               </div>
             </el-upload>
