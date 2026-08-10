@@ -1,5 +1,380 @@
 # CronMail 后端变更日志
 
+## 2026-08-09 (修改) — 回款列表 API 返回文件 filename 和 mime_type
+
+| 日期 | 类型 | 变更内容 | 影响文件/范围 | 关联任务 | 备注 |
+|------|------|---------|-------------|---------|------|
+| 2026-08-09 | 修改 | 回款列表 `GET /{contract_id}/payments` 响应新增 `receipt_filename`/`receipt_mime_type`/`invoice_filename`/`invoice_mime_type` | backend/src/project/schemas.py, services.py, api.py | - | 批量查询 Attachment 表，避免 N+1 |
+
+### 修改
+- **`PaymentResponse` Schema 新增 4 个字段**
+  - 影响文件：`backend/src/project/schemas.py`
+  - 新增字段：`receipt_filename: Optional[str]`、`receipt_mime_type: Optional[str]`、`invoice_filename: Optional[str]`、`invoice_mime_type: Optional[str]`
+  - 所有新字段默认 `None`，向后兼容
+
+- **`list_payments` 服务函数重构**
+  - 影响文件：`backend/src/project/services.py`
+  - 变更内容：
+    1. 返回类型从 `list[ProjectContractPayment]` (ORM) 改为 `list[dict]`
+    2. 查询回款记录后，收集所有 `receipt_file_id` / `invoice_file_id`，批量查询 `Attachment` 表
+    3. 将 `filename` 和 `mime_type` 附加到每条记录的 dict 中
+    4. 文件不存在时对应字段为 `None`
+  - 调用方适配：`get_payment_summary` 中 `p.amount` → `p["amount"]`
+
+- **API 文档更新**
+  - 影响文件：`docs/backend/api.md`
+  - `GET /api/project-contracts/{contract_id}/payments` 响应示例更新，新增文件名字段的说明
+
+---
+
+## 2026-08-09 (修复) — _ensure_payment_attachment_items 中 AttachmentItem.code 字段不存在导致 500 错误
+
+| 日期 | 类型 | 变更内容 | 影响文件/范围 | 关联任务 | 备注 |
+|------|------|---------|-------------|---------|------|
+| 2026-08-09 | 修复 | _ensure_payment_attachment_items 中 AttachmentItem.code 字段不存在导致 500 错误 | backend/src/project/api.py | TASK-017-11 | |
+
+### 修复
+- **`_ensure_payment_attachment_items` 去掉 `AttachmentItem.code` 引用**
+  - 影响文件：`backend/src/project/api.py`
+  - 变更内容：`AttachmentItem` 模型没有 `code` 字段，将查询和创建中的 `code` 参数移除，改用 `name` 字段区分"回执单"和"电子发票"：
+    - 查询回执单子项：`AttachmentItem.code == "receipt"` → `AttachmentItem.name == "回执单"`
+    - 查询发票子项：`AttachmentItem.code == "einvoice"` → `AttachmentItem.name == "电子发票"`
+    - 创建子项时去掉 `code="receipt"` 和 `code="einvoice"` 参数
+  - 根因：`AttachmentItem` 模型（`attachment/models.py`）没有 `code` 字段，调用 `AttachmentItem.code` 抛出 `AttributeError`，500 错误
+
+---
+
+## 2026-08-09 (修复) — parse_payment_receipt 修复未定义函数导致运行时崩溃
+
+| 日期 | 类型 | 变更内容 | 影响文件/范围 | 关联任务 | 备注 |
+|------|------|---------|-------------|---------|------|
+| 2026-08-09 | 修复 | parse_payment_receipt 修复未定义函数 _pdf_to_images_b64/_ocr_prompt 导致运行时崩溃 | backend/src/contract_parser/services.py | TASK-017-9 | |
+
+### 修复
+- **`parse_payment_receipt` 替换两个不存在的函数调用**
+  - 影响文件：`backend/src/contract_parser/services.py`
+  - 变更内容：
+    1. `_pdf_to_images_b64(reader, dpi=200)` → `extract_images_from_pdf(pdf_bytes, max_pages=10)`：使用已存在的 `extract_images_from_pdf` 函数（接受 file_bytes 参数，返回 base64 字符串列表），max_pages=10 足以覆盖回款凭证（通常 1-2 页）。同时移除了多余的 `PdfReader` 导入和调用。
+    2. `_ocr_prompt(batch_num, start_page, end_page, total_batches)` → `get_ocr_batch_prompt(batch_num, total_batches, start_page, end_page)`：使用 prompts.py 中已存在的 `get_ocr_batch_prompt` 函数，注意参数顺序不同（`total_batches` 在第 2 位而非第 4 位）。
+  - 根因：两个函数从未定义过，`parse_payment_receipt` 在运行时直接抛出 `NameError`，导致回款凭证解析完全不可用。
+  - 备注：`get_ocr_batch_prompt` 的 prompt 文本是通用的（"请输出第 X-Y 页的文字内容"），对回款凭证场景也适用。
+
+---
+
+## 2026-08-07 (新增) — 附件分类迁移脚本 migrate_attachment_categories.py
+
+| 日期 | 类型 | 变更内容 | 影响文件/范围 | 关联任务 | 备注 |
+|------|------|---------|-------------|---------|------|
+| 2026-08-07 | 新增 | 附件分类迁移脚本 migrate_attachment_categories.py | backend/migrate_attachment_categories.py | TASK-017-5 | ADR-017 |
+
+### 新增
+- **一次性迁移脚本 `migrate_attachment_categories.py`**
+  - 影响文件：`backend/migrate_attachment_categories.py`
+  - 用途：确保每个 project_type 都有独立的附件分类（contract_material / delivery_material / process_material / payment_receipt）
+  - 迁移策略：
+    1. 从 `project_contract` 表获取所有不同的 `project_type`
+    2. 查找 `project_type IS NULL` 的兜底分类，按 code 分组
+    3. 重复兜底分类：每个 code 保留一条，其余放入"可分配池"
+    4. 对每个 project_type + 每个目标 code：
+       - 已存在 → 跳过
+       - 可分配池有 → 更新 project_type（移动）
+       - 无可分配 → 从模板创建新分类
+  - 幂等设计：可重复执行，已存在的分类不会重复创建
+  - 注意：不修改 AttachmentItem、Attachment、AttachmentStatus 的任何记录
+  - 执行方式：`cd /data/CronMail/backend && python migrate_attachment_categories.py`
+
+---
+
+## 2026-08-07 (修改) — list_categories 去掉空字符串查询兜底分类逻辑
+
+| 日期 | 类型 | 变更内容 | 影响文件/范围 | 关联任务 | 备注 |
+|------|------|---------|-------------|---------|------|
+| 2026-08-07 | 修改 | list_categories 去掉空字符串查询兜底分类逻辑 | backend/src/attachment/services.py | TASK-017-2 | ADR-017 |
+
+### 修改
+- **`list_categories` 去掉 `project_type=''` 查询 `project_type IS NULL` 兜底逻辑**
+  - 影响文件：`backend/src/attachment/services.py`
+  - 变更内容：
+    1. 原逻辑：`project_type` 为 `None` → 返回所有分类；`project_type=''` → 只返回 `project_type IS NULL` 的兜底分类；`project_type='数据服务'` → 返回匹配专属分类
+    2. 新逻辑：`project_type` 为 `None` 或空字符串 → 返回所有分类（不做 project_type 过滤）；`project_type='数据服务'` → 只返回 `project_type='数据服务'` 的分类
+  - 影响：`list_categories('project', '')` 行为变更：从"只返回兜底分类"变为"返回所有 project 分类"
+  - 备注：`get_attachment_list` 和 `get_summary` 不受影响（它们没有兜底逻辑）
+
+- **`init_default_categories` 去掉 project 类型默认兜底分类**
+  - 影响文件：`backend/src/attachment/services.py`
+  - 变更内容：从 `DEFAULT_CATEGORIES` 列表中删除 `contract_type: "project"` 的条目（含合同材料/交付材料/过程材料三类），不再为 project 类型创建 NULL project_type 的兜底分类
+  - 原因：project 类型的附件分类应严格按 project_type 隔离，不再需要兜底分类
+  - 备注：compute_leasing/satellite_data/compute_service 三种合同类型的默认分类保持不变
+
+---
+
+## 2026-08-07 (修改) — 回款 AI 解析支持双文件金额匹配 + 确认端点
+
+| 日期 | 类型 | 变更内容 | 影响文件/范围 | 关联任务 | 备注 |
+|------|------|---------|-------------|---------|------|
+| 2026-08-07 | 修改 | `parse_payment_receipt` 端点改造为双文件金额匹配 | src/project/api.py | - | 回执单+发票都走 AI 解析 |
+| 2026-08-07 | 新增 | `PaymentParseConfirmRequest` schema | src/project/schemas.py | - | 确认金额请求体 |
+| 2026-08-07 | 新增 | `POST /{contract_id}/payments/parse/confirm` 端点 | src/project/api.py | - | 用户确认金额后创建回款 |
+| 2026-08-07 | 修改 | _ensure_payment_attachment_items 改为按 project_type 创建专属分类 | backend/src/project/api.py | TASK-017-3 | ADR-017 |
+
+### 修改
+- **`POST /api/project-contracts/{contract_id}/payments/parse` 端点改造**
+  - 影响文件：`backend/src/project/api.py`
+  - 变更：
+    - 回执单和发票两个文件都调用 `parse_payment_receipt()` 进行 AI 解析
+    - 金额匹配逻辑：误差 ≤ 1% 或 ≤ 100 元视为匹配成功
+    - 匹配成功 → 自动创建回款记录（取回执单金额为准）
+    - 匹配失败 → 返回 `matched: false` + 两个金额，不创建回款
+    - 仅一个文件 → 直接用该金额创建回款
+  - 响应结构变更：不再返回 `extracted` / `attachment_id`，改为返回 `matched` / `receipt_amount` / `invoice_amount` / `final_amount` / `payment` / `receipt_file_id` / `invoice_file_id`
+  - ⚠️ Breaking Change：响应结构变化
+
+### 新增
+- **`POST /api/project-contracts/{contract_id}/payments/parse/confirm` 端点**
+  - 影响文件：`backend/src/project/api.py`, `backend/src/project/schemas.py`
+  - 请求体：`PaymentParseConfirmRequest`（receipt_file_id 必填, invoice_file_id 可选, amount 必填 gt=0, payment_date 可选）
+  - 功能：前端在 parse 端点返回 `matched: false` 后弹窗让用户确认，确认后调用此接口用已有附件创建回款记录
+  - 响应：`PaymentResponse`，HTTP 状态码 201
+
+- **辅助函数**
+  - `_extract_amount_and_date()`：从 AI 解析结果提取金额和日期
+  - `_amounts_match()`：金额匹配判断（误差 ≤ 1% 或 ≤ 100 元）
+  - `_ensure_payment_attachment_items()`：确保回款凭证附件分类存在
+
+## 2026-08-06 (新增) — project_type 独立管理表 + CRUD API
+
+| 日期 | 类型 | 变更内容 | 影响文件/范围 | 关联任务 | 备注 |
+|------|------|---------|-------------|---------|------|
+| 2026-08-06 | 新增 | `project_type` 独立表 + CRUD API | src/project/models.py, schemas.py, services.py, api.py, main.py | - | 替代 project_contract.project_type 字符串字段 |
+| 2026-08-06 | 修改 | `ProjectContractCreate.project_type` 改为必填 | src/project/schemas.py | - | ⚠️ Breaking Change |
+| 2026-08-06 | 新增 | Alembic 迁移 `019_add_project_type_table` | alembic/versions/019_add_project_type_table.py | - | 创建 project_type 表 |
+| 2026-08-06 | 新增 | 数据迁移脚本 `migrate_project_types.py` | backend/migrate_project_types.py | - | 从现有数据提取 project_type 写入新表 |
+
+### 新增
+- **`project_type` 独立管理表**
+  - 影响文件：`backend/src/project/models.py`
+  - 字段：id (UUID), name (唯一), sort_order, is_active (软删除), created_at, updated_at
+  - 用途：统一管理项目类型（如「算力服务合同」「卫星数据合同」），替代 project_contract 表中存字符串的方式
+
+- **ProjectType CRUD API**
+  - 影响文件：`backend/src/project/api.py`, `backend/src/project/services.py`
+  - 路由前缀：`/api/project-types`（独立 router `project_type_router`）
+  - 端点：
+    - `GET /api/project-types` — 获取所有活跃项目类型（按 sort_order 排序）
+    - `POST /api/project-types` — 创建项目类型（201）
+    - `PUT /api/project-types/{type_id}` — 更新项目类型
+    - `DELETE /api/project-types/{type_id}` — 软删除项目类型（204）
+
+- **Alembic 迁移 `019_add_project_type_table`**
+  - 影响文件：`backend/alembic/versions/019_add_project_type_table.py`
+  - 创建 `project_type` 表 + name 唯一约束
+
+- **数据迁移脚本 `migrate_project_types.py`**
+  - 影响文件：`backend/migrate_project_types.py`
+  - 从 `project_contract.project_type` 和 `attachment_category.project_type` 提取不重复值写入 `project_type` 表
+  - 幂等设计：已存在的 name 跳过
+
+### 修改
+- ⚠️ **`ProjectContractCreate.project_type` 改为必填**
+  - 影响文件：`backend/src/project/schemas.py`
+  - 变更：`Optional[str] = Field(None, ...)` → `str = Field(..., ...)`
+  - `ProjectContractUpdate.project_type` 保持 Optional（编辑时可不传）
+
+- **`main.py` 注册 `project_type_router`**
+  - 影响文件：`backend/main.py`
+  - 新增 `app.include_router(project_type_router)`
+
+---
+
+## 2026-08-05 (修复) — _get_contract_name 新增 project 类型 + 附件数据迁移
+
+| 日期 | 类型 | 变更内容 | 影响文件/范围 | 关联任务 | 备注 |
+|------|------|---------|-------------|---------|------|
+| 2026-08-05 | 修复 | `_get_contract_name` 新增 `project` 分支 | src/attachment/api.py | - | ZIP 导出 project 合同不再 404 |
+| 2026-08-05 | 新增 | 一次性数据迁移脚本 `fix_project_attachments.py` | backend/fix_project_attachments.py | - | 将合同 d00fbd55 附件从 compute_service 迁移到 project |
+
+### 修复
+- **`_get_contract_name` 新增 project 类型支持**
+  - 影响文件：`backend/src/attachment/api.py`
+  - 变更内容：在 `_get_contract_name` 函数中新增 `elif contract_type == "project"` 分支，查询 `ProjectContract` 表获取合同名称
+  - 根因：该函数只处理了 compute_leasing/satellite_data/compute_service 三种类型，project 类型走 ZIP 导出时查不到合同名返回 404
+  - 备注：ZIP 导出 `GET /api/attachments/export?contract_type=project&contract_id=...` 现在可正常工作
+
+### 新增
+- **一次性数据迁移脚本 `fix_project_attachments.py`**
+  - 影响文件：`backend/fix_project_attachments.py`
+  - 用途：将合同 `d00fbd55-c679-49c9-a2a8-14864c62a0c1` 的附件记录从 `compute_service` 迁移到 `project` 类型
+  - 迁移内容：
+    1. `attachment` 表：`contract_type` → `project`，`item_id` → project「合同扫描件」的 item_id，`file_path` 中 `compute_service/` → `project/`
+    2. `attachment_status` 表：同上（contract_type + item_id）
+    3. NFS 文件：`/app/uploads/compute_service/d00fbd55-.../` → `/app/uploads/project/d00fbd55-.../`
+  - 幂等设计：只处理 `contract_type='compute_service'` 且 `item_id` 匹配旧值的记录，重复执行不会出错
+  - 执行方式：`kubectl exec -n cronmail deploy/cronmail-backend-api -- python /app/fix_project_attachments.py`
+
+---
+
+## 2026-08-05 (修复) — 附件服务 project 类型 project_type 过滤
+
+| 日期 | 类型 | 变更内容 | 影响文件/范围 | 关联任务 | 备注 |
+|------|------|---------|-------------|---------|------|
+| 2026-08-05 | 修复 | `get_attachment_list` / `get_summary` 新增 project_type 过滤 | src/attachment/services.py, api.py | - | project 类型合同按 project_type 过滤分类，含 NULL 兜底 |
+
+### 修复
+- **附件服务 project 类型 project_type 过滤**
+  - 影响文件：`backend/src/attachment/services.py`, `backend/src/attachment/api.py`
+  - 变更内容：
+    1. `get_attachment_list` 新增 `project_type: Optional[str] = None` 参数，当 `contract_type == "project"` 且 `project_type` 有值时，按 `AttachmentCategory.project_type` 过滤（匹配指定值或 NULL 兜底）
+    2. `get_summary` 同样新增 `project_type` 参数和过滤逻辑
+    3. `GET /api/attachments` 和 `GET /api/attachments/status/summary` 新增 `project_type` 查询参数
+  - 根因：`list_categories` 已有 project_type 过滤，但 `get_attachment_list` 和 `get_summary` 两个函数在查询 AttachmentCategory 时只按 contract_type 过滤，未按 project_type 过滤，导致 project 类型合同无法正确区分不同项目类型的附件分类
+  - 备注：其他合同类型（compute_leasing/satellite_data/compute_service）不受影响，project_type 为 None 或 contract_type 不是 "project" 时行为与原来完全一致
+
+---
+
+## 2026-08-05 (修复) — project API 详情/列表响应缺失字段
+
+| 日期 | 类型 | 变更内容 | 影响文件/范围 | 关联任务 | 备注 |
+|------|------|---------|-------------|---------|------|
+| 2026-08-05 | 修复 | `_build_detail_response` / `_build_list_item` 补齐 5 个缺失字段 | src/project/api.py | - | responsible_person, business_person, party_a_contact, party_b_contact, project_type |
+
+### 修复
+- **project API 详情和列表响应补齐缺失字段**
+  - 影响文件：`backend/src/project/api.py`
+  - 变更内容：
+    1. `_build_detail_response` 新增 5 个字段：`project_type`、`responsible_person`、`business_person`、`party_a_contact`、`party_b_contact`
+    2. `_build_list_item` 新增 5 个字段：`project_type`、`responsible_person`、`business_person`、`party_a_contact`、`party_b_contact`
+  - 根因：Schema（`schemas.py`）中已定义这 5 个字段，但 `api.py` 两个构建函数未传递，导致响应中缺失
+  - 关联任务：project API 字段补齐
+
+---
+
+## 2026-08-05 (部署) — 后端镜像构建部署 (第五次)
+
+### 部署
+- **后端镜像构建 + K8s 滚动更新（全量）**
+  - 影响文件：`Dockerfile.backend`
+  - 变更内容：
+    1. Docker 构建 `harbor.xhwltech.com/xhcloud/cronmail-backend:latest`（镜像 ID: `06d383b58929`）
+    2. 推送镜像到 Harbor（digest: `sha256:c36af7b0d83a5785fe8eb98678f215568ca188425fc22a342460af6e1d38459e`）
+    3. 滚动重启三个 Deployment：
+       - `cronmail-backend-api` — successfully rolled out
+       - `cronmail-backend-worker` — successfully rolled out
+       - `cronmail-backend-beat` — successfully rolled out
+    4. 所有 Pod 状态 Running（1/1 Ready）
+  - 构建代理：`http://192.168.180.251:7890`
+  - 关联任务：后端构建部署
+
+---
+
+## 2026-08-05 (部署) — 后端镜像构建部署 (第四次)
+
+### 部署
+- **后端镜像构建 + K8s 滚动更新（全量）**
+  - 影响文件：`Dockerfile.backend`
+  - 变更内容：
+    1. Docker 构建 `harbor.xhwltech.com/xhcloud/cronmail-backend:latest`（镜像 ID: `83c38f75c6f2`）
+    2. 推送镜像到 Harbor（digest: `sha256:3c480818308c882443c877e799d05f43af424b2e9a99eee63a1eea2b73355f28`）
+    3. 滚动重启三个 Deployment：
+       - `cronmail-backend-api` — successfully rolled out
+       - `cronmail-backend-worker` — successfully rolled out
+       - `cronmail-backend-beat` — successfully rolled out
+    4. 所有 Pod 状态 Running（1/1 Ready）
+  - 构建代理：`http://192.168.180.251:7890`
+  - 关联任务：后端构建部署
+
+---
+
+## 2026-08-05 (部署) — 后端镜像构建部署 (第三次)
+
+### 部署
+- **后端镜像构建 + K8s 滚动更新（全量）**
+  - 影响文件：`Dockerfile.backend`
+  - 变更内容：
+    1. Docker 构建 `harbor.xhwltech.com/xhcloud/cronmail-backend:latest`（镜像 ID: `2fb7744b34e9`）
+    2. 推送镜像到 Harbor（digest: `sha256:f83f1f856f489510d0d6670817f8e77f31be46d6ec6270ab668df34ed7a9efad`）
+    3. 滚动重启三个 Deployment：
+       - `cronmail-backend-api` — successfully rolled out
+       - `cronmail-backend-worker` — successfully rolled out
+       - `cronmail-backend-beat` — successfully rolled out
+    4. 所有 Pod 状态 Running（1/1 Ready）
+  - 构建代理：`http://192.168.180.251:7890`
+  - 关联任务：后端构建部署
+
+---
+
+## 2026-08-05 (部署) — 后端镜像构建部署 (第二次)
+
+### 部署
+- **后端镜像构建 + K8s 滚动更新（全量）**
+  - 影响文件：`Dockerfile.backend`
+  - 变更内容：
+    1. Docker 构建 `harbor.xhwltech.com/xhcloud/cronmail-backend:latest`（镜像 ID: `169f1ba803d3`）
+    2. 推送镜像到 Harbor（digest: `sha256:8eb98f86352763b294d339ae620ed5a4a646912d0f19fa41d52e0aceeb1d0c23`）
+    3. 滚动重启三个 Deployment：
+       - `cronmail-backend-api` — successfully rolled out
+       - `cronmail-backend-worker` — successfully rolled out
+       - `cronmail-backend-beat` — successfully rolled out
+    4. 所有 Pod 状态 Running（1/1 Ready）
+  - 构建代理：`http://192.168.180.251:7890`
+  - 关联任务：后端构建部署
+
+---
+
+## 2026-08-05 (部署) — 后端镜像构建部署
+
+### 部署
+- **后端镜像构建 + K8s 滚动更新**
+  - 影响文件：`Dockerfile.backend`
+  - 变更内容：
+    1. Docker 构建 `harbor.xhwltech.com/xhcloud/cronmail-backend:latest`（镜像 ID: `269065378f2f`）
+    2. 推送镜像到 Harbor（digest: `sha256:2a72b2da2161160f0fc717b208ae486a9c223eaf73bbd9415cd8350960549a7e`）
+    3. 滚动重启三个 Deployment：
+       - `cronmail-backend-api` — successfully rolled out
+       - `cronmail-backend-worker` — successfully rolled out
+       - `cronmail-backend-beat` — successfully rolled out
+    4. 所有 Pod 状态 Running（1/1 Ready）
+  - 构建代理：`http://192.168.180.251:7890`
+  - 关联任务：后端构建部署
+
+---
+
+## 2026-08-05 (清理) — 清理冗余 Prompt 配置 + 修复 Vision Prompt 缺失字段
+
+| 日期 | 类型 | 变更内容 | 影响文件/范围 | 关联任务 | 备注 |
+|------|------|---------|-------------|---------|------|
+| 2026-08-05 | 删除 | 删除冗余 prompts 目录 | backend/prompts/ (整个目录) | TASK-001 | 10 个文件，代码已从 prompts.py 读取 |
+| 2026-08-05 | 删除 | 删除 K8s ConfigMap cronmail-prompts | k8s/configmap.yaml | TASK-001 | 保留 cronmail-config |
+| 2026-08-05 | 删除 | 删除 K8s backend-api.yaml 中 prompts 挂载 | k8s/backend-api.yaml | TASK-001 | volumeMount + volume |
+| 2026-08-05 | 修改 | Vision project prompt 补全 contract_type/project_type/process_records | backend/src/contract_parser/prompts.py | TASK-001 | 新增 3 个字段 + 特别提示 |
+| 2026-08-05 | 修改 | VISION_SYSTEM_PROMPT 新增合同类型和执行过程提示 | backend/src/contract_parser/prompts.py | TASK-001 | 增加第 5/6 条核心任务 |
+
+### 删除
+- **冗余 prompt 存储清理**
+  - 影响文件：`backend/prompts/`（整个目录，含 10 个文件）、`k8s/configmap.yaml`、`k8s/backend-api.yaml`
+  - 变更内容：
+    1. 删除 `backend/prompts/` 目录及其下所有文件（system_prompt.txt、fields_*.json、vision_system_prompt.txt、vision_fields_*.json）
+    2. 删除 `k8s/configmap.yaml` 中整个 `cronmail-prompts` ConfigMap
+    3. 删除 `k8s/backend-api.yaml` 中 prompts 的 volumeMount 和 volume 定义
+  - 原因：实际代码只从 `backend/src/contract_parser/prompts.py` 硬编码读取，其他两处冗余
+  - 关联任务：TASK-001
+
+### 修改
+- **Vision project prompt 补全字段**
+  - 影响文件：`backend/src/contract_parser/prompts.py`
+  - 变更内容：
+    1. `VISION_FIELD_TEMPLATES["project"]` 返回格式 JSON 中新增三个字段：
+       - `contract_type`：`"sales"` 或 `"procurement"`，无法判断填 null
+       - `project_type`：自由文本，如"算力服务合同"
+       - `process_records`：执行过程记录、变更记录，无则填 null
+    2. "特别注意"部分增加三个字段的提取提示
+    3. `VISION_SYSTEM_PROMPT` 新增第 5/6 条核心任务：
+       - 5. 注意识别合同的销售/采购性质，以及合同封面或首部的合同类型描述
+       - 6. 留意合同中关于执行过程、变更记录等过程性内容
+  - 其他 contract_type（compute_service、compute_leasing、satellite_data）的 prompt 未修改
+  - 关联任务：TASK-001
+
+---
+
 ## 2026-07-30 (新增) — SSE 流式逐页推送 + 图片 base64 + Prompt 优化
 
 | 日期 | 类型 | 变更内容 | 影响文件/范围 | 关联任务 | 备注 |

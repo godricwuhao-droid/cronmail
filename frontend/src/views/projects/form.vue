@@ -11,16 +11,17 @@
  *  - 关联合同选项来自同公司 project 合同
  *  - 智能解析 contract_type=project，使用 SSE 流式
  */
-import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
-import { Delete, MagicStick, Loading, Document, List, Close } from '@element-plus/icons-vue'
+import { Delete, MagicStick, Loading, Document, List, Close, UploadFilled } from '@element-plus/icons-vue'
 // 智能解析使用 fetch() 调用 SSE 流，不需要 request 模块
 import {
   createProjectContract,
   getProjectContract,
   updateProjectContract,
   listProjectContracts,
+  getProjectTypes,
   type ProjectContractCreatePayload,
   type ProjectContractDetail,
   type ProjectContractUpdatePayload,
@@ -29,29 +30,10 @@ import {
   type ProjectServiceLine,
   type ProjectSpecification,
   type ProjectContractItem,
+  type ProjectTypeResponse,
   COMPANY_MAP,
 } from '@/api/modules/project'
-
-// ============================================================
-// 中文字段标签映射
-// ============================================================
-const FIELD_LABELS: Record<string, string> = {
-  name: '合同名称',
-  contract_no: '合同编号',
-  party_a_name: '甲方',
-  party_b_name: '乙方',
-  amount: '合同金额',
-  start_date: '服务开始',
-  end_date: '服务结束',
-  project_name: '所属项目',
-  contract_content: '合同内容',
-  delivery_requirements: '交付要求',
-  process_records: '过程记录',
-  remark: '备注',
-  contract_type: '合同类型',
-  sort_order: '序号',
-  service_lines: '服务清单',
-}
+import { useGlobalDrop } from '@/composables/useGlobalDrop'
 
 const route = useRoute()
 const router = useRouter()
@@ -89,6 +71,10 @@ interface ProjectContractForm {
   contract_content: string
   delivery_requirements: string
   process_records: string
+  responsible_person: string
+  business_person: string
+  party_a_contact: string
+  party_b_contact: string
   sort_order: number
 }
 
@@ -108,6 +94,10 @@ const form = reactive<ProjectContractForm>({
   contract_content: '',
   delivery_requirements: '',
   process_records: '',
+  responsible_person: '',
+  business_person: '',
+  party_a_contact: '',
+  party_b_contact: '',
   sort_order: 0,
 })
 
@@ -125,6 +115,17 @@ async function loadRelatedContracts() {
       : res.items
   } catch {
     ElMessage.warning('关联合同列表加载失败')
+  }
+}
+
+// 项目类型下拉选项
+const projectTypeOptions = ref<ProjectTypeResponse[]>([])
+
+async function loadProjectTypes() {
+  try {
+    projectTypeOptions.value = await getProjectTypes()
+  } catch {
+    // 静默失败，下拉为空
   }
 }
 
@@ -174,6 +175,14 @@ const serviceLines = ref<ServiceLineForm[]>([])
 // ============================================================
 const rawTables = ref<any[]>([])
 const resourceSummary = ref<any>(null)
+// 可编辑的 stats（用户可手动修改 Agent 计算值）
+const editableStats = reactive<Record<string, number | null>>({
+  vcpu: null,
+  memory_gb: null,
+  storage_gb: null,
+  gpu_count: null,
+  gpu_tops: null,
+})
 
 const STATS_LABELS: Record<string, string> = {
   vcpu: 'vCPU',
@@ -181,17 +190,59 @@ const STATS_LABELS: Record<string, string> = {
   storage_gb: '存储(GB)',
   gpu_count: 'GPU(卡)',
   gpu_tops: '算力(TOPS)',
-  bandwidth_mbps: '带宽(Mbps)',
-  rack_count: '机柜(个)',
-  ip_count: 'IP(个)',
 }
 
+const STATS_KEYS = ['vcpu', 'memory_gb', 'storage_gb', 'gpu_count', 'gpu_tops']
+
 const statsDisplay = computed(() => {
-  const stats = resourceSummary.value?.stats || {}
-  return Object.entries(stats)
-    .filter(([_, v]) => v && Number(v) > 0)
-    .map(([k, v]) => ({ label: STATS_LABELS[k] || k, value: v }))
+  return STATS_KEYS
+    .filter(k => editableStats[k] !== null && Number(editableStats[k]) > 0)
+    .map(k => ({ key: k, label: STATS_LABELS[k], value: editableStats[k] }))
 })
+
+function buildRawTablesJson(): string | undefined {
+  const data: any = { tables: rawTables.value }
+  const stats: Record<string, number> = {}
+  for (const key of STATS_KEYS) {
+    if (editableStats[key] !== null) stats[key] = editableStats[key] as number
+  }
+  if (Object.keys(stats).length > 0) data.resource_summary = { stats }
+  return rawTables.value.length > 0 ? JSON.stringify(data) : undefined
+}
+
+// ============================================================
+// 表格单元格编辑 & 行操作
+// ============================================================
+function updateTableRow(table: any, rowIndex: number, colIndex: number, value: string) {
+  if (!table.rows || !Array.isArray(table.rows)) {
+    table.rows = []
+  }
+  if (!table.rows[rowIndex]) {
+    table.rows[rowIndex] = {}
+  }
+  table.rows[rowIndex][colIndex] = value
+  // 触发响应式更新
+  table.rows = [...table.rows]
+}
+
+function addTableRow(table: any) {
+  if (!table.rows) table.rows = []
+  const newRow: Record<number, string> = {}
+  for (let i = 0; i < (table.headers?.length || 1); i++) {
+    newRow[i] = ''
+  }
+  table.rows = [...table.rows, newRow]
+}
+
+function deleteTableRow(table: any) {
+  if (!table.rows || table.rows.length === 0) return
+  table.rows = [...table.rows.slice(0, -1)]
+}
+
+function deleteTableRowAt(table: any, rowIndex: number) {
+  if (!table.rows) return
+  table.rows = [...table.rows.slice(0, rowIndex), ...table.rows.slice(rowIndex + 1)]
+}
 
 // 服务行操作（简化版）
 // 服务行操作（简化版：仅备注行）
@@ -278,14 +329,32 @@ async function loadDetail() {
     form.contract_content = data.contract_content ?? ''
     form.delivery_requirements = data.delivery_requirements ?? ''
     form.process_records = data.process_records ?? ''
+    form.responsible_person = (data as any).responsible_person ?? ''
+    form.business_person = (data as any).business_person ?? ''
+    form.party_a_contact = (data as any).party_a_contact ?? ''
+    form.party_b_contact = (data as any).party_b_contact ?? ''
     form.sort_order = data.sort_order ?? 0
     if (data.service_lines && data.service_lines.length > 0) {
       fillLinesFromDetail(data.service_lines)
     }
-    // 回填 raw_tables
+    // 回填 raw_tables（支持 {tables:[], resource_summary:{}} 结构）
     const detailAny = data as any
     if (detailAny.raw_tables_json) {
-      try { rawTables.value = JSON.parse(detailAny.raw_tables_json) } catch {}
+      try {
+        const parsed = JSON.parse(detailAny.raw_tables_json)
+        if (Array.isArray(parsed)) {
+          rawTables.value = parsed
+        } else {
+          rawTables.value = parsed.tables || []
+          if (parsed.resource_summary?.stats) {
+            for (const key of STATS_KEYS) {
+              if (parsed.resource_summary.stats[key] !== undefined) {
+                editableStats[key] = Number(parsed.resource_summary.stats[key])
+              }
+            }
+          }
+        }
+      } catch {}
     }
   } catch {
     ElMessage.error('合同详情加载失败，请返回重试')
@@ -300,6 +369,7 @@ async function loadDetail() {
 const formRef = ref<FormInstance>()
 const rules: FormRules = {
   name: [{ required: true, message: '请输入合同名称', trigger: 'blur' }],
+  project_type: [{ required: true, message: '请选择项目类型', trigger: 'change' }],
 }
 
 // ============================================================
@@ -347,8 +417,12 @@ async function handleSubmit() {
         contract_content: form.contract_content.trim() || undefined,
         delivery_requirements: form.delivery_requirements.trim() || undefined,
         process_records: form.process_records.trim() || undefined,
+        responsible_person: form.responsible_person.trim() || undefined,
+        business_person: form.business_person.trim() || undefined,
+        party_a_contact: form.party_a_contact.trim() || undefined,
+        party_b_contact: form.party_b_contact.trim() || undefined,
         service_lines: serviceLinesPayload,
-        raw_tables_json: rawTables.value.length > 0 ? JSON.stringify(rawTables.value) : undefined,
+        raw_tables_json: buildRawTablesJson(),
         sort_order: form.sort_order,
       }
       await updateProjectContract(contractId.value, payload)
@@ -372,8 +446,12 @@ async function handleSubmit() {
         contract_content: form.contract_content.trim() || undefined,
         delivery_requirements: form.delivery_requirements.trim() || undefined,
         process_records: form.process_records.trim() || undefined,
+        responsible_person: form.responsible_person.trim() || undefined,
+        business_person: form.business_person.trim() || undefined,
+        party_a_contact: form.party_a_contact.trim() || undefined,
+        party_b_contact: form.party_b_contact.trim() || undefined,
         service_lines: serviceLinesPayload,
-        raw_tables_json: rawTables.value.length > 0 ? JSON.stringify(rawTables.value) : undefined,
+        raw_tables_json: buildRawTablesJson(),
         sort_order: form.sort_order,
       }
       const created = await createProjectContract(payload)
@@ -419,42 +497,16 @@ async function addCopilotMsg(role: 'system' | 'result', text: string) {
 // 智能解析
 // ============================================================
 const parsing = ref(false)
-const isDragOver = ref(false)
-let dragCounter = 0
 
-function onDragEnter(e: DragEvent) {
-  e.preventDefault()
-  dragCounter++
-  if (dragCounter === 1) isDragOver.value = true
-}
-function onDragLeave(e: DragEvent) {
-  e.preventDefault()
-  dragCounter--
-  if (dragCounter <= 0) {
-    dragCounter = 0
-    isDragOver.value = false
-  }
-}
-function onDragOver(e: DragEvent) {
-  e.preventDefault()
-}
-function onDrop(e: DragEvent) {
-  e.preventDefault()
-  dragCounter = 0
-  isDragOver.value = false
-}
-
-const handleParseUpload = async (options: any) => {
-  isDragOver.value = false
-  dragCounter = 0
-  const file = options.file as File
+/** 核心解析逻辑：接收 File 对象，执行 SSE 流式解析并填充表单 */
+async function parseContractFile(file: File) {
   const ext = file.name.split('.').pop()?.toLowerCase()
   if (ext !== 'docx' && ext !== 'doc' && ext !== 'pdf') {
     ElMessage.warning('仅支持 .doc / .docx / .pdf 格式的文件')
     return
   }
-  if (file.size > 10 * 1024 * 1024) {
-    ElMessage.warning('文件大小不能超过 10MB')
+  if (file.size > 50 * 1024 * 1024) {
+    ElMessage.warning('文件大小不能超过 50MB')
     return
   }
 
@@ -511,15 +563,18 @@ const handleParseUpload = async (options: any) => {
         if (eventType === 'progress') {
           if (data.step === 'pdf_to_images') {
             addCopilotMsg('system', `📐 PDF 转图片完成：${data.pages} 页，耗时 ${data.seconds} 秒`)
+          } else if (data.step === 'ocr_done') {
+            addCopilotMsg('system', `📝 文字识别完成：${data.chars} 字符`)
+          } else if (data.step === 'extract_done') {
+            addCopilotMsg('system', `🔍 信息提取完成（${data.seconds} 秒）`)
           } else if (data.step === 'final_summary') {
             addCopilotMsg('system', `🔍 最终汇总完成（${data.seconds} 秒）`)
           }
-        } else if (eventType === 'page') {
-          const labels = (data.found_fields || [])
-            .map((f: string) => FIELD_LABELS[f] || f)
-            .slice(0, 6)
-          const labelStr = labels.length > 0 ? `，识别到：${labels.join('、')}` : '，无新增字段'
-          addCopilotMsg('system', `📖 第 ${data.page}/${data.total} 页（${data.seconds}秒）${labelStr}`)
+        } else if (eventType === 'batch') {
+          const pageRange = data.start_page === data.end_page
+            ? `第 ${data.start_page} 页`
+            : `第 ${data.start_page}-${data.end_page} 页`
+          addCopilotMsg('system', `📖 ${pageRange}（${data.batch}/${data.total_batches} 批，${data.seconds}秒）OCR 文字提取`)
           if (data.image_base64) {
             copilotMessages.value.push({
               role: 'result',
@@ -554,6 +609,12 @@ const handleParseUpload = async (options: any) => {
 async function fillFormFromFields(fields: any) {
   let filledCount = 0
 
+  // OCR 文字：存入 window 全局变量，可在控制台查看
+  if (fields._ocr_text) {
+    addCopilotMsg('result', `📝 识别全文（${fields._ocr_text.length} 字符）— 在浏览器控制台输入 __ocr_full_text 查看完整内容`)
+    ;(window as any).__ocr_full_text = fields._ocr_text
+  }
+
   // 基础字段映射（已删除 vcpu_count 等 7 个硬编码字段）
   const fieldMap: Record<string, keyof ProjectContractForm> = {
     name: 'name',
@@ -569,6 +630,10 @@ async function fillFormFromFields(fields: any) {
     contract_content: 'contract_content',
     delivery_requirements: 'delivery_requirements',
     remark: 'remark',
+    responsible_person: 'responsible_person',
+    business_person: 'business_person',
+    party_a_contact: 'party_a_contact',
+    party_b_contact: 'party_b_contact',
   }
 
   for (const [key, value] of Object.entries(fields)) {
@@ -639,9 +704,15 @@ async function fillFormFromFields(fields: any) {
     serviceLines.value = []
   }
 
-  // resource_summary - 资源统计
+  // resource_summary - 资源统计（填入可编辑 stats）
   if (fields.resource_summary) {
     resourceSummary.value = fields.resource_summary
+    const stats = fields.resource_summary.stats || {}
+    for (const key of STATS_KEYS) {
+      if (stats[key] !== undefined && stats[key] !== null) {
+        editableStats[key] = Number(stats[key])
+      }
+    }
     if (fields.resource_summary.summary_text) {
       addCopilotMsg('result', `📊 ${fields.resource_summary.summary_text}`)
     }
@@ -668,26 +739,31 @@ async function fillFormFromFields(fields: any) {
   ElMessage.success(summaryMsg)
 }
 
-onMounted(async () => {
-  document.addEventListener('dragenter', onDragEnter)
-  document.addEventListener('dragleave', onDragLeave)
-  document.addEventListener('dragover', onDragOver)
-  document.addEventListener('drop', onDrop)
+/** el-upload 的 http-request 回调，包装 parseContractFile */
+async function handleParseUpload(options: any) {
+  await parseContractFile(options.file as File)
+}
 
+/** 全局拖拽上传（仅新建模式生效） */
+const { isDragging: isGlobalDragging } = useGlobalDrop({
+  accept: ['pdf', 'doc', 'docx'],
+  multiple: false,
+  onDrop: (files) => {
+    // 编辑模式不触发解析
+    if (isEdit.value) return
+    parseContractFile(files[0])
+  },
+})
+
+onMounted(async () => {
   await loadRelatedContracts()
+  await loadProjectTypes()
   if (isEdit.value) {
     await loadDetail()
   } else {
     // 新建模式默认给一行空行
     serviceLines.value.push(emptyLine(0))
   }
-})
-
-onUnmounted(() => {
-  document.removeEventListener('dragenter', onDragEnter)
-  document.removeEventListener('dragleave', onDragLeave)
-  document.removeEventListener('dragover', onDragOver)
-  document.removeEventListener('drop', onDrop)
 })
 </script>
 
@@ -707,7 +783,7 @@ onUnmounted(() => {
       </template>
 
       <!-- 拖拽上传区（仅新建模式） -->
-      <div v-if="!isEdit" class="parse-drop-zone" :class="{ 'is-dragover': isDragOver }">
+      <div v-if="!isEdit" class="parse-drop-zone" :class="{ 'is-dragover': isGlobalDragging }">
         <el-upload
           drag
           :show-file-list="false"
@@ -780,7 +856,20 @@ onUnmounted(() => {
         </el-form-item>
 
         <el-form-item label="项目类型" prop="project_type">
-          <el-input v-model="form.project_type" placeholder="如：算力服务合同、数据采购合同" maxlength="100" />
+          <el-select
+            v-model="form.project_type"
+            placeholder="请选择项目类型"
+            clearable
+            filterable
+            style="width: 100%"
+          >
+            <el-option
+              v-for="pt in projectTypeOptions"
+              :key="pt.id"
+              :label="pt.name"
+              :value="pt.name"
+            />
+          </el-select>
         </el-form-item>
 
         <el-form-item label="合同金额">
@@ -832,6 +921,22 @@ onUnmounted(() => {
               :value="c.id"
             />
           </el-select>
+        </el-form-item>
+
+        <el-form-item label="负责人">
+          <el-input v-model="form.responsible_person" placeholder="手动填写" style="width: 240px" maxlength="100" />
+        </el-form-item>
+
+        <el-form-item label="商务">
+          <el-input v-model="form.business_person" placeholder="手动填写" style="width: 240px" maxlength="100" />
+        </el-form-item>
+
+        <el-form-item label="甲方委派人">
+          <el-input v-model="form.party_a_contact" placeholder="AI 自动提取，可手动修改" style="width: 100%" maxlength="255" />
+        </el-form-item>
+
+        <el-form-item label="乙方委派人">
+          <el-input v-model="form.party_b_contact" placeholder="AI 自动提取，可手动修改" style="width: 100%" maxlength="255" />
         </el-form-item>
 
         <el-form-item label="备注">
@@ -889,25 +994,60 @@ onUnmounted(() => {
           服务内容明细
         </div>
 
-        <!-- 文档表格展示区（智能解析结果） -->
+        <!-- 文档表格展示区（智能解析结果，支持单元格编辑 + 添加/删除行） -->
         <div v-if="rawTables.length > 0" style="margin-bottom: 16px;">
-          <div v-for="table in rawTables" :key="table.table_index" style="margin-bottom: 16px;">
-            <div v-if="table.title" style="font-weight: 600; margin-bottom: 8px;">📋 {{ table.title }}</div>
+          <div v-for="(table, ti) in rawTables" :key="table.table_index ?? ti" style="margin-bottom: 16px;">
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+              <span v-if="table.title" style="font-weight: 600;">📋 {{ table.title }}</span>
+              <span v-else style="font-weight: 600;">📋 表格 {{ ti + 1 }}</span>
+              <div style="display: flex; gap: 4px;">
+                <el-button size="small" text type="primary" @click="addTableRow(table)">+ 添加行</el-button>
+                <el-button
+                  size="small"
+                  text
+                  type="danger"
+                  :disabled="!table.rows || table.rows.length === 0"
+                  @click="deleteTableRow(table)"
+                >- 删除行</el-button>
+              </div>
+            </div>
             <el-table :data="table.rows" border size="small" max-height="500">
               <el-table-column v-for="(h, hi) in table.headers" :key="hi" :label="h" :prop="String(hi)" min-width="100">
-                <template #default="{ row }">{{ row[hi] || '-' }}</template>
+                <template #default="{ row, $index }">
+                  <el-input
+                    :model-value="row[hi] || ''"
+                    @update:model-value="(v: string) => updateTableRow(table, $index, hi, v)"
+                    size="small"
+                    placeholder="-"
+                    :style="{ minWidth: '80px' }"
+                    clearable
+                  />
+                </template>
+              </el-table-column>
+              <el-table-column label="操作" width="70" fixed="right">
+                <template #default="{ $index }">
+                  <el-button size="small" text type="danger" @click="deleteTableRowAt(table, $index)">删除</el-button>
+                </template>
               </el-table-column>
             </el-table>
           </div>
         </div>
 
-        <!-- 资源统计面板 -->
+        <!-- 资源统计面板（可编辑） -->
         <div v-if="statsDisplay.length > 0" style="margin-bottom: 16px; padding: 12px; background: #f5f7fa; border-radius: 6px;">
-          <div style="font-weight: 600; margin-bottom: 8px;">📊 交付资源统计</div>
-          <div style="display: flex; flex-wrap: wrap; gap: 16px;">
-            <div v-for="s in statsDisplay" :key="s.label" style="display: flex; gap: 6px;">
-              <span style="color: #909399;">{{ s.label }}：</span>
-              <span style="font-weight: 600; color: #1a3270;">{{ s.value }}</span>
+          <div style="font-weight: 600; margin-bottom: 8px;">📊 交付资源统计（可手动调整）</div>
+          <div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: center;">
+            <div v-for="s in statsDisplay" :key="s.key" style="display: flex; gap: 6px; align-items: center;">
+              <span style="color: #909399; white-space: nowrap;">{{ s.label }}：</span>
+              <el-input-number
+                :model-value="editableStats[s.key]"
+                @update:model-value="(v: number | undefined) => { editableStats[s.key] = v ?? null }"
+                :min="0"
+                :step="1"
+                size="small"
+                controls-position="right"
+                style="width: 120px;"
+              />
             </div>
           </div>
         </div>
@@ -932,11 +1072,13 @@ onUnmounted(() => {
       </div>
     </el-card>
 
-    <!-- 全页面拖拽遮罩 -->
+    <!-- 全页面拖拽遮罩（新建模式 + 全局拖拽） -->
     <Teleport to="body">
-      <div v-if="isDragOver && !isEdit" class="page-drag-overlay">
-        <el-icon class="overlay-icon"><MagicStick /></el-icon>
-        <div class="overlay-text">释放文件以智能解析合同</div>
+      <div v-if="isGlobalDragging && !isEdit" class="global-drop-overlay">
+        <div class="global-drop-box">
+          <el-icon :size="48"><UploadFilled /></el-icon>
+          <p>释放文件以开始智能解析</p>
+        </div>
       </div>
     </Teleport>
 
@@ -1179,28 +1321,24 @@ onUnmounted(() => {
   transform: scale(1.02);
 }
 
-/* 全页面拖拽遮罩 */
-.page-drag-overlay {
+/* 全局拖拽遮罩 */
+.global-drop-overlay {
   position: fixed;
   inset: 0;
   z-index: 9999;
-  background: rgba(230, 162, 60, 0.08);
-  border: 3px dashed #e6a23c;
+  background: rgba(0, 0, 0, 0.5);
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  pointer-events: none;
 }
-.page-drag-overlay .overlay-icon {
-  font-size: 64px;
-  color: #e6a23c;
-  margin-bottom: 16px;
-}
-.page-drag-overlay .overlay-text {
-  font-size: 24px;
-  color: #e6a23c;
-  font-weight: 600;
+.global-drop-box {
+  background: #fff;
+  border: 3px dashed #409eff;
+  border-radius: 12px;
+  padding: 48px 64px;
+  text-align: center;
+  color: #409eff;
+  font-size: 16px;
 }
 
 /* ============================================

@@ -133,7 +133,7 @@ from src.satellite.api import satellite_router  # noqa: E402
 from src.compute_service.api import compute_service_router  # noqa: E402
 from src.attachment.api import attachment_router, system_attachment_category_router  # noqa: E402
 from src.contract_parser.api import parse_router  # noqa: E402
-from src.project.api import project_router  # noqa: E402
+from src.project.api import project_router, project_type_router  # noqa: E402
 
 app.include_router(customer_router)
 app.include_router(contact_router)
@@ -148,6 +148,7 @@ app.include_router(attachment_router)
 app.include_router(system_attachment_category_router)
 app.include_router(parse_router)
 app.include_router(project_router)
+app.include_router(project_type_router)
 
 
 # ============================================================

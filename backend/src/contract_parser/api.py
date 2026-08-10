@@ -7,7 +7,7 @@ from src.contract_parser.services import parse_contract, parse_contract_stream
 
 parse_router = APIRouter(prefix="/api/contracts", tags=["Contract Parser"])
 
-MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
 
 
 @parse_router.post("/parse")

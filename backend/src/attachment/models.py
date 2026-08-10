@@ -28,7 +28,11 @@ class AttachmentCategory(Base):
     id = Column(UUIDColumn(), primary_key=True, default=generate_uuid)
     contract_type = Column(
         String(30), nullable=False,
-        comment="合同类型: compute_leasing / satellite_data / compute_service",
+        comment="合同类型: compute_leasing / satellite_data / compute_service / project",
+    )
+    project_type = Column(
+        String(100), nullable=True,
+        comment="项目类型（仅 contract_type=project 时使用），NULL 表示兜底",
     )
     name = Column(String(100), nullable=False, comment="分类名称")
     code = Column(String(50), nullable=False, comment="分类编码")

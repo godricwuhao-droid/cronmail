@@ -24,6 +24,7 @@
           </template>
           <el-menu-item index="/data-report/overview">运营概览</el-menu-item>
           <el-menu-item index="/data-report/rental-overview">租赁概览</el-menu-item>
+          <el-menu-item index="/data-report/project-overview">项目概览</el-menu-item>
         </el-sub-menu>
         <el-menu-item index="/customers">
           <el-icon><UserFilled /></el-icon>
@@ -78,7 +79,7 @@
           <el-menu-item index="/system/colleagues">内部同事</el-menu-item>
           <el-menu-item index="/system/config">系统配置</el-menu-item>
           <el-menu-item index="/system/attachment-categories">附件分类管理</el-menu-item>
-          <el-menu-item index="/system/attachment-categories-project" @click.prevent="goProjectAttachmentCategories">项目管理附件配置</el-menu-item>
+          <el-menu-item index="/system/project-config">项目配置</el-menu-item>
         </el-sub-menu>
       </el-menu>
     </el-aside>
@@ -114,7 +115,7 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import {
   UserFilled,
   Document,
@@ -133,12 +134,7 @@ import {
 } from '@element-plus/icons-vue'
 
 const route = useRoute()
-const router = useRouter()
 const isCollapse = ref(false)
-
-function goProjectAttachmentCategories() {
-  router.push({ path: '/system/attachment-categories', query: { contract_type: 'project' } })
-}
 
 const activeMenu = computed(() => {
   // /system/* 路由时高亮 /system 父菜单
@@ -199,6 +195,7 @@ const pageTitle = computed(() => {
   const map: Record<string, string> = {
     '/data-report/overview': '运营概览',
     '/data-report/rental-overview': '租赁概览',
+    '/data-report/project-overview': '项目概览',
     '/customers': '客户管理',
     '/contracts/compute-leasing': '算力租赁合同',
     '/contracts/satellite-data': '卫星数据',
@@ -210,7 +207,8 @@ const pageTitle = computed(() => {
     '/system/colleagues': '内部同事',
     '/system/config': '系统配置',
     '/system/dingtalk': '钉钉通知',
-    '/system/attachment-categories': '附件分类管理',
+  '/system/attachment-categories': '附件分类管理',
+  '/system/project-config': '项目配置',
   }
   if (route.path.startsWith('/customers/') && route.path.endsWith('contacts')) return '联系人管理'
   if (route.path.startsWith('/contracts/compute-leasing/create')) return '新建算力租赁合同'

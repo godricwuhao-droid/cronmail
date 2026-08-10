@@ -26,7 +26,9 @@ import {
 } from '@/api/modules/project'
 import {
   getAttachmentSummary,
+  listAttachmentCategories,
   type AttachmentSummary,
+  type AttachmentCategoryConfig,
 } from '@/api/modules/attachment'
 
 const route = useRoute()
@@ -66,6 +68,8 @@ const pagination = reactive({
 
 // 附件状态汇总缓存
 const summaryMap = ref<Record<string, AttachmentSummary>>({})
+// 附件分类配置（实时从系统配置获取）
+const categoryConfig = ref<AttachmentCategoryConfig[]>([])
 
 let searchTimer: ReturnType<typeof setTimeout> | null = null
 function handleSearch() {
@@ -97,14 +101,57 @@ async function fetchList() {
 }
 
 async function loadSummaries(items: ProjectContractItem[]) {
-  for (const item of items) {
-    try {
-      const summary = await getAttachmentSummary('compute_service', item.id)
-      summaryMap.value[item.id] = summary
-    } catch {
-      // 忽略
+  // 并行：获取分类配置 + 所有合同的 summary
+  const [cats, ...summaries] = await Promise.all([
+    listAttachmentCategories('project').then((res: any) => (res?.items || res) as AttachmentCategoryConfig[]).catch(() => [] as AttachmentCategoryConfig[]),
+    ...items.map((item) =>
+      getAttachmentSummary('project', item.id, item.project_type || undefined).catch(() => null)
+    ),
+  ])
+  categoryConfig.value = cats
+  items.forEach((item, i) => {
+    if (summaries[i]) summaryMap.value[item.id] = summaries[i]!
+  })
+}
+
+/** 获取分类配置中的子项列表（按大类分组） */
+function getCategoryGroups(summary: any): { name: string; code: string; items: { code: string; name: string }[] }[] {
+  if (!summary?.items) return []
+  const itemIds = Object.keys(summary.items)
+  if (itemIds.length === 0) return []
+
+  // 建立 item_id -> {category, item} 的映射，并按 categoryConfig 顺序记录分类
+  const itemMap: Record<string, { cat: any; itemName: string }> = {}
+  const categoryOrder: any[] = []
+  for (const cat of categoryConfig.value) {
+    categoryOrder.push(cat)
+    for (const it of (cat.items || [])) {
+      if (it.is_active !== false) {
+        itemMap[it.id] = { cat, itemName: it.name }
+      }
     }
   }
+
+  // 按 categoryConfig 的顺序，依次构造 group（保持顺序）
+  const groupMap: Record<string, { name: string; code: string; cat: any; items: { code: string; name: string }[] }> = {}
+  for (const itemId of itemIds) {
+    const info = itemMap[itemId]
+    if (!info) continue
+    if (!groupMap[info.cat.id]) {
+      groupMap[info.cat.id] = {
+        name: info.cat.name,
+        code: info.cat.code || info.cat.name,
+        cat: info.cat,
+        items: [],
+      }
+    }
+    groupMap[info.cat.id].items.push({ code: itemId, name: info.itemName })
+  }
+
+  // 按 categoryConfig 原始顺序返回
+  return categoryOrder
+    .filter(cat => groupMap[cat.id])
+    .map(cat => groupMap[cat.id])
 }
 
 function handlePageChange(page: number) {
@@ -137,6 +184,10 @@ function goAttachments(row: ProjectContractItem) {
   router.push({ name: 'ProjectAttachments', params: { company: currentCompany.value, id: row.id } })
 }
 
+function goPayments(row: ProjectContractItem) {
+  router.push({ name: 'ProjectPayments', params: { company: currentCompany.value, id: row.id } })
+}
+
 async function handleDelete(row: ProjectContractItem) {
   try {
     await deleteProjectContract(row.id)
@@ -165,22 +216,48 @@ function formatAmount(s?: string | null) {
   return n.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
-function statusDotColor(summary: AttachmentSummary | undefined, code: string): string {
+function getSummary(row: ProjectContractItem): AttachmentSummary | undefined {
+  return summaryMap.value[row.id]
+}
+
+/** 大类标签样式 */
+function badgeClass(summary: AttachmentSummary | undefined, grp: { code: string; items: { code: string }[] }): string {
+  if (!summary) return 'badge-loading'
+  const total = grp.items.length
+  const done = grp.items.filter((it) => summary.items[it.code]?.confirmed).length
+  if (done === total) return 'badge-done'
+  if (done > 0) return 'badge-partial'
+  return 'badge-none'
+}
+
+/** 大类已完成子项数 */
+function completedCount(summary: AttachmentSummary | undefined, grp: { items: { code: string }[] }): number {
+  if (!summary) return 0
+  return grp.items.filter((it) => summary.items[it.code]?.confirmed).length
+}
+
+/** 子项圆点颜色 */
+function subDotColor(summary: AttachmentSummary | undefined, code: string): string {
   if (!summary) return '#c0c4cc'
   const item = summary.items[code]
   if (!item || item.file_count === 0) return '#c0c4cc'
-  return item.confirmed ? '#10b981' : '#ef4444'
+  return item.confirmed ? '#10b981' : '#f56c6c'
 }
 
-function statusDotTitle(summary: AttachmentSummary | undefined, code: string): string {
-  if (!summary) return '加载中...'
+/** 子项 CSS class */
+function subStatusClass(summary: AttachmentSummary | undefined, code: string): string {
+  if (!summary) return ''
+  const item = summary.items[code]
+  if (!item || item.file_count === 0) return 'sub-missing'
+  return item.confirmed ? 'sub-done' : 'sub-unconfirmed'
+}
+
+/** 子项信息文本 */
+function subInfoText(summary: AttachmentSummary | undefined, code: string): string {
+  if (!summary) return ''
   const item = summary.items[code]
   if (!item || item.file_count === 0) return '未上传'
-  return item.confirmed ? `已确认 (${item.file_count} 个文件)` : `未确认 (${item.file_count} 个文件)`
-}
-
-function getSummary(row: ProjectContractItem): AttachmentSummary | undefined {
-  return summaryMap.value[row.id]
+  return item.confirmed ? `✓ ${item.file_count}个文件` : `⚠ ${item.file_count}个文件`
 }
 
 // ============================================================
@@ -195,17 +272,18 @@ interface ColumnDef {
 
 const allColumns: ColumnDef[] = [
   { key: 'name', title: '合同名称', default: true },
-  { key: 'contract_no', title: '合同编号' },
   { key: 'contract_type', title: '合同类型', default: true },
-  { key: 'party_a_name', title: '甲方' },
-  { key: 'party_b_name', title: '乙方' },
+  { key: 'project_type', title: '项目类型', default: true },
   { key: 'amount', title: '合同金额', default: true },
-  { key: 'start_date', title: '开始日期' },
+  { key: 'contract_no', title: '合同编号', default: true },
+  { key: 'party_a_name', title: '甲方', default: true },
+  { key: 'party_b_name', title: '乙方', default: true },
+  { key: 'start_date', title: '开始日期', default: true },
   { key: 'end_date', title: '结束日期', default: true },
-  { key: 'project_name', title: '项目名称' },
-  { key: 'project_type', title: '项目类型' },
-  { key: 'service_lines_count', title: '服务行数' },
   { key: 'attachment_status', title: '附件状态', default: true },
+  { key: 'payment_progress', title: '回款进度', default: true },
+  { key: 'project_name', title: '项目名称' },
+  { key: 'service_lines_count', title: '服务行数' },
   { key: 'sort_order', title: '序号' },
   { key: 'remark', title: '备注' },
   { key: 'contract_content', title: '合同内容' },
@@ -472,6 +550,10 @@ function getColumnProps(col: ColumnDef): ColumnProps {
   } else if (key === 'attachment_status') {
     base.label = '附件状态'
     base.width = 140
+  } else if (key === 'payment_progress') {
+    base.label = '回款进度'
+    base['min-width'] = 140
+    base.align = 'center'
   } else if (key === 'sort_order') {
     base.prop = 'sort_order'
     base.label = '序号'
@@ -503,7 +585,7 @@ function getColumnProps(col: ColumnDef): ColumnProps {
     base.width = 120
   } else if (key === 'actions') {
     base.label = '操作'
-    base.width = 280
+    base.width = 350
     base.fixed = 'right'
   }
 
@@ -709,17 +791,52 @@ onMounted(() => {
               {{ row.service_lines_count ?? 0 }}
             </template>
             <template v-else-if="col.key === 'attachment_status'" #default="{ row }">
-              <el-tooltip
-                v-for="code in ['contract_agreement', 'acceptance_material', 'process_material']"
-                :key="code"
-                :content="statusDotTitle(getSummary(row), code)"
-                placement="top"
+              <el-popover
+                placement="bottom-start"
+                :width="360"
+                trigger="click"
+                :teleported="true"
               >
-                <span
-                  class="status-dot"
-                  :style="{ backgroundColor: statusDotColor(getSummary(row), code) }"
-                />
-              </el-tooltip>
+                <template #reference>
+                  <div class="attachment-status-badges">
+                    <span
+                      v-for="grp in getCategoryGroups(getSummary(row))"
+                      :key="grp.code"
+                      class="status-badge"
+                      :class="badgeClass(getSummary(row), grp)"
+                    >
+                      {{ grp.name }} {{ completedCount(getSummary(row), grp) }}/{{ grp.items.length }}
+                    </span>
+                  </div>
+                </template>
+                <!-- Popover 明细卡片 -->
+                <div class="status-detail">
+                  <div
+                    v-for="grp in getCategoryGroups(getSummary(row))"
+                    :key="grp.code"
+                    class="status-group"
+                  >
+                    <div class="status-group-title">{{ grp.name }}</div>
+                    <div
+                      v-for="sub in grp.items"
+                      :key="sub.code"
+                      class="status-sub-item"
+                      :class="subStatusClass(getSummary(row), sub.code)"
+                    >
+                      <span class="status-sub-dot" :style="{ backgroundColor: subDotColor(getSummary(row), sub.code) }" />
+                      <span class="status-sub-name">{{ sub.name }}</span>
+                      <span class="status-sub-info">{{ subInfoText(getSummary(row), sub.code) }}</span>
+                    </div>
+                  </div>
+                </div>
+              </el-popover>
+            </template>
+            <template v-else-if="col.key === 'payment_progress'" #default="{ row }">
+              <el-progress
+                :percentage="row.payment_progress || 0"
+                :stroke-width="8"
+                :status="row.payment_progress >= 100 ? 'success' : ''"
+              />
             </template>
             <template v-else-if="col.key === 'sort_order'" #default="{ row }">
               {{ row.sort_order ?? 0 }}
@@ -746,6 +863,7 @@ onMounted(() => {
               <div class="action-buttons">
                 <el-button size="small" link type="primary" @click="goDetail(row)">详情</el-button>
                 <el-button size="small" link type="primary" @click="goEdit(row)">编辑</el-button>
+                <el-button size="small" link type="warning" @click="goPayments(row)">回款</el-button>
                 <el-popconfirm
                   title="确定删除该合同？"
                   confirm-button-text="删除"
@@ -825,14 +943,6 @@ onMounted(() => {
   justify-content: flex-end;
   margin-top: 16px;
 }
-.status-dot {
-  display: inline-block;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  margin: 0 2px;
-  cursor: default;
-}
 .action-buttons {
   display: flex;
   align-items: center;
@@ -842,6 +952,91 @@ onMounted(() => {
 .muted {
   color: #c0c4cc;
 }
+
+/* ============================================================
+ * 附件状态展示
+ * ============================================================ */
+.attachment-status-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  cursor: pointer;
+}
+.status-badge {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 10px;
+  white-space: nowrap;
+}
+.badge-done {
+  background: #e6f7e6;
+  color: #10b981;
+  border: 1px solid #b7ebc8;
+}
+.badge-partial {
+  background: #fff7e6;
+  color: #e6a23c;
+  border: 1px solid #ffd591;
+}
+.badge-none {
+  background: #f5f5f5;
+  color: #909399;
+  border: 1px solid #e4e7ed;
+}
+.badge-loading {
+  background: #f5f5f5;
+  color: #c0c4cc;
+  border: 1px solid #e4e7ed;
+}
+
+/* Popover 明细 */
+.status-detail {
+  max-height: 400px;
+  overflow-y: auto;
+}
+.status-group {
+  margin-bottom: 12px;
+}
+.status-group-title {
+  font-weight: 600;
+  font-size: 13px;
+  color: #303133;
+  margin-bottom: 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid #ebeef5;
+}
+.status-sub-item {
+  display: flex;
+  align-items: center;
+  padding: 4px 0;
+  font-size: 12px;
+  gap: 6px;
+}
+.status-sub-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.status-sub-name {
+  color: #606266;
+  flex: 1;
+}
+.status-sub-info {
+  color: #909399;
+  font-size: 11px;
+}
+.sub-missing .status-sub-name {
+  color: #c0c4cc;
+}
+.sub-done .status-sub-name {
+  color: #303133;
+}
+.sub-unconfirmed .status-sub-name {
+  color: #f56c6c;
+}
+
 </style>
 
 <style>

@@ -119,14 +119,32 @@ def parse_contract(file_bytes: bytes, filename: str, contract_type: str) -> dict
         processing_info["file_type"] = "pdf"
         return parse_contract_vision(file_bytes, filename, contract_type, processing_info)
 
+    # .png/.jpg/.jpeg → 包装为单页 PDF 走 Vision
+    elif ext in ('png', 'jpg', 'jpeg'):
+        from PIL import Image
+        import io
+        img = Image.open(io.BytesIO(file_bytes))
+        if img.mode in ('RGBA', 'P'):
+            img = img.convert('RGB')
+        pdf_buffer = io.BytesIO()
+        img.save(pdf_buffer, format='PDF')
+        pdf_bytes = pdf_buffer.getvalue()
+        processing_info["mode"] = "vision"
+        processing_info["file_type"] = ext
+        processing_info["converted_from"] = ext
+        return parse_contract_vision(pdf_bytes, filename.rsplit('.', 1)[0] + '.pdf', contract_type, processing_info)
+
     else:
-        raise ValueError(f"不支持的文件格式: .{ext}，支持 .doc / .docx / .pdf")
+        raise ValueError(f"不支持的文件格式: .{ext}，支持 .doc / .docx / .pdf / .png / .jpg / .jpeg")
 
 
 def parse_contract_vision(file_bytes: bytes, filename: str, contract_type: str, processing_info: dict = None) -> dict:
-    """累进式 Vision 管道：逐页分析，每页带上下文"""
+    """两阶段管道：
+    阶段 1：分批 OCR 提取纯文字 → 拼接为完整 MD
+    阶段 2：文本 LLM 从全文提取结构化 JSON
+    """
     t0 = time.time()
-    timing = {}  # 耗时记录
+    timing = {}
     if processing_info is None:
         processing_info = {"mode": "vision", "file_size_kb": round(len(file_bytes) / 1024, 1), "file_type": "pdf"}
 
@@ -139,94 +157,244 @@ def parse_contract_vision(file_bytes: bytes, filename: str, contract_type: str, 
     processing_info["pdf_pages"] = len(b64_images)
     processing_info["extract_seconds"] = timing["pdf_to_images"]["seconds"]
 
-    # 2. 累进式逐页分析
-    from src.contract_parser.prompts import VISION_SYSTEM_PROMPT, get_vision_page_prompt, get_vision_final_prompt
+    # ============================================================
+    # 阶段 1：分批 OCR 提取纯文字
+    # ============================================================
+    from src.contract_parser.prompts import OCR_SYSTEM_PROMPT, get_ocr_batch_prompt
 
     client = OpenAI(
         base_url=settings.LLM_BASE_URL,
         api_key=settings.LLM_API_KEY,
-        timeout=180,
+        timeout=300,
     )
 
-    accumulated = {}  # 累积结果
-    page_results = []  # 每页分析记录
+    BATCH_SIZE = 3
     total_pages = len(b64_images)
+    batches = _chunk_list(b64_images, BATCH_SIZE)
+    total_batches = len(batches)
+    ocr_parts = []  # 每批 OCR 结果
+    ocr_timing = []
 
-    for i, b64 in enumerate(b64_images):
-        t_page = time.time()
-        page_num = i + 1
+    for batch_idx, batch_images in enumerate(batches):
+        t_batch = time.time()
+        batch_num = batch_idx + 1
+        start_page = batch_idx * BATCH_SIZE + 1
+        end_page = min(start_page + len(batch_images) - 1, total_pages)
 
-        # 构建累进式 prompt
-        if i == 0:
-            page_prompt = get_vision_page_prompt(contract_type, page_num, total_pages, None)
-        else:
-            prev_summary = json.dumps(accumulated, ensure_ascii=False, indent=2)
-            page_prompt = get_vision_page_prompt(contract_type, page_num, total_pages, prev_summary)
-
-        content = [
-            {"type": "text", "text": page_prompt},
-            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}}
-        ]
+        batch_prompt = get_ocr_batch_prompt(batch_num, total_batches, start_page, end_page)
+        content = [{"type": "text", "text": batch_prompt}]
+        for b64 in batch_images:
+            content.append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}})
 
         try:
             response = client.chat.completions.create(
                 model=settings.LLM_MODEL,
                 messages=[
-                    {"role": "system", "content": VISION_SYSTEM_PROMPT},
+                    {"role": "system", "content": OCR_SYSTEM_PROMPT},
                     {"role": "user", "content": content},
                 ],
-                temperature=0.1,
-                max_tokens=4096,
-                extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+                temperature=0.3,
+                max_tokens=16384,
+                extra_body={"chat_template_kwargs": {"enable_thinking": True}},
             )
-            raw = response.choices[0].message.content
+            raw = response.choices[0].message.content or ""
+            ocr_parts.append(raw)
+            logger.info(f"OCR batch {batch_num}/{total_batches} (pages {start_page}-{end_page}) len={len(raw)}")
         except Exception as e:
-            logger.error(f"Vision LLM 第{page_num}页失败: {e}")
-            page_results.append({"page": page_num, "error": str(e), "seconds": round(time.time() - t_page, 1)})
-            continue
+            logger.error(f"OCR batch {batch_num} failed: {e}")
+            ocr_parts.append(f"--- 第{start_page}-{end_page}页（OCR 失败） ---")
 
-        # 解析本页结果
-        page_data = _parse_llm_json(raw)
+        elapsed = round(time.time() - t_batch, 1)
+        ocr_timing.append({"batch": batch_num, "pages": f"{start_page}-{end_page}", "seconds": elapsed})
 
-        # 合并到累积结果
-        _deep_merge(accumulated, page_data)
+    # 拼接完整文字
+    full_text = "\n\n".join(ocr_parts)
+    logger.info(f"OCR complete: {len(full_text)} chars from {total_pages} pages")
 
-        elapsed = round(time.time() - t_page, 1)
-        page_results.append({
-            "page": page_num,
-            "seconds": elapsed,
-            "found_fields": [k for k, v in page_data.items() if v is not None and v != [] and v != {}],
-        })
+    # ============================================================
+    # 阶段 2：文本 LLM 从全文提取结构化 JSON
+    # ============================================================
+    from src.contract_parser.prompts import EXTRACT_SYSTEM_PROMPT, get_extract_prompt
 
-    timing["per_page"] = page_results
+    t_extract = time.time()
+    extract_prompt = get_extract_prompt(contract_type, full_text)
 
-    # 3. 最终汇总（如果超过 3 页）
-    if total_pages > 3:
-        t_final = time.time()
-        final_prompt = get_vision_final_prompt(contract_type, json.dumps(accumulated, ensure_ascii=False, indent=2))
-        try:
-            response = client.chat.completions.create(
-                model=settings.LLM_MODEL,
-                messages=[
-                    {"role": "system", "content": "你是合同信息提取助手，请汇总分析结果。"},
-                    {"role": "user", "content": final_prompt},
-                ],
-                temperature=0.1,
-                max_tokens=8192,
-                extra_body={"chat_template_kwargs": {"enable_thinking": False}},
-            )
-            raw = response.choices[0].message.content
-            final_data = _parse_llm_json(raw)
-            _deep_merge(accumulated, final_data)
-        except Exception:
-            pass  # 汇总失败不影响结果
-        timing["final_summary"] = {"seconds": round(time.time() - t_final, 1)}
+    try:
+        response = client.chat.completions.create(
+            model=settings.LLM_MODEL,
+            messages=[
+                {"role": "system", "content": EXTRACT_SYSTEM_PROMPT},
+                {"role": "user", "content": extract_prompt},
+            ],
+            temperature=0.3,
+            max_tokens=32768,
+            extra_body={"chat_template_kwargs": {"enable_thinking": True}},
+        )
+        raw = response.choices[0].message.content
+        result = _parse_llm_json(raw)
+        import sys
+        print(f"[contract_parser] [sync] Extract keys: {list(result.keys()) if result else 'EMPTY'}, party_a={result.get('party_a_name')}, party_b={result.get('party_b_name')}", file=sys.stderr)
+        rs = result.get("resource_summary", {})
+        logger.info(f"[sync] Extract result: resource_summary items={rs.get('items')}, stats={rs.get('stats')}")
+    except Exception as e:
+        logger.error(f"Extract LLM failed: {e}")
+        result = {}
+
+    timing["extract"] = {"seconds": round(time.time() - t_extract, 1)}
+
+    # 后处理：代码层过滤确认单 + 去重 + 资源统计
+    _post_process_tables(result)
 
     timing["total_vision"] = {"seconds": round(time.time() - t0, 1)}
-    accumulated["_processing_info"] = processing_info
-    accumulated["_timing"] = timing
-    accumulated["_page_results"] = page_results
-    return accumulated
+    result["_processing_info"] = processing_info
+    result["_timing"] = timing
+    result["_ocr_text"] = full_text  # 调试用，后续可移除
+    return result
+
+
+def _chunk_list(lst: list, chunk_size: int) -> list:
+    """将列表按 chunk_size 分批"""
+    return [lst[i:i + chunk_size] for i in range(0, len(lst), chunk_size)]
+
+
+def parse_payment_receipt(file_bytes: bytes, filename: str) -> dict:
+    """解析回款凭证（回执单/发票）——简化版 Vision 管道，不开启思考
+
+    流程：
+    1. 文件转 PDF（如需）
+    2. PDF 逐页拆图
+    3. Vision LLM 逐批 OCR（enable_thinking=False）
+    4. 拼接文本 → 文本 LLM 提取金额/日期
+
+    Returns:
+        {"amount": "...", "payment_date": "...", "payer": "...", "doc_type": "..."}
+    """
+    from src.contract_parser.prompts import (
+        PAYMENT_RECEIPT_SYSTEM_PROMPT, PAYMENT_RECEIPT_EXTRACT_PROMPT,
+        get_ocr_batch_prompt,
+    )
+
+    ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
+
+    # 获取 PDF bytes
+    if ext == 'pdf':
+        pdf_bytes = file_bytes
+    elif ext in ('png', 'jpg', 'jpeg'):
+        from PIL import Image as PILImage
+        img = PILImage.open(io.BytesIO(file_bytes))
+        if img.mode in ('RGBA', 'P'):
+            img = img.convert('RGB')
+        pdf_buf = io.BytesIO()
+        img.save(pdf_buf, format='PDF')
+        pdf_bytes = pdf_buf.getvalue()
+    else:
+        pdf_bytes = convert_to_pdf(file_bytes, filename)
+
+    # 拆页：使用 extract_images_from_pdf（接受 file_bytes，返回 base64 字符串列表）
+    images_b64 = extract_images_from_pdf(pdf_bytes, max_pages=10)
+    total_pages = len(images_b64)
+    if total_pages == 0:
+        return {"amount": None, "payment_date": None, "payer": None, "doc_type": "unknown"}
+
+    ocr_parts: list[str] = []
+    batch_size = 3
+    batches = list(_chunk_list(images_b64, batch_size))
+    total_batches = len(batches)
+
+    client = OpenAI(api_key=settings.LLM_API_KEY, base_url=settings.LLM_BASE_URL)
+
+    for batch_num, batch in enumerate(batches, 1):
+        start_page = (batch_num - 1) * batch_size + 1
+        end_page = min(batch_num * batch_size, total_pages)
+        content = [{"type": "text", "text": get_ocr_batch_prompt(batch_num, total_batches, start_page, end_page)}]
+        for img_b64 in batch:
+            content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}})
+
+        response = client.chat.completions.create(
+            model=settings.LLM_MODEL,
+            messages=[{"role": "user", "content": content}],
+            temperature=0.1,
+            max_tokens=8192,
+            extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+        )
+        ocr_parts.append(response.choices[0].message.content or "")
+
+    full_text = "\n\n".join(ocr_parts)
+    if len(full_text) > 32000:
+        full_text = full_text[:32000]
+
+    # 阶段 2：提取
+    extract_prompt = PAYMENT_RECEIPT_EXTRACT_PROMPT.format(full_text=full_text)
+    response = client.chat.completions.create(
+        model=settings.LLM_MODEL,
+        messages=[
+            {"role": "system", "content": PAYMENT_RECEIPT_SYSTEM_PROMPT},
+            {"role": "user", "content": extract_prompt},
+        ],
+        temperature=0.1,
+        max_tokens=4096,
+        extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+    )
+    raw = response.choices[0].message.content
+    return _parse_llm_json(raw) or {}
+def _post_process_tables(accumulated):
+    """后处理：过滤非交付表格 + 去重"""
+    if isinstance(accumulated, list):
+        return  # LLM 返回了数组而非对象，跳过
+    if not accumulated.get("raw_tables"):
+        return
+
+    # 关键词黑名单（title 包含任一关键词的表格直接丢弃）
+    BLACKLIST_KEYWORDS = ["确认单", "验收单", "验收报告", "签字页", "签章页", "审批单", "确认函"]
+    
+    filtered = []
+    for t in accumulated["raw_tables"]:
+        if not isinstance(t, dict):
+            continue
+        title = t.get("title", "") or ""
+        if any(kw in title for kw in BLACKLIST_KEYWORDS):
+            logger.info(f"后处理过滤表格: {title}")
+            continue
+        filtered.append(t)
+    
+    # 去重：按 (title, headers) 保留行数最多的版本
+    deduped = {}
+    for t in filtered:
+        key = (t.get("title", ""), tuple(t.get("headers", [])))
+        if key not in deduped or len(t.get("rows", [])) > len(deduped[key].get("rows", [])):
+            deduped[key] = t
+    accumulated["raw_tables"] = list(deduped.values())
+
+    # 确保 resource_summary 存在
+    if "resource_summary" not in accumulated:
+        accumulated["resource_summary"] = {"stats": {}, "summary_text": ""}
+
+    # 从 items 精确计算 stats（代码层做乘法累加，不依赖 Agent 算术）
+    items = accumulated["resource_summary"].get("items", [])
+    if items:
+        total = {"vcpu": 0, "memory_gb": 0, "storage_gb": 0, "gpu_count": 0, "gpu_tops": 0}
+        for item in items:
+            qty = item.get("qty", 0) or 0
+            for key in total:
+                val = item.get(key, 0) or 0
+                total[key] += val * qty
+        accumulated["resource_summary"]["stats"] = total
+        logger.info(f"资源统计（代码层精确计算）: items={items}, total={total}")
+    else:
+        logger.warning(f"资源统计: resource_summary 中无 items，stats={accumulated['resource_summary'].get('stats', {})}")
+
+
+def _extract_number_from_row(row: list) -> int:
+    """从表格行中提取数量（最后一列纯数字）"""
+    if not row:
+        return 0
+    for cell in reversed(row):
+        cell = str(cell).strip().replace(',', '').replace('个', '').replace('台', '')
+        try:
+            return int(cell)
+        except (ValueError, TypeError):
+            continue
+    return 0
 
 
 def _parse_llm_json(raw: str) -> dict:
@@ -241,8 +409,17 @@ def _parse_llm_json(raw: str) -> dict:
         return {}
 
 
+# 字符串字段：首次非空有效值优先，防止后期批次用确认单内容污染
+_STRING_FIELDS = {"name", "contract_no", "party_a_name", "party_b_name", "amount",
+                  "start_date", "end_date", "project_name", "contract_content",
+                  "delivery_requirements", "contract_type", "process_records"}
+
 def _deep_merge(base: dict, update: dict):
-    """深度合并，update 中的非 null 值覆盖 base"""
+    """深度合并。标量字段首次有效值优先，dict 递归合并，list extend。
+    
+    策略：字符串字段一旦有值就不覆盖，防止后续批次的附件页污染正文信息。
+    remark 字段除外，允许追加。
+    """
     for k, v in update.items():
         if v is None or v == [] or v == {}:
             continue
@@ -250,12 +427,17 @@ def _deep_merge(base: dict, update: dict):
             _deep_merge(base[k], v)
         elif isinstance(v, list) and isinstance(base.get(k), list):
             base[k].extend(v)
+        elif k in _STRING_FIELDS:
+            # 字符串关键字段：首次有效值优先
+            if not base.get(k):
+                base[k] = v
         else:
+            # remark、resource_summary 等：允许覆盖
             base[k] = v
 
 
 async def parse_contract_stream(file_bytes: bytes, filename: str, contract_type: str):
-    """SSE 流式解析：每完成一页 yield 一个事件"""
+    """SSE 流式解析：阶段 1 分批 OCR → 阶段 2 文本汇总提取"""
     t0 = time.time()
     processing_info = {"mode": "vision", "file_size_kb": round(len(file_bytes) / 1024, 1), "file_type": "pdf"}
 
@@ -273,105 +455,126 @@ async def parse_contract_stream(file_bytes: bytes, filename: str, contract_type:
     t1 = time.time()
     loop = asyncio.get_running_loop()
     b64_images = await loop.run_in_executor(None, extract_images_from_pdf, pdf_bytes)
+    total_pages = len(b64_images)
     yield {"event": "progress", "data": json.dumps({
-        "step": "pdf_to_images", "pages": len(b64_images), "seconds": round(time.time() - t1, 1)
+        "step": "pdf_to_images", "pages": total_pages, "seconds": round(time.time() - t1, 1)
     }, ensure_ascii=False)}
 
-    # 2. 逐页分析
-    from src.contract_parser.prompts import VISION_SYSTEM_PROMPT, get_vision_page_prompt, get_vision_final_prompt
+    # ============================================================
+    # 阶段 1：分批 OCR 提取纯文字
+    # ============================================================
+    from src.contract_parser.prompts import OCR_SYSTEM_PROMPT, get_ocr_batch_prompt
 
     client = OpenAI(
         base_url=settings.LLM_BASE_URL,
         api_key=settings.LLM_API_KEY,
-        timeout=180,
+        timeout=300,
     )
 
-    accumulated = {}
-    total_pages = len(b64_images)
+    BATCH_SIZE = 3
+    batches = _chunk_list(b64_images, BATCH_SIZE)
+    total_batches = len(batches)
+    ocr_parts = []
 
-    for i, b64 in enumerate(b64_images):
-        t_page = time.time()
-        page_num = i + 1
+    for batch_idx, batch_images in enumerate(batches):
+        t_batch = time.time()
+        batch_num = batch_idx + 1
+        start_page = batch_idx * BATCH_SIZE + 1
+        end_page = min(start_page + len(batch_images) - 1, total_pages)
 
-        if i == 0:
-            page_prompt = get_vision_page_prompt(contract_type, page_num, total_pages, None)
-        else:
-            page_prompt = get_vision_page_prompt(contract_type, page_num, total_pages, json.dumps(accumulated, ensure_ascii=False, indent=2))
-
-        content = [
-            {"type": "text", "text": page_prompt},
-            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}}
-        ]
+        batch_prompt = get_ocr_batch_prompt(batch_num, total_batches, start_page, end_page)
+        content = [{"type": "text", "text": batch_prompt}]
+        for b64 in batch_images:
+            content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
 
         try:
             response = await loop.run_in_executor(
                 None,
-                lambda content=content, sp=VISION_SYSTEM_PROMPT, m=settings.LLM_MODEL: client.chat.completions.create(
+                lambda content=content, sp=OCR_SYSTEM_PROMPT, m=settings.LLM_MODEL: client.chat.completions.create(
                     model=m,
                     messages=[{"role": "system", "content": sp}, {"role": "user", "content": content}],
-                    temperature=0.1, max_tokens=4096,
+                    temperature=0.1, max_tokens=16384,
                     extra_body={"chat_template_kwargs": {"enable_thinking": False}},
                 )
             )
-            raw = response.choices[0].message.content
-            page_data = _parse_llm_json(raw)
-            _deep_merge(accumulated, page_data)
-
-            found = [k for k, v in page_data.items() if v not in (None, [], {}, "", 0)]
+            raw = response.choices[0].message.content or ""
+            ocr_parts.append(raw)
+            logger.info(f"OCR batch {batch_num}/{total_batches} (pages {start_page}-{end_page}) len={len(raw)}")
         except Exception as e:
-            found = []
-            logger.error(f"第{page_num}页失败: {e}")
+            logger.error(f"OCR batch {batch_num} failed: {e}")
+            ocr_parts.append(f"--- 第{start_page}-{end_page}页（OCR 失败） ---")
 
-        elapsed = round(time.time() - t_page, 1)
-        yield {"event": "page", "data": json.dumps({
-            "page": page_num, "total": total_pages, "seconds": elapsed,
-            "found_fields": found, "image_base64": b64,
+        elapsed = round(time.time() - t_batch, 1)
+        pageRange = str(start_page) if start_page == end_page else f"{start_page}-{end_page}"
+        yield {"event": "batch", "data": json.dumps({
+            "batch": batch_num, "total_batches": total_batches,
+            "start_page": start_page, "end_page": end_page,
+            "seconds": elapsed, "found_fields": ["OCR 文字提取"],
+            "image_base64": batch_images[0],
         }, ensure_ascii=False)}
 
-    # 3. 最终汇总
-    if total_pages > 3:
-        t_final = time.time()
-        # 保存 raw_tables（不被汇总覆盖）
-        saved_tables = accumulated.get("raw_tables", [])
-        final_prompt = get_vision_final_prompt(contract_type, json.dumps(accumulated, ensure_ascii=False, indent=2))
-        try:
-            response = await loop.run_in_executor(
-                None,
-                lambda fp=final_prompt, m=settings.LLM_MODEL: client.chat.completions.create(
-                    model=m,
-                    messages=[{"role": "system", "content": "汇总合同信息，保留所有 raw_tables 和 resource_summary，不要丢失"}, {"role": "user", "content": fp}],
-                    temperature=0.1, max_tokens=8192,
-                    extra_body={"chat_template_kwargs": {"enable_thinking": False}},
-                )
+    # 拼接完整文字
+    full_text = "\n\n".join(ocr_parts)
+    logger.info(f"OCR complete: {len(full_text)} chars from {total_pages} pages")
+    yield {"event": "progress", "data": json.dumps({
+        "step": "ocr_done", "chars": len(full_text), "seconds": round(time.time() - t1, 1)
+    }, ensure_ascii=False)}
+
+    # ============================================================
+    # 阶段 2：文本 LLM 从全文提取结构化 JSON
+    # ============================================================
+    from src.contract_parser.prompts import EXTRACT_SYSTEM_PROMPT, get_extract_prompt
+
+    t_extract = time.time()
+    extract_prompt = get_extract_prompt(contract_type, full_text)
+
+    try:
+        response = await loop.run_in_executor(
+            None,
+            lambda ep=extract_prompt, sp=EXTRACT_SYSTEM_PROMPT, m=settings.LLM_MODEL: client.chat.completions.create(
+                model=m,
+                messages=[{"role": "system", "content": sp}, {"role": "user", "content": ep}],
+                temperature=0.3, max_tokens=32768,
+                extra_body={"chat_template_kwargs": {"enable_thinking": True}},
             )
-            _deep_merge(accumulated, _parse_llm_json(response.choices[0].message.content))
-        except Exception:
-            pass
-        # 恢复 raw_tables（汇总可能丢失）
-        if saved_tables and (not accumulated.get("raw_tables") or len(accumulated.get("raw_tables", [])) < len(saved_tables)):
-            accumulated["raw_tables"] = saved_tables
-        yield {"event": "progress", "data": json.dumps({"step": "final_summary", "seconds": round(time.time() - t_final, 1)}, ensure_ascii=False)}
+        )
+        raw = response.choices[0].message.content
+        result = _parse_llm_json(raw)
+        import sys
+        print(f"[contract_parser] [stream] Extract keys: {list(result.keys()) if result else 'EMPTY'}, party_a={result.get('party_a_name')}, party_b={result.get('party_b_name')}", file=sys.stderr)
+        rs = result.get("resource_summary", {})
+        logger.info(f"[stream] Extract result: resource_summary items={rs.get('items')}, stats={rs.get('stats')}")
+    except Exception as e:
+        logger.error(f"Extract LLM failed: {e}")
+        result = {}
 
-    # 4. raw_tables 去重（跨页表格可能被多页识别为多条，按 title 去重保留最长行数的）
-    if accumulated.get("raw_tables"):
-        deduped = {}
-        for t in accumulated["raw_tables"]:
-            key = (t.get("title", ""), tuple(t.get("headers", [])))
-            if key not in deduped or len(t.get("rows", [])) > len(deduped[key].get("rows", [])):
-                deduped[key] = t
-        accumulated["raw_tables"] = list(deduped.values())
-    
-    accumulated["_processing_info"] = processing_info
-    accumulated["_processing_info"]["elapsed_seconds"] = round(time.time() - t0, 1)
-    if accumulated.get("raw_tables"):
-        accumulated["raw_tables_json"] = json.dumps(accumulated["raw_tables"], ensure_ascii=False)
-    yield {"event": "done", "data": json.dumps({"fields": accumulated}, ensure_ascii=False)}
+    yield {"event": "progress", "data": json.dumps({
+        "step": "extract_done", "seconds": round(time.time() - t_extract, 1)
+    }, ensure_ascii=False)}
+
+    # 后处理：过滤 + 去重 + 资源统计
+    _post_process_tables(result)
+
+    result["_processing_info"] = processing_info
+    result["_processing_info"]["elapsed_seconds"] = round(time.time() - t0, 1)
+    result["_ocr_text"] = full_text
+    if result.get("raw_tables"):
+        result["raw_tables_json"] = json.dumps(result["raw_tables"], ensure_ascii=False)
+    yield {"event": "done", "data": json.dumps({"fields": result}, ensure_ascii=False)}
 
 
-def _fallback_parse(raw: str, contract_type: str) -> dict:
-    """JSON 解析失败时的降级策略：返回原始文本"""
-    return {
-        "raw_response": raw,
-        "parse_error": True,
-        "message": "AI 返回格式异常，请手动填写或重试",
-    }
+# ============================================================
+# 辅助函数（_deep_merge 已不再需要，保留兼容）
+# ============================================================
+
+def _deep_merge(base: dict, update: dict):
+    """深度合并（已废弃，两阶段管道不再使用）"""
+    for k, v in update.items():
+        if v is None or v == [] or v == {}:
+            continue
+        if isinstance(v, dict) and isinstance(base.get(k), dict):
+            _deep_merge(base[k], v)
+        elif isinstance(v, list) and isinstance(base.get(k), list):
+            base[k].extend(v)
+        else:
+            base[k] = v

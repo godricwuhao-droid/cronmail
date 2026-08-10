@@ -3,7 +3,7 @@
  * 项目管理 - 附件管理页
  *
  * 基于通用 AttachmentsPage.vue 适配：
- *  - contract_type 固定为 compute_service
+ *  - contract_type 固定为 project
  *  - 路由返回 ProjectDetail
  */
 import { computed, onMounted, ref, nextTick } from 'vue'
@@ -20,6 +20,7 @@ import {
   Document,
   Folder,
   WarningFilled,
+  UploadFilled,
 } from '@element-plus/icons-vue'
 import {
   getAttachments,
@@ -30,6 +31,8 @@ import {
   type AttachmentFile,
   type AttachmentItem,
 } from '@/api/modules/attachment'
+import { getProjectContract } from '@/api/modules/project'
+import { useGlobalDrop } from '@/composables/useGlobalDrop'
 
 // 文件预览相关依赖
 import { renderAsync as renderDocx } from 'docx-preview'
@@ -44,8 +47,11 @@ GlobalWorkerOptions.workerSrc = pdfjsWorker
 const route = useRoute()
 const router = useRouter()
 
-// 项目管理固定使用 compute_service 作为附件 contract_type
-const contractType = 'compute_service' as const
+// 项目管理固定使用 project 作为附件 contract_type
+const contractType = 'project' as const
+
+/** 从合同详情获取 project_type，用于附件分类过滤 */
+const projectType = ref<string | undefined>(undefined)
 
 const contractId = computed(() => route.params.id as string)
 const companyCode = computed(() => (route.params.company as string) || 'fengyun')
@@ -78,7 +84,7 @@ async function fetchAttachments() {
   loading.value = true
   const previousSelectedId = selectedItemId.value
   try {
-    const res = await getAttachments(contractType, contractId.value)
+    const res = await getAttachments(contractType, contractId.value, projectType.value)
     categories.value = res.categories
     expandedCategories.value = res.categories.map((c) => c.category_id)
     const stillExists = res.categories.some(cat =>
@@ -189,6 +195,32 @@ async function handleUpload(file: File, itemId: string) {
     }, 3000)
   }
 }
+
+// ============================================================
+// 批量上传（全局拖拽用）
+// ============================================================
+async function uploadFiles(files: File[], itemId: string) {
+  for (const file of files) {
+    await handleUpload(file, itemId)
+  }
+  // 批量上传完成后刷新列表
+  fetchAttachments()
+}
+
+// ============================================================
+// 全局拖拽上传
+// ============================================================
+const { isDragging: isGlobalDragging } = useGlobalDrop({
+  accept: ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'jpg', 'jpeg', 'png', 'txt'],
+  multiple: true,
+  onDrop: (files) => {
+    if (!selectedItem.value) {
+      ElMessage.warning('请先选择附件分类后再拖入文件')
+      return
+    }
+    uploadFiles(files, selectedItem.value.item_id)
+  },
+})
 
 // ============================================================
 // 下载
@@ -516,7 +548,14 @@ function onPreviewDialogClosed() {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
+  // 先获取合同详情以拿到 project_type
+  try {
+    const contract = await getProjectContract(contractId.value)
+    projectType.value = (contract as any).project_type || undefined
+  } catch {
+    // 获取合同详情失败，project_type 保持 undefined
+  }
   fetchAttachments()
 })
 </script>
@@ -705,6 +744,16 @@ onMounted(() => {
         <div id="preview-container" style="overflow:auto;max-height:70vh;"></div>
       </div>
     </el-dialog>
+
+    <!-- 全局拖拽上传遮罩 -->
+    <Teleport to="body">
+      <div v-if="isGlobalDragging" class="global-drop-overlay">
+        <div class="global-drop-box">
+          <el-icon :size="48"><UploadFilled /></el-icon>
+          <p>释放文件以上传到「{{ selectedItem?.item_name || '请先选择附件分类' }}」</p>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -854,4 +903,24 @@ onMounted(() => {
 .preview-dialog :deep(.el-dialog__body) { padding: 12px 24px 24px; }
 .docx-preview { padding: 20px; background: #fff; }
 .docx-preview section { background: #fff; margin-bottom: 16px; box-shadow: 0 1px 4px rgba(0,0,0,.08); padding: 40px; }
+
+/* 全局拖拽遮罩 */
+.global-drop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.global-drop-box {
+  background: #fff;
+  border: 3px dashed #409eff;
+  border-radius: 12px;
+  padding: 48px 64px;
+  text-align: center;
+  color: #409eff;
+  font-size: 16px;
+}
 </style>

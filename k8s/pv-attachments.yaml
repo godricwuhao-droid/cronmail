@@ -15,6 +15,8 @@ spec:
     - ReadWriteMany
   persistentVolumeReclaimPolicy: Retain
   storageClassName: ""
+  mountOptions:
+    - lookupcache=none
   nfs:
     server: 192.168.180.50
     path: /cronmail

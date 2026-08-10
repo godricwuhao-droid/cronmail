@@ -19,6 +19,7 @@ import {
 } from '@/api/modules/project'
 import {
   getAttachmentSummary,
+  listAttachmentCategories,
   type AttachmentSummary,
 } from '@/api/modules/attachment'
 
@@ -61,11 +62,6 @@ function formatDate(s?: string | null) {
   return s.length >= 10 ? s.slice(0, 10) : s
 }
 
-function formatDateTime(s?: string | null) {
-  if (!s) return '-'
-  return s.replace('T', ' ').slice(0, 19)
-}
-
 function formatAmount(val?: string | number | null) {
   if (val === null || val === undefined || val === '') return '-'
   const n = typeof val === 'string' ? parseFloat(val) : val
@@ -78,15 +74,32 @@ async function fetchRecord() {
   try {
     const res = await getProjectContract(route.params.id as string)
     record.value = res
-    // 从 raw_tables_json 解析原始表格
+    // 从 raw_tables_json 解析原始表格（兼容 {tables:[], resource_summary:{}} 和纯数组格式）
     const detailAny = res as any
     if (detailAny.raw_tables_json) {
       try {
-        rawTables.value = JSON.parse(detailAny.raw_tables_json)
+        const parsed = JSON.parse(detailAny.raw_tables_json)
+        if (Array.isArray(parsed)) {
+          rawTables.value = parsed
+        } else {
+          rawTables.value = parsed.tables || []
+          if (parsed.resource_summary?.stats) {
+            resourceSummary.value = { stats: parsed.resource_summary.stats }
+          }
+        }
       } catch { rawTables.value = [] }
     }
     try {
-      summary.value = await getAttachmentSummary('project', res.id)
+      summary.value = await getAttachmentSummary('project', res.id, detailAny.project_type)
+      // 从分类列表获取 item_id -> 分类名称的映射
+      if (summary.value) {
+        const catRes = await listAttachmentCategories('project', detailAny.project_type || undefined)
+        for (const cat of catRes.items) {
+          for (const item of cat.items || []) {
+            categoryLabels[item.id] = cat.name
+          }
+        }
+      }
     } catch {
       summary.value = null
     }
@@ -149,11 +162,8 @@ function statusText(confirmed: boolean, fileCount: number): string {
   return confirmed ? '已确认' : '未确认'
 }
 
-const categoryLabels: Record<string, string> = {
-  contract_agreement: '合同协议',
-  acceptance_material: '交付材料',
-  process_material: '过程材料',
-}
+const categoryLabels: Record<string, string> = {}
+
 
 onMounted(() => {
   fetchRecord()
@@ -217,14 +227,17 @@ onMounted(() => {
           <span v-if="record?.amount">{{ formatAmount(record.amount) }}</span>
           <span v-else class="muted">自动计算</span>
         </el-descriptions-item>
-        <el-descriptions-item label="合同金额">
-          {{ formatAmount(record?.amount) }}
+        <el-descriptions-item label="负责人">
+          {{ record?.responsible_person || '-' }}
         </el-descriptions-item>
-        <el-descriptions-item label="创建时间" :span="3">
-          {{ formatDateTime(record?.created_at) }}
+        <el-descriptions-item label="商务">
+          {{ record?.business_person || '-' }}
         </el-descriptions-item>
-        <el-descriptions-item label="更新时间" :span="3">
-          {{ formatDateTime(record?.updated_at) }}
+        <el-descriptions-item label="甲方委派人">
+          {{ record?.party_a_contact || '-' }}
+        </el-descriptions-item>
+        <el-descriptions-item label="乙方委派人">
+          {{ record?.party_b_contact || '-' }}
         </el-descriptions-item>
         <el-descriptions-item label="所属项目" :span="3">
           <span v-if="record?.project_name">{{ record.project_name }}</span>
@@ -242,59 +255,28 @@ onMounted(() => {
     </section>
 
     <!-- 合同详细内容 -->
-    <section v-if="record?.contract_content || record?.delivery_requirements || record?.process_records" class="detail-section">
+    <section class="detail-section">
       <h3 class="section-title">合同详细内容</h3>
       <el-descriptions :column="1" border>
-        <el-descriptions-item v-if="record?.contract_content" label="合同内容">
-          <div class="long-text">{{ record.contract_content }}</div>
+        <el-descriptions-item label="合同内容">
+          <div v-if="record?.contract_content" class="long-text">{{ record.contract_content }}</div>
+          <span v-else class="muted">—</span>
         </el-descriptions-item>
-        <el-descriptions-item v-if="record?.delivery_requirements" label="交付要求">
-          <div class="long-text">{{ record.delivery_requirements }}</div>
+        <el-descriptions-item label="交付要求">
+          <div v-if="record?.delivery_requirements" class="long-text">{{ record.delivery_requirements }}</div>
+          <span v-else class="muted">—</span>
         </el-descriptions-item>
-        <el-descriptions-item v-if="record?.process_records" label="过程记录">
-          <div class="long-text">{{ record.process_records }}</div>
+        <el-descriptions-item label="过程记录">
+          <div v-if="record?.process_records" class="long-text">{{ record.process_records }}</div>
+          <span v-else class="muted">—</span>
         </el-descriptions-item>
       </el-descriptions>
-    </section>
-
-    <!-- 文档表格展示区 -->
-    <section v-if="rawTables.length > 0" class="detail-section">
-      <h3 class="section-title">文档表格</h3>
-      <div v-for="table in rawTables" :key="table.table_index" style="margin-bottom: 16px;">
-        <div v-if="table.title" style="font-weight: 600; margin-bottom: 8px;">{{ table.title }}</div>
-        <el-table :data="table.rows" border size="small" max-height="400">
-          <el-table-column v-for="(h, hi) in table.headers" :key="hi" :label="h" :prop="String(hi)" min-width="100">
-            <template #default="{ row }">{{ row[hi] || '-' }}</template>
-          </el-table-column>
-        </el-table>
-      </div>
-    </section>
-
-    <!-- 资源统计面板 -->
-    <section v-if="statsDisplay.length > 0" class="detail-section">
-      <h3 class="section-title">📊 交付资源统计</h3>
-      <div style="display: flex; flex-wrap: wrap; gap: 16px; padding: 12px; background: #f5f7fa; border-radius: 6px;">
-        <div v-for="s in statsDisplay" :key="s.label" style="display: flex; gap: 6px;">
-          <span style="color: #909399;">{{ s.label }}：</span>
-          <span style="font-weight: 600; color: #1a3270;">{{ s.value }}</span>
-        </div>
-      </div>
     </section>
 
     <!-- 服务内容明细（原始表格 + 统计） -->
     <section v-if="rawTables.length > 0 || (record?.service_lines && record.service_lines.length > 0)" class="detail-section">
       <h3 class="section-title">服务内容明细</h3>
       
-      <!-- 原始表格 -->
-      <div v-for="table in rawTables" :key="table.table_index" style="margin-bottom: 16px;">
-        <div v-if="table.title" style="font-weight: 600; margin-bottom: 8px;">📋 {{ table.title }}</div>
-        <el-table :data="table.rows" border size="small" max-height="500">
-          <el-table-column v-for="(h, hi) in table.headers" :key="hi" :label="h" :prop="String(hi)" min-width="100">
-            <template #default="{ row }">{{ row[hi] || '-' }}</template>
-          </el-table-column>
-        </el-table>
-      </div>
-
       <!-- 资源统计 -->
       <div v-if="statsDisplay.length > 0" style="padding: 12px; background: #f5f7fa; border-radius: 6px; margin-bottom: 12px;">
         <div style="font-weight: 600; margin-bottom: 8px;">📊 交付资源统计</div>
@@ -304,6 +286,16 @@ onMounted(() => {
             <span style="font-weight: 600; color: #1a3270;">{{ s.value }}</span>
           </div>
         </div>
+      </div>
+
+      <!-- 原始表格 -->
+      <div v-for="table in rawTables" :key="table.table_index" style="margin-bottom: 16px;">
+        <div v-if="table.title" style="font-weight: 600; margin-bottom: 8px;">📋 {{ table.title }}</div>
+        <el-table :data="table.rows" border size="small" max-height="500">
+          <el-table-column v-for="(h, hi) in table.headers" :key="hi" :label="h" :prop="String(hi)" min-width="100">
+            <template #default="{ row }">{{ row[hi] || '-' }}</template>
+          </el-table-column>
+        </el-table>
       </div>
     </section>
 

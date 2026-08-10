@@ -61,13 +61,24 @@ def _get_upload_dir(contract_type: str, contract_id: str, item_id: str) -> str:
 def list_categories(
     db: Session,
     contract_type: Optional[str] = None,
+    project_type: Optional[str] = None,
 ) -> list[AttachmentCategory]:
-    """获取分类列表，含子项（排除软删除的子项）"""
+    """获取分类列表，含子项（排除软删除的子项）
+    
+    当 project_type 有值时，只返回匹配该 project_type 的分类；
+    project_type 为 None 或空字符串时，返回所有分类。
+    """
     query = db.query(AttachmentCategory).filter(
         AttachmentCategory.is_active == True  # noqa: E712
     )
     if contract_type:
         query = query.filter(AttachmentCategory.contract_type == contract_type)
+
+    if contract_type == "project":
+        if project_type:
+            query = query.filter(AttachmentCategory.project_type == project_type)
+        # project_type 为 None 或空字符串时：返回所有分类
+
     categories = query.order_by(AttachmentCategory.sort_order).all()
 
     # 过滤掉每个分类下已软删除的子项
@@ -88,6 +99,7 @@ def create_category(
 ) -> AttachmentCategory:
     category = AttachmentCategory(
         contract_type=data.contract_type,
+        project_type=data.project_type,
         name=data.name,
         code=data.code,
         sort_order=data.sort_order,
@@ -272,21 +284,29 @@ def get_attachment_list(
     db: Session,
     contract_type: str,
     contract_id: str,
+    project_type: Optional[str] = None,
 ) -> list[dict]:
     """
     按分类+子项结构返回附件列表。
     返回格式：categories 列表，每个 category 包含 items，每个 item 包含 files。
+    当 project_type 指定且 contract_type="project" 时，按 project_type 过滤分类。
     """
+
     # 获取该合同类型下的所有活跃分类
-    categories = (
+    query = (
         db.query(AttachmentCategory)
         .filter(
             AttachmentCategory.contract_type == contract_type,
             AttachmentCategory.is_active == True,  # noqa: E712
         )
-        .order_by(AttachmentCategory.sort_order)
-        .all()
     )
+
+    if project_type and contract_type == "project":
+        query = query.filter(
+            AttachmentCategory.project_type == project_type,
+        )
+
+    categories = query.order_by(AttachmentCategory.sort_order).all()
 
     result = []
     for cat in categories:
@@ -456,17 +476,27 @@ def get_summary(
     db: Session,
     contract_type: str,
     contract_id: str,
+    project_type: Optional[str] = None,
 ) -> dict:
-    """获取合同附件完成状态汇总"""
+    """获取合同附件完成状态汇总
+    当 project_type 指定且 contract_type="project" 时，按 project_type 过滤分类。
+    """
+
     # 获取该合同类型下的所有活跃分类和子项
-    categories = (
+    query = (
         db.query(AttachmentCategory)
         .filter(
             AttachmentCategory.contract_type == contract_type,
             AttachmentCategory.is_active == True,  # noqa: E712
         )
-        .all()
     )
+
+    if project_type and contract_type == "project":
+        query = query.filter(
+            AttachmentCategory.project_type == project_type,
+        )
+
+    categories = query.all()
 
     total_items = 0
     confirmed_items = 0
@@ -499,11 +529,11 @@ def get_summary(
             else:
                 cat_confirmed = False
 
-        # 分类确认状态：所有子项都已确认 且 至少有一个文件
-        items_detail[cat.code] = {
-            "confirmed": cat_confirmed and cat_file_count > 0,
-            "file_count": cat_file_count,
-        }
+            # 按子项 ID 返回明细
+            items_detail[item.id] = {
+                "confirmed": is_confirmed,
+                "file_count": fc,
+            }
 
     return {
         "total_items": total_items,
@@ -604,35 +634,6 @@ DEFAULT_CATEGORIES = [
                 "items": [
                     {"name": "资源交付清单", "description": "资源交付清单Excel", "expected_type": "excel", "sort_order": 1},
                     {"name": "资源开通邮件截图", "description": "资源开通邮件截图", "expected_type": "image", "sort_order": 2},
-                ],
-            },
-        ],
-    },
-    {
-        "contract_type": "project",
-        "categories": [
-            {
-                "name": "合同材料",
-                "code": "contract_material",
-                "sort_order": 1,
-                "items": [
-                    {"name": "合同扫描件", "expected_type": "pdf", "sort_order": 1},
-                ],
-            },
-            {
-                "name": "交付材料",
-                "code": "delivery_material",
-                "sort_order": 2,
-                "items": [
-                    {"name": "验收单", "expected_type": "pdf", "sort_order": 1},
-                ],
-            },
-            {
-                "name": "过程材料",
-                "code": "process_material",
-                "sort_order": 3,
-                "items": [
-                    {"name": "交付清单", "expected_type": "excel", "sort_order": 1},
                 ],
             },
         ],

@@ -8,6 +8,31 @@ from pydantic import BaseModel, Field
 
 
 # ============================================================
+# ProjectType Schemas
+# ============================================================
+
+class ProjectTypeCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100, description="项目类型名称")
+    sort_order: Optional[int] = Field(0, description="排序序号")
+
+
+class ProjectTypeUpdate(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=100, description="项目类型名称")
+    sort_order: Optional[int] = Field(None, description="排序序号")
+
+
+class ProjectTypeResponse(BaseModel):
+    id: str
+    name: str
+    sort_order: int
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ============================================================
 # ProjectServiceLine Schemas
 # ============================================================
 
@@ -83,12 +108,16 @@ class ProjectContractCreate(BaseModel):
     end_date: Optional[date] = Field(None, description="合同结束日期")
     related_contract_id: Optional[str] = Field(None, description="背靠背关联合同ID")
     project_name: Optional[str] = Field(None, max_length=255, description="所属项目")
-    project_type: Optional[str] = Field(None, max_length=100, description="项目类型，如算力服务合同")
+    project_type: str = Field(..., max_length=100, description="项目类型，如算力服务合同")
     contract_content: Optional[str] = Field(None, description="合同内容")
     delivery_requirements: Optional[str] = Field(None, description="合同交付要求")
     process_records: Optional[str] = Field(None, description="过程记录")
     raw_tables_json: Optional[str] = Field(None, description="原始表格JSON，AI解析结果")
     remark: Optional[str] = Field(None, description="备注")
+    responsible_person: Optional[str] = Field(None, max_length=100, description="负责人，手动填写")
+    business_person: Optional[str] = Field(None, max_length=100, description="商务，手动填写")
+    party_a_contact: Optional[str] = Field(None, max_length=255, description="甲方委派人及联系方式，Agent提取")
+    party_b_contact: Optional[str] = Field(None, max_length=255, description="乙方委派人及联系方式，Agent提取")
     sort_order: Optional[int] = Field(0, description="排序序号")
     service_lines: Optional[list[ProjectServiceLineCreate]] = Field(None, description="服务行列表")
 
@@ -111,12 +140,16 @@ class ProjectContractUpdate(BaseModel):
     process_records: Optional[str] = None
     raw_tables_json: Optional[str] = None
     remark: Optional[str] = None
+    responsible_person: Optional[str] = Field(None, max_length=100)
+    business_person: Optional[str] = Field(None, max_length=100)
+    party_a_contact: Optional[str] = Field(None, max_length=255)
+    party_b_contact: Optional[str] = Field(None, max_length=255)
     sort_order: Optional[int] = None
     service_lines: Optional[list[ProjectServiceLineCreate]] = None
 
 
 class ProjectContractListResponse(BaseModel):
-    """列表项（不含完整 service_lines，含 service_lines_count）"""
+    """列表项（不含完整 service_lines，含 service_lines_count + 回款汇总）"""
     id: str
     company_code: str
     name: str
@@ -134,8 +167,14 @@ class ProjectContractListResponse(BaseModel):
     delivery_requirements: Optional[str] = None
     process_records: Optional[str] = None
     remark: Optional[str] = None
+    responsible_person: Optional[str] = None
+    business_person: Optional[str] = None
+    party_a_contact: Optional[str] = None
+    party_b_contact: Optional[str] = None
     sort_order: int = 0
     service_lines_count: int = 0
+    paid_amount: Optional[Decimal] = None
+    payment_progress: Optional[float] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
@@ -162,6 +201,10 @@ class ProjectContractResponse(BaseModel):
     process_records: Optional[str] = None
     raw_tables_json: Optional[str] = None
     remark: Optional[str] = None
+    responsible_person: Optional[str] = None
+    business_person: Optional[str] = None
+    party_a_contact: Optional[str] = None
+    party_b_contact: Optional[str] = None
     sort_order: int = 0
     service_lines: list[ProjectServiceLineResponse] = []
     related_contract: Optional[RelatedProjectContractBrief] = None
@@ -177,3 +220,46 @@ class ProjectContractListWrap(BaseModel):
     total: int
     page: int = 1
     page_size: int = 20
+
+
+# ============================================================
+# ProjectContractPayment Schemas
+# ============================================================
+
+class PaymentCreate(BaseModel):
+    amount: Decimal = Field(..., gt=0, description="回款金额")
+    payment_date: Optional[date] = Field(None, description="回款日期")
+    receipt_file_id: Optional[str] = Field(None, max_length=36)
+    invoice_file_id: Optional[str] = Field(None, max_length=36)
+    remark: Optional[str] = Field(None)
+
+
+class PaymentUpdate(BaseModel):
+    amount: Optional[Decimal] = Field(None, gt=0)
+    payment_date: Optional[date] = None
+    remark: Optional[str] = None
+
+
+class PaymentResponse(BaseModel):
+    id: str
+    contract_id: str
+    amount: Decimal
+    payment_date: Optional[date] = None
+    receipt_file_id: Optional[str] = None
+    receipt_filename: Optional[str] = None
+    receipt_mime_type: Optional[str] = None
+    invoice_file_id: Optional[str] = None
+    invoice_filename: Optional[str] = None
+    invoice_mime_type: Optional[str] = None
+    remark: Optional[str] = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class PaymentParseConfirmRequest(BaseModel):
+    """前端确认金额后创建回款记录"""
+    receipt_file_id: str = Field(..., min_length=1, max_length=36, description="回执单附件ID")
+    invoice_file_id: Optional[str] = Field(None, max_length=36, description="发票附件ID")
+    amount: Decimal = Field(..., gt=0, description="用户确认的金额")
+    payment_date: Optional[date] = Field(None, description="用户确认的回款日期")

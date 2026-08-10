@@ -7,6 +7,135 @@
 > - 类型：新增 / 修改 / 修复 / 删除 / 重构
 > - Breaking Change 标注 ⚠️
 
+## 2026-08-07 (回款页面重写 v2)
+
+### [重构] 回款页面——双文件匹配 + 附件预览 + Copilot
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 重构 |
+| 范围 | 回款管理页面 + API 模块 |
+| 影响文件 | `frontend/src/views/projects/payments.vue`、`frontend/src/api/modules/project.ts`、`frontend/src/api/modules/attachment.ts` |
+| 关联任务 | TASK-PAYMENTS-REWRITE-V2 |
+
+#### 改动
+
+- **payments.vue 重写**：
+  - 表头改为：日期 | 金额 | 回执单 | 发票 | 备注 | 操作
+  - 新增回款弹窗中集成 AI 上传区（回执单 + 发票），上传后自动调用 `parsePaymentFiles`
+  - AI 解析匹配成功 → 自动创建回款并关闭弹窗
+  - AI 解析匹配失败 → 弹出金额确认对话框，用户选择回执单金额或发票金额后调用 `confirmPaymentParse`
+  - Copilot 面板展示解析过程消息（与 form.vue 一致的设计）
+  - 点击回执单/发票列的「查看」链接 → 打开附件预览弹窗
+  - 预览弹窗支持 PDF（pdfjs-dist 逐页渲染）、图片（blob URL）、其他文件（下载按钮）
+  - 保留全局拖拽识别功能
+  - 保留手动新增/编辑/删除回款功能
+- **project.ts**：
+  - 新增 `ParseResult` 接口类型
+  - 新增 `parsePaymentFiles()` 函数（双文件 AI 解析，对应 `POST /.../payments/parse`）
+  - 新增 `confirmPaymentParse()` 函数（确认金额创建回款，对应 `POST /.../payments/parse/confirm`）
+  - 旧 `parsePaymentFile()` 标记为 `@deprecated`
+- **attachment.ts**：
+  - 新增 `getDownloadUrl()` 函数（生成附件下载 URL）
+
+---
+
+## 2026-08-07 (项目概览看板 UI 重设计)
+
+### [重构] 项目概览看板页面全面重设计
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 重构 |
+| 范围 | 项目概览看板页面 |
+| 影响文件 | `frontend/src/views/reports/project-overview.vue` |
+| 关联任务 | TASK-PROJECT-OVERVIEW-REDESIGN |
+
+#### 改动
+
+- **顶部标题栏**：新增页面图标 + 公司选择器（全部/蜂云时代/安徽天枢/千星控股）
+- **统计卡片行**：4 个卡片改为带图标的现代卡片样式，hover 上浮动效，渐变图标背景
+  - 合同总数（蓝色图标）、总金额（绿色图标）、本月新增（橙色图标）、本月金额（紫色图标）
+- **金额格式化**：超过万显示「¥XX万」，超过亿显示「¥X.XX亿」
+- **项目类型分布**：从表格改为卡片列表，带彩色圆点 + 标签 + 金额
+- **月度趋势图**：新增 ECharts 混合图表（柱状图=合同数 + 折线图=金额 + 双 Y 轴 + 渐变配色）
+- **按月明细表**：精简列（月份/合同数/金额/vCPU/GPU/存储），新增「全部展开/收起」按钮
+- **存储格式化**：超过 1024GB 自动显示为 TB
+- **响应式**：移动端卡片堆叠，图表高度自适应
+
+---
+
+## 2026-08-06 (项目概览看板)
+
+### [新增] 数据报表菜单下新增「项目概览」看板页面
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 新增 |
+| 范围 | 左侧菜单、路由、API 模块、看板页面 |
+| 影响文件 | `frontend/src/router/index.ts`、`frontend/src/layouts/MainLayout.vue`、`frontend/src/api/modules/project.ts`、`frontend/src/views/reports/project-overview.vue` |
+| 关联任务 | TASK-PROJECT-OVERVIEW |
+
+#### 改动
+
+- **路由新增**：在 `data-report` 子路由中新增 `project-overview` 路由
+- **菜单新增**：在「数据报表」sub-menu 中新增「项目概览」菜单项，同步更新面包屑映射
+- **API 扩展**：在 `project.ts` 中新增 `ProjectOverviewResponse`、`MonthlyStat`、`ProjectTypeStat` 类型及 `getProjectOverview()` 方法
+- **看板页面**：`project-overview.vue`
+  - 顶部 4 个统计卡片：合同总数、合同总金额、本月新增合同数、本月新增金额
+  - 中部：按项目类型分布表格（`by_project_type`）
+  - 下部：按月统计表格，展示月份/合同数/金额/vCPU/内存/存储/GPU/算力/带宽/机柜/IP
+  - 点击月份行可展开该月合同列表（通过遍历三家公司拉取后前端按 start_date 过滤）
+
+---
+
+## 2026-07-30 (项目附件配置页重构)
+
+### [重构] 「项目附件配置」页面改为两层结构（项目类型 → 分类）
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 重构 |
+| 范围 | 项目附件配置页面布局与交互 |
+| 影响文件 | `frontend/src/views/system/project-attachment-categories.vue` |
+| 关联任务 | TASK-REFACTOR-PROJECT-CATEGORIES |
+
+#### 改动
+
+- **布局重构**：从单一卡片改为上下两层结构
+  - 顶部卡片：项目类型选择区（el-select + allow-create + filterable），展示当前选中类型
+  - 下方卡片：该类型的附件分类管理（保持原有 CRUD 逻辑不变）
+- **project_type 管理优化**：
+  - 下拉选择器整合「兜底分类（适用所有项目）」和已有 project_type 选项
+  - 支持输入新建项目类型（allow-create）
+  - 新建分类自动关联当前选中的 project_type，弹窗中不再展示 project_type 字段
+- **交互增强**：
+  - 顶部显示当前选中类型标签
+  - 空状态提示区分兜底分类和具体类型
+- **样式优化**：page-container 使用 flex column + gap 布局，分类卡片样式微调
+
+---
+
+## 2026-07-29 (前端镜像构建部署)
+
+### [修改] 构建并推送前端 Docker 镜像，重启 K8s 部署
+
+| 项目 | 说明 |
+| --- | --- |
+| 类型 | 修改 |
+| 范围 | Docker 镜像、K8s 部署 |
+| 影响文件 | `Dockerfile.frontend`（使用已有）、`frontend/` 源码 |
+| 关联任务 | TASK-FRONTEND-DEPLOY |
+
+#### 改动
+
+- 使用 `Dockerfile.frontend` 构建 `harbor.xhwltech.com/xhcloud/cronmail-frontend:latest` 镜像
+- 推送到 Harbor 仓库（digest: `sha256:e1423983ccb70eee0be593863184369f6315d998b4c9ae77d194a032adb213b1`）
+- 重启 `cronmail-frontend` deployment（namespace: `cronmail`）
+- 新 Pod `cronmail-frontend-fb74dc674-x79r2` 正常运行（1/1 Running）
+
+---
+
 ## 2026-07-28 (项目管理合同新增 project_type + 动态表格渲染 + 统计面板)
 
 ### [新增] 项目管理合同新增 project_type 字段、raw_tables 表格渲染、resource_summary 统计面板
@@ -3658,3 +3787,26 @@ Copilot 对接 SSE 流式 + 显示图片 + 中文字段标签
 
 **备注：**
 - ⚠️ Breaking Change：旧数据中硬编码字段（如 `vcpu_count`）的值需要迁移到 `specification` JSON 中，否则详情页不再显示
+
+| 日期 | 类型 | 变更内容 | 影响文件/范围 | 关联任务 | 备注 |
+|------|------|---------|-------------|---------|------|
+| 2026-08-05 | 修复 | Copilot 字段名和资源统计改为纯中文显示 | form.vue | TASK-002 | |
+| 2026-08-05 | 修复 | 项目管理附件页 contractType 从 compute_service 改为 project，并传入 project_type 过滤 | AttachmentsPage.vue, attachment.ts | - | 之前错误使用 compute_service 导致附件分类混乱；同时 getAttachments 新增 projectType 参数支持 |
+| 2026-12-18 | 部署 | 前端镜像构建并部署到 K8s | Dockerfile.frontend, K8s deployment | - | 镜像: harbor.xhwltech.com/xhcloud/cronmail-frontend:latest (sha256:93ea4dec) |
+| 2026-12-18 | 部署 | 前端镜像构建并部署到 K8s（修复 TS 编译错误后重新构建） | Dockerfile.frontend, K8s deployment, form.vue | - | 镜像: harbor.xhwltech.com/xhcloud/cronmail-frontend:latest (sha256:56a819df)；修复：移除 form.vue 中未使用的 FIELD_LABELS 变量 |
+| 2026-12-18 | 新增 | 创建独立的「项目管理附件配置」页面，拆分自 attachment-categories.vue | project-attachment-categories.vue, router/index.ts, MainLayout.vue | TASK-010 | 固定 contract_type=project，去掉 tab 切换；通过 project_type 输入框过滤分类；MainLayout 面包屑同步更新 |
+| 2026-12-18 | 重构 | 项目配置页 project_type 改为下拉选择框，支持新建和已有类型选择 | project-attachment-categories.vue | - | el-select + allow-create + filterable；页面加载时从后端提取已有 project_type 作为选项；默认选中「兜底分类」；新建分类弹窗去掉 project_type 输入框，自动使用顶部选中值；删除分类后刷新选项列表 |
+| 2026-12-19 | 重构 | 项目配置页改为两层结构：先管理项目类型再管理附件分类 | project-attachment-categories.vue, project.ts | - | 顶部标签列表展示项目类型（调用 GET/POST/PUT/DELETE /api/project-types）；点击标签切换分类列表；保留兜底分类；分类/子项 CRUD 逻辑不变 |
+| 2026-12-19 | 修改 | 合同表单 project_type 从文本输入改为下拉选择（必填） | form.vue, project.ts | - | el-select 选项从 getProjectTypes() 获取；添加 required 校验规则；onMounted 中预加载项目类型列表 |
+| 2026-12-19 | 新增 | 新建合同页和附件管理页实现全局拖拽上传 | form.vue, AttachmentsPage.vue, useGlobalDrop.ts | - | 创建通用 composable `useGlobalDrop`；新建合同页拖文件到任意位置触发智能解析；附件页拖文件到任意位置上到当前选中分类；拖拽时显示全屏遮罩；不影响现有上传区域拖拽 |
+| 2026-12-19 | 新增 | 合同解析表格支持前端手动编辑 | form.vue | - | rawTables 表格单元格改为 el-input 可编辑；每张表格上方新增「添加行」「删除行」按钮；updateTableRow / addTableRow / deleteTableRow 三个函数通过 table.rows = [...table.rows] 触发响应式更新；编辑后通过 buildRawTablesJson() 序列化提交 |
+| 2026-12-19 | 重构 | 项目概览看板按新统计口径重做 | project-overview.vue, project.ts | TASK-011 | ⚠️ Breaking Change：API 类型 MonthlyStat/ProjectTypeStat/ProjectOverviewResponse 已替换为新结构；旧字段 monthly_stats/total_contracts/total_amount/by_project_type 移除；新增按 project_type 分组、月度分摊统计、资源趋势图、年份选择器、项目类型筛选器；图表从 1 个扩展为 3 个（月度合同数柱状图、金额趋势混合图、资源趋势多折线图）；月度明细表列扩展为 10 列；点击柱状图可弹出合同列表 |
+| 2026-12-19 | 新增 | 项目管理合同列表新增回款功能 | index.vue, project.ts | - | 新增回款进度列（进度条+百分比）；操作列新增「回款」按钮打开回款管理弹窗；弹窗展示回款汇总（合同金额/已回款/进度）；支持新增/编辑/删除回款记录；AI 识别回执单上传自动创建回款记录；回款后列表进度自动刷新；ProjectContractItem 新增 paid_amount/payment_progress 字段；API 层新增 PaymentRecord/PaymentSummary 类型及 6 个回款接口函数 |
+| 2026-12-19 | 重构 | 回款管理弹窗改为独立页面 | payments.vue, index.vue, router/index.ts | - | ⚠️ 回款管理从 index.vue 弹窗迁移到独立路由页面 `:company/:id/payments`（hidden）；页面含汇总卡片（合同金额/已回款/进度条）、回款列表（日期/金额/回执单/发票/备注/操作）、新增/编辑回款弹窗、AI 识别上传（回执单+发票双文件）、全局拖拽触发文件用途选择；index.vue 删除所有旧回款弹窗代码，回款按钮改为 router.push 跳转；列表页保留 payment_progress 进度条列 |
+| 2026-12-19 | 重构 | 回款管理页面重写：引入 Copilot 面板 + 文件预览区 | payments.vue | - | 参考 form.vue 的 Copilot 设计：右侧抽屉式 AI 助手面板（折叠/展开、消息列表、system/result 消息、自动滚动）；AI 识别时打开 Copilot 并实时展示解析进度和结果（金额/日期）；新增底部文件预览区（回执单 + 发票双栏 el-image 预览）；汇总卡片重新设计（图标+数据分栏布局）；操作栏重新组织（新增回款 + 回执单上传 + 发票上传）；深蓝主题配色与平台一致 |
+| 2026-08-07 | 修改 | 通用附件分类管理 project tab 下 project_type 必填 | src/views/system/attachment-categories.vue | TASK-017-7 | ADR-017 |
+| 2026-08-07 | 修改 | 项目管理附件配置页去掉兜底分类 | src/views/system/project-attachment-categories.vue | TASK-017-6 | ADR-017 |
+| 2026-08-09 | 修改 | 回款页面 AI 识别区重新设计为双拖拽区布局 | src/views/projects/payments.vue | TASK-017-10 | |
+| 2026-12-19 | 修改 | 回款页面回执单和发票均设为必选，去掉"* 必选"标签 | payments.vue | - | 去掉回执单拖拽区和弹窗中的「* 必选」标签；两个拖拽区文案统一不标注必选/可选；「开始 AI 识别」按钮改为回执单+发票都选好后启用（`!pendingReceipt \|\| !pendingInvoice`）；processPayment 守卫改为双文件检查；全局拖拽不再自动触发识别，改为提示继续上传发票 |
+| 2026-08-09 | 修复 | 回款页面预览改用 blob.type 判断 + 全局拖拽改为智能分发气泡 | src/views/projects/payments.vue | TASK-017-12 | |
+| 2026-12-19 | 修改 | 回款页面预览改用 mime_type 综合判断文件类型 | payments.vue, project.ts | - | 新增 `getPreviewType()` 函数，优先用扩展名和 mime_type 判断，blob.type 作为 fallback；`PaymentRecord` 新增 `receipt_filename`/`receipt_mime_type`/`invoice_filename`/`invoice_mime_type` 可选字段；`openPreview` 签名改为 `(fileId, filename, mimeType?)`；模板调用传入真实文件名和 mime_type |

@@ -2563,6 +2563,110 @@ HTTP 状态码：200
 
 ---
 
+## 项目类型 (Project Type)
+
+### GET /api/project-types
+
+获取所有活跃的项目类型列表，按 sort_order 排序。
+
+请求：`GET /api/project-types`
+
+响应：
+```json
+[
+  {
+    "id": "cada5c63-6928-4c49-8b3d-51450d234ef7",
+    "name": "算力服务合同(更新)",
+    "sort_order": 10,
+    "is_active": true,
+    "created_at": "2026-08-06T13:41:58.939974",
+    "updated_at": "2026-08-06T13:42:06.897463"
+  }
+]
+```
+
+HTTP 状态码：200
+
+关键字段：
+- `id`（string）：项目类型 UUID
+- `name`（string）：项目类型名称，如「算力服务合同」「卫星数据合同」
+- `sort_order`（int）：排序序号
+- `is_active`（bool）：是否启用（软删除后为 false）
+- `created_at`（datetime）：创建时间
+- `updated_at`（datetime）：更新时间
+
+---
+
+### POST /api/project-types
+
+创建项目类型。
+
+请求：`POST /api/project-types`
+```json
+{"name": "算力服务合同", "sort_order": 1}
+```
+
+响应：
+```json
+{
+  "id": "cada5c63-6928-4c49-8b3d-51450d234ef7",
+  "name": "算力服务合同",
+  "sort_order": 1,
+  "is_active": true,
+  "created_at": "2026-08-06T13:41:58.939974",
+  "updated_at": "2026-08-06T13:41:58.939985"
+}
+```
+
+HTTP 状态码：201
+
+关键字段：
+- `name`（string, 必填）：项目类型名称，1-100 字符，唯一
+- `sort_order`（int, 可选，默认 0）：排序序号
+
+---
+
+### PUT /api/project-types/{type_id}
+
+更新项目类型。
+
+请求：`PUT /api/project-types/cada5c63-6928-4c49-8b3d-51450d234ef7`
+```json
+{"name": "算力服务合同(更新)", "sort_order": 10}
+```
+
+响应：
+```json
+{
+  "id": "cada5c63-6928-4c49-8b3d-51450d234ef7",
+  "name": "算力服务合同(更新)",
+  "sort_order": 10,
+  "is_active": true,
+  "created_at": "2026-08-06T13:41:58.939974",
+  "updated_at": "2026-08-06T13:42:06.897463"
+}
+```
+
+HTTP 状态码：200
+错误：404（项目类型不存在）
+
+关键字段：
+- `name`（string, 可选）：项目类型名称
+- `sort_order`（int, 可选）：排序序号
+
+---
+
+### DELETE /api/project-types/{type_id}
+
+软删除项目类型（设置 is_active=false）。
+
+请求：`DELETE /api/project-types/f6168454-6147-4b63-80c4-a840d5f58163`
+
+HTTP 状态码：204（无响应体）
+错误：404（项目类型不存在）
+
+---
+
 ## 项目管理合同 (Project Contract)
 
 ### GET /api/project-contracts
@@ -2813,3 +2917,381 @@ HTTP 状态码：200
 请求：`DELETE /api/project-contracts/{id}/service-lines/{line_id}`
 
 响应：`{"detail": "服务行已删除"}`，HTTP 状态码：200
+
+---
+
+### GET /api/project-contracts/overview
+
+获取项目概览统计：按 `project_type` 维度拆分，服务期内月度分摊统计。
+
+请求：`GET /api/project-contracts/overview?year=2026`
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| year | int | 否 | 统计年份，默认当年（2000-2100） |
+
+响应：
+```json
+{
+  "year": 2026,
+  "by_project_type": [
+    {
+      "project_type": "算力服务",
+      "total_contracts": 2,
+      "total_amount": "18000000.00",
+      "monthly": [
+        {
+          "month": "2026-01",
+          "active_contracts": 2,
+          "monthly_amount": "2000000.00",
+          "contracts": [
+            {"id": "4ad8e61f-...", "name": "算力服务合同A", "monthly_amount": "1000000.00"},
+            {"id": "1ff46cb3-...", "name": "算力服务合同D-带资源", "monthly_amount": "1000000.00"}
+          ],
+          "resources": {
+            "total_vcpu": 100,
+            "total_memory_gb": 200,
+            "total_storage_gb": 1000,
+            "total_gpu_count": 5,
+            "total_gpu_tops": 500,
+            "total_bandwidth_mbps": 17,
+            "total_rack_count": 2,
+            "total_ip_count": 3
+          }
+        },
+        {
+          "month": "2026-06",
+          "active_contracts": 3,
+          "monthly_amount": "2857142.86",
+          "contracts": [
+            {"id": "4ad8e61f-...", "name": "算力服务合同A", "monthly_amount": "1000000.00"},
+            {"id": "55e08323-...", "name": "算力服务合同B", "monthly_amount": "857142.86"},
+            {"id": "1ff46cb3-...", "name": "算力服务合同D-带资源", "monthly_amount": "1000000.00"}
+          ],
+          "resources": {
+            "total_vcpu": 100,
+            "total_memory_gb": 200,
+            "total_storage_gb": 1000,
+            "total_gpu_count": 5,
+            "total_gpu_tops": 500,
+            "total_bandwidth_mbps": 17,
+            "total_rack_count": 2,
+            "total_ip_count": 3
+          }
+        }
+      ]
+    },
+    {
+      "project_type": "存储服务",
+      "total_contracts": 1,
+      "total_amount": "3600000.00",
+      "monthly": [
+        {
+          "month": "2026-03",
+          "active_contracts": 1,
+          "monthly_amount": "360000.00",
+          "contracts": [
+            {"id": "9a40e037-...", "name": "存储服务合同C", "monthly_amount": "360000.00"}
+          ],
+          "resources": {
+            "total_vcpu": 0,
+            "total_memory_gb": 0,
+            "total_storage_gb": 0,
+            "total_gpu_count": 0,
+            "total_gpu_tops": 0,
+            "total_bandwidth_mbps": 0,
+            "total_rack_count": 0,
+            "total_ip_count": 0
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+HTTP 状态码：200
+
+关键字段：
+- `year`（int）：统计年份
+- `by_project_type`（array）：按 project_type 分组，按类型名升序排列
+  - `project_type`（string）：项目类型名称，NULL 归为"未分类"
+  - `total_contracts`（int）：该类型合同总数
+  - `total_amount`（string）：该类型合同金额合计（保留两位小数）
+  - `monthly`（array）：该类型下各月统计，按月升序排列（仅含目标年份 1~12 月）
+    - `month`（string）：月份，格式 YYYY-MM
+    - `active_contracts`（int）：该月服务期内合同数
+    - `monthly_amount`（string）：该月分摊金额合计（保留两位小数）
+    - `contracts`（array）：该月具体合同列表，含 id、name、monthly_amount
+    - `resources`（object）：该月分摊资源合计（数值取整）
+
+说明：
+- ⚠️ **新口径**：合同金额按服务月数均摊到各月（总金额 / 服务月数 = 月度分摊）
+- ⚠️ **新口径**：资源按服务月数均摊（stats 各项 / 服务月数 = 月度分摊资源）
+- 服务月数 = max(1, (end_date - start_date).days // 30)
+- start_date 和 end_date 都为 NULL 的合同不参与月度统计
+- 仅 start_date 或仅 end_date 的合同：服务月数=1，仅计入该月
+- 无数据时返回 `{"year": 2026, "by_project_type": []}`
+- raw_tables_json 兼容字符串（JSON）和已解析对象格式
+
+---
+
+## 项目管理合同 - 回款记录 (Project Contract Payment)
+
+### GET /api/project-contracts/{contract_id}/payments
+
+获取合同的所有回款记录，附带关联附件的文件名和 MIME 类型。
+
+请求：`GET /api/project-contracts/2bf33d62-08d3-44b1-bed6-242d475742b4/payments`
+
+响应：
+```json
+[
+  {
+    "id": "c8f1a3b2-...",
+    "contract_id": "2bf33d62-08d3-44b1-bed6-242d475742b4",
+    "amount": "50000.00",
+    "payment_date": "2026-03-15",
+    "receipt_file_id": "att-uuid-1",
+    "receipt_filename": "回执单.pdf",
+    "receipt_mime_type": "application/pdf",
+    "invoice_file_id": "att-uuid-2",
+    "invoice_filename": "电子发票.pdf",
+    "invoice_mime_type": "application/pdf",
+    "remark": "第一期回款",
+    "created_at": "2026-08-06T10:00:00"
+  }
+]
+```
+
+HTTP 状态码：200
+
+关键字段：
+- `amount`（Decimal）：本次回款金额
+- `payment_date`（date|null）：回款日期
+- `receipt_file_id`（string|null）：回执单附件ID
+- `receipt_filename`（string|null）：回执单原始文件名（从 Attachment 表查询）
+- `receipt_mime_type`（string|null）：回执单文件 MIME 类型（如 application/pdf、image/png）
+- `invoice_file_id`（string|null）：开票附件ID
+- `invoice_filename`（string|null）：发票原始文件名（从 Attachment 表查询）
+- `invoice_mime_type`（string|null）：发票文件 MIME 类型
+- `remark`（string|null）：备注
+- 附件不存在时，对应的 `*_filename` 和 `*_mime_type` 为 null
+
+---
+
+### POST /api/project-contracts/{contract_id}/payments
+
+创建回款记录。
+
+请求：`POST /api/project-contracts/2bf33d62-.../payments`
+```json
+{
+  "amount": 50000.00,
+  "payment_date": "2026-03-15",
+  "remark": "第一期回款"
+}
+```
+
+响应：`PaymentResponse`，HTTP 状态码：201
+
+关键字段：
+- `amount`（Decimal, 必填, gt=0）：回款金额
+- `payment_date`（date, 可选）：回款日期
+- `receipt_file_id`（string, 可选, max_length=36）：回执单附件ID
+- `invoice_file_id`（string, 可选, max_length=36）：开票附件ID
+- `remark`（string, 可选）：备注
+
+---
+
+### PUT /api/project-contracts/payments/{payment_id}
+
+更新回款记录。
+
+请求：`PUT /api/project-contracts/payments/c8f1a3b2-...`
+```json
+{
+  "amount": 60000.00,
+  "remark": "第一期回款（已更新）"
+}
+```
+
+响应：`PaymentResponse`，HTTP 状态码：200
+
+关键字段：
+- `amount`（Decimal, 可选, gt=0）
+- `payment_date`（date, 可选）
+- `remark`（string, 可选）
+
+错误：404（回款记录不存在）
+
+---
+
+### DELETE /api/project-contracts/payments/{payment_id}
+
+删除回款记录。
+
+请求：`DELETE /api/project-contracts/payments/c8f1a3b2-...`
+
+HTTP 状态码：204（无响应体）
+
+错误：404（回款记录不存在）
+
+---
+
+### GET /api/project-contracts/{contract_id}/payments/summary
+
+获取合同回款汇总：已回款总额 + 进度百分比。
+
+请求：`GET /api/project-contracts/2bf33d62-.../payments/summary`
+
+响应：
+```json
+{
+  "total_paid": "50000.00",
+  "contract_amount": "100000.00",
+  "progress": 50.0
+}
+```
+
+HTTP 状态码：200
+
+关键字段：
+- `total_paid`（string）：已回款总额
+- `contract_amount`（string）：合同总金额
+- `progress`（float）：回款进度百分比（0-100），合同金额为 0 时返回 0.0
+
+---
+
+### POST /api/project-contracts/{contract_id}/payments/parse
+
+AI 解析回执单/发票并创建回款记录（双文件金额匹配）。上传回执单文件（必填）和电子发票文件（可选），两个文件都走 Vision 管道提取金额和日期，进行金额匹配：
+- 匹配成功（误差 ≤ 1% 或 ≤ 100 元）→ 自动创建回款记录，取回执单金额为准
+- 匹配失败 → 返回两个金额让前端弹窗确认，不创建回款
+- 仅一个文件 → 直接用该金额自动创建回款
+
+请求：`POST /api/project-contracts/2bf33d62-.../payments/parse`
+- `receipt`（form-data, file, 必填）：回执单文件（最大 50MB）
+- `invoice`（form-data, file, 可选）：电子发票文件（最大 50MB）
+
+**匹配成功时响应（200）：**
+```json
+{
+  "matched": true,
+  "receipt_amount": "500000.00",
+  "invoice_amount": "500000.00",
+  "final_amount": "500000.00",
+  "payment_date": "2026-03-15",
+  "payment": {
+    "id": "c8f1a3b2-...",
+    "contract_id": "2bf33d62-...",
+    "amount": "500000.00",
+    "payment_date": "2026-03-15",
+    "receipt_file_id": "att-uuid-...",
+    "invoice_file_id": "att-uuid-...",
+    "remark": "AI 解析自动创建（回执单: receipt.pdf, 发票: invoice.pdf）",
+    "created_at": "2026-08-06T10:00:00"
+  }
+}
+```
+
+**匹配失败时响应（200）：**
+```json
+{
+  "matched": false,
+  "receipt_amount": "500000.00",
+  "invoice_amount": "480000.00",
+  "final_amount": null,
+  "payment_date": "2026-03-15",
+  "payment": null,
+  "receipt_file_id": "att-uuid-...",
+  "invoice_file_id": "att-uuid-..."
+}
+```
+
+HTTP 状态码：200
+
+关键字段：
+- `matched`（bool）：金额是否匹配成功
+- `receipt_amount`（string|null）：回执单 AI 提取的金额
+- `invoice_amount`（string|null）：发票 AI 提取的金额
+- `final_amount`（string|null）：最终采用的金额，匹配失败时为 null
+- `payment_date`（string|null）：AI 提取的回款日期
+- `payment`（object|null）：匹配成功时返回创建的回款记录，失败时为 null
+- `receipt_file_id`（string|null）：不匹配时返回回执单附件ID，供确认接口使用
+- `invoice_file_id`（string|null）：不匹配时返回发票附件ID，供确认接口使用
+
+错误：
+- 404：合同不存在
+- 413：文件超过 50MB
+- 400：文件格式不支持或解析失败
+- 502：AI 解析服务不可用
+
+---
+
+### POST /api/project-contracts/{contract_id}/payments/parse/confirm
+
+确认金额后创建回款记录。前端在 parse 端点返回 `matched: false` 时弹窗让用户确认金额，确认后调用此接口用已有的附件文件创建回款记录。
+
+请求：`POST /api/project-contracts/2bf33d62-.../payments/parse/confirm`
+```json
+{
+  "receipt_file_id": "att-uuid-...",
+  "invoice_file_id": "att-uuid-...",
+  "amount": "500000.00",
+  "payment_date": "2026-03-15"
+}
+```
+
+响应（实际测试结果）：
+```json
+{
+  "id": "82446c46-2166-496e-abdc-2e8bc63571e1",
+  "contract_id": "515b0bf3-cb11-4326-98e3-fbaf593831e0",
+  "amount": "500000.00",
+  "payment_date": "2026-03-15",
+  "receipt_file_id": "test-receipt-id",
+  "invoice_file_id": "test-invoice-id",
+  "remark": "用户确认金额后创建",
+  "created_at": "2026-08-07T15:23:32.133402"
+}
+```
+
+HTTP 状态码：201
+
+关键字段：
+- `receipt_file_id`（string, 必填, max_length=36）：回执单附件ID（由 parse 端点返回）
+- `invoice_file_id`（string, 可选, max_length=36）：发票附件ID（由 parse 端点返回）
+- `amount`（Decimal, 必填, gt=0）：用户确认的金额
+- `payment_date`（date, 可选）：用户确认的回款日期
+- `remark`（string）：固定值 "用户确认金额后创建"
+
+错误：
+- 404：合同不存在
+- 422：参数校验失败（缺少必填字段、金额 ≤ 0 等）
+
+---
+
+## 项目管理合同列表 - 回款字段
+
+项目管理合同列表接口（`GET /api/project-contracts`）响应中新增回款汇总字段：
+
+```json
+{
+  "items": [
+    {
+      "id": "2bf33d62-...",
+      "name": "风云项目测试合同",
+      "amount": "100000.00",
+      "paid_amount": "50000.00",
+      "payment_progress": 50.0,
+      ...
+    }
+  ],
+  ...
+}
+```
+
+新增字段：
+- `paid_amount`（Decimal|null）：已回款总额
+- `payment_progress`（float|null）：回款进度百分比

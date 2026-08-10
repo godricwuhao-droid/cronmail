@@ -29,6 +29,12 @@ const routes: RouteRecordRaw[] = [
             component: () => import('@/views/data-report/rental-overview.vue'),
             meta: { title: '租赁概览', icon: 'TrendCharts', parent: 'data-report' },
           },
+          {
+            path: 'project-overview',
+            name: 'ProjectOverview',
+            component: () => import('@/views/reports/project-overview.vue'),
+            meta: { title: '项目概览', icon: 'DataAnalysis', parent: 'data-report' },
+          },
         ],
       },
 
@@ -190,6 +196,12 @@ const routes: RouteRecordRaw[] = [
             component: () => import('@/views/projects/AttachmentsPage.vue'),
             meta: { title: '附件管理', icon: 'FolderOpened', hidden: true, parent: 'projects' },
           },
+          {
+            path: ':company/:id/payments',
+            name: 'ProjectPayments',
+            component: () => import('@/views/projects/payments.vue'),
+            meta: { title: '回款管理', hidden: true, parent: 'projects' },
+          },
         ],
       },
 
@@ -284,6 +296,12 @@ const routes: RouteRecordRaw[] = [
             name: 'AttachmentCategories',
             component: () => import('@/views/system/attachment-categories.vue'),
             meta: { title: '附件分类管理', icon: 'FolderOpened' },
+          },
+          {
+            path: 'project-config',
+            name: 'ProjectConfig',
+            component: () => import('@/views/system/project-attachment-categories.vue'),
+            meta: { title: '项目配置', icon: 'FolderOpened' },
           },
         ],
       },
