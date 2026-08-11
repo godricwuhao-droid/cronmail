@@ -1,5 +1,45 @@
 # CronMail 后端变更日志
 
+## 2026-08-10 (修改) — 合同解析阶段2换用 DeepSeek-V4-Flash 并开启 thinking
+
+| 日期 | 类型 | 变更内容 | 影响文件/范围 | 关联任务 | 备注 |
+|------|------|---------|-------------|---------|------|
+| 2026-08-10 | 修改 | 合同解析阶段2换用 DeepSeek-V4-Flash（新配置 LLM_*_EXTRACT）并开启 thinking；OCR与回款不受影响 | backend/src/core/config.py, backend/src/contract_parser/services.py | TASK-MODEL-SWITCH | 提升提取稳定性与完整性 |
+
+## 2026-08-10 (修改) — 项目合同阶段2提取关闭 thinking
+
+| 日期 | 类型 | 变更内容 | 影响文件/范围 | 关联任务 | 备注 |
+|------|------|---------|-------------|---------|------|
+| 2026-08-10 | 修改 | 项目合同阶段2提取关闭 thinking（enable_thinking=True→False），与回款路径保持一致，减少字段漂移 | backend/src/contract_parser/services.py | TASK-THINK-OFF | 提升解析稳定性 |
+
+## 2026-08-10 (修改) — 项目合同解析新增 _parse_llm_json_lenient 容错
+
+| 日期 | 类型 | 变更内容 | 影响文件/范围 | 关联任务 | 备注 |
+|------|------|---------|-------------|---------|------|
+| 2026-08-10 | 修改 | 项目合同解析新增 _parse_llm_json_lenient 容错（剥离思考块+抽取最外层JSON）；回款路径不受影响 | backend/src/contract_parser/services.py | TASK-OPT-LLM | 修复项目合同解析缺字段 |
+
+### 修改
+- **新增 `_parse_llm_json_lenient` 函数**（第 478-528 行）
+  - 影响文件：`backend/src/contract_parser/services.py`
+  - 变更内容：
+    1. 新增专用容错解析函数，使用贪婪匹配剥离 `<think>...</think>` / `<reasoning>...</reasoning>` 思考块
+    2. 剥离 markdown 代码块标记后，先尝试直接 `json.loads`
+    3. 失败则用括号深度扫描抽取首个最外层 `{...}` JSON 块（正确处理字符串内引号与转义）
+    4. 解析失败兜底返回 `{}`
+  - 与 `_parse_llm_json` 的区别：贪婪匹配 `.*?` → `.*`，更激进地剥离思考块；使用独立的异常处理流程
+
+- **`parse_contract_vision` 阶段2 切换为 lenient**（第 234 行）
+  - `result = _parse_llm_json(raw)` → `result = _parse_llm_json_lenient(raw)`
+
+- **`parse_contract_stream` 阶段2 切换为 lenient**（第 661 行）
+  - `result = _parse_llm_json(raw)` → `result = _parse_llm_json_lenient(raw)`
+
+- **回款路径 `parse_payment_receipt` 不受影响**（第 339 行保持 `_parse_llm_json`）
+- **全局 `_parse_llm_json` 函数不受影响**（第 400-475 行保持原样）
+- **所有 `enable_thinking` 参数不受影响**（7 处全部保持原值）
+
+---
+
 ## 2026-08-09 (修改) — 回款列表 API 返回文件 filename 和 mime_type
 
 | 日期 | 类型 | 变更内容 | 影响文件/范围 | 关联任务 | 备注 |
@@ -1884,3 +1924,11 @@ INSERT IGNORE INTO system_config (id, `key`, value, description) VALUES (UUID(),
     5. 健康检查 `GET /api/health` 200 OK，应用环境 PRODUCTION
   - 构建代理：`http://192.168.180.251:7890`
   - 关联任务：后端部署
+
+---
+
+## 2026-08-10 (修改) — 回滚 _parse_llm_json 增强，恢复原始实现
+
+| 日期 | 类型 | 变更内容 | 影响文件/范围 | 关联任务 | 备注 |
+|------|------|---------|-------------|---------|------|
+| 2026-08-10 | 修改 | 回滚 _parse_llm_json 增强，恢复原始实现以隔离回款路径；项目合同专用 _parse_llm_json_lenient 保留 | backend/src/contract_parser/services.py | TASK-OPT-LLM | 确保回款不受影响 |

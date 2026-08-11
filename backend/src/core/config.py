@@ -25,6 +25,11 @@ class Settings(BaseSettings):
     LLM_API_KEY: str = "not-needed"
     LLM_MODEL: str = "Qwen3.6-27B"
 
+    # LLM 阶段2 提取专用模型（与 OCR 分离，独立 OpenAI 协议服务）
+    LLM_BASE_URL_EXTRACT: str = "http://api.opearlai.com:30096/v1"
+    LLM_API_KEY_EXTRACT: str = "sk-tArrgRR2_tqUGYoU_Glakw"
+    LLM_MODEL_EXTRACT: str = "DeepSeek-V4-Flash"
+
     # CORS
     CORS_ORIGINS: list[str] = ["*"]
 

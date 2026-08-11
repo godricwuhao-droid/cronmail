@@ -195,7 +195,7 @@ def parse_contract_vision(file_bytes: bytes, filename: str, contract_type: str, 
                 ],
                 temperature=0.3,
                 max_tokens=16384,
-                extra_body={"chat_template_kwargs": {"enable_thinking": True}},
+                extra_body={"chat_template_kwargs": {"enable_thinking": False}},
             )
             raw = response.choices[0].message.content or ""
             ocr_parts.append(raw)
@@ -219,9 +219,15 @@ def parse_contract_vision(file_bytes: bytes, filename: str, contract_type: str, 
     t_extract = time.time()
     extract_prompt = get_extract_prompt(contract_type, full_text)
 
+    extract_client = OpenAI(
+        base_url=settings.LLM_BASE_URL_EXTRACT,
+        api_key=settings.LLM_API_KEY_EXTRACT,
+        timeout=300,
+    )
+
     try:
-        response = client.chat.completions.create(
-            model=settings.LLM_MODEL,
+        response = extract_client.chat.completions.create(
+            model=settings.LLM_MODEL_EXTRACT,
             messages=[
                 {"role": "system", "content": EXTRACT_SYSTEM_PROMPT},
                 {"role": "user", "content": extract_prompt},
@@ -231,7 +237,7 @@ def parse_contract_vision(file_bytes: bytes, filename: str, contract_type: str, 
             extra_body={"chat_template_kwargs": {"enable_thinking": True}},
         )
         raw = response.choices[0].message.content
-        result = _parse_llm_json(raw)
+        result = _parse_llm_json_lenient(raw)
         import sys
         print(f"[contract_parser] [sync] Extract keys: {list(result.keys()) if result else 'EMPTY'}, party_a={result.get('party_a_name')}, party_b={result.get('party_b_name')}", file=sys.stderr)
         rs = result.get("resource_summary", {})
@@ -409,6 +415,59 @@ def _parse_llm_json(raw: str) -> dict:
         return {}
 
 
+def _parse_llm_json_lenient(raw: str) -> dict:
+    """项目合同解析专用：对 LLM 输出做更强容错。
+
+    相比 _parse_llm_json，额外处理：
+    1. 剥离 <think>...</think> / <reasoning>...</reasoning> 思考块（不区分大小写、可嵌套/多行）；
+    2. 用正则抽取首个最外层 {..} JSON 块（正确处理字符串内引号与括号）；
+    3. 解析失败兜底返回 {}。
+    """
+    if not raw or not raw.strip():
+        return {}
+    text = raw
+    # 1. 剥离思考块（成对标签，可嵌套，贪婪到最后一个闭合标签）
+    for tag in ('think', 'reasoning'):
+        pat = re.compile(rf'<{tag}.*?</{tag}>', re.IGNORECASE | re.DOTALL)
+        text = pat.sub('', text)
+    # 2. 剥离 markdown 代码块标记
+    text = re.sub(r'^```(?:json)?\s*', '', text.strip())
+    text = re.sub(r'\s*```$', '', text)
+    # 3. 抽取首个最外层 JSON 对象块
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    start = text.find('{')
+    if start == -1:
+        return {}
+    depth = 0
+    in_str = False
+    esc = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == '\\':
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == '{':
+            depth += 1
+        elif ch == '}':
+            depth -= 1
+            if depth == 0:
+                try:
+                    return json.loads(text[start:i + 1])
+                except json.JSONDecodeError:
+                    return {}
+    return {}
+
+
 # 字符串字段：首次非空有效值优先，防止后期批次用确认单内容污染
 _STRING_FIELDS = {"name", "contract_no", "party_a_name", "party_b_name", "amount",
                   "start_date", "end_date", "project_name", "contract_content",
@@ -528,10 +587,16 @@ async def parse_contract_stream(file_bytes: bytes, filename: str, contract_type:
     t_extract = time.time()
     extract_prompt = get_extract_prompt(contract_type, full_text)
 
+    extract_client = OpenAI(
+        base_url=settings.LLM_BASE_URL_EXTRACT,
+        api_key=settings.LLM_API_KEY_EXTRACT,
+        timeout=300,
+    )
+
     try:
         response = await loop.run_in_executor(
             None,
-            lambda ep=extract_prompt, sp=EXTRACT_SYSTEM_PROMPT, m=settings.LLM_MODEL: client.chat.completions.create(
+            lambda ep=extract_prompt, sp=EXTRACT_SYSTEM_PROMPT, m=settings.LLM_MODEL_EXTRACT, c=extract_client: c.chat.completions.create(
                 model=m,
                 messages=[{"role": "system", "content": sp}, {"role": "user", "content": ep}],
                 temperature=0.3, max_tokens=32768,
@@ -539,7 +604,7 @@ async def parse_contract_stream(file_bytes: bytes, filename: str, contract_type:
             )
         )
         raw = response.choices[0].message.content
-        result = _parse_llm_json(raw)
+        result = _parse_llm_json_lenient(raw)
         import sys
         print(f"[contract_parser] [stream] Extract keys: {list(result.keys()) if result else 'EMPTY'}, party_a={result.get('party_a_name')}, party_b={result.get('party_b_name')}", file=sys.stderr)
         rs = result.get("resource_summary", {})
