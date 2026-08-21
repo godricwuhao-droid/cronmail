@@ -12,7 +12,8 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Document, Search, Operation as OperationIcon, Top } from '@element-plus/icons-vue'
+import { Document, Search, Operation as OperationIcon, Top, Refresh, RefreshLeft } from '@element-plus/icons-vue'
+import { confirmDelete } from '@/lib/confirm'
 import {
   deleteRental,
   getRentals,
@@ -97,6 +98,18 @@ function handleFilterChange() {
   fetchList()
 }
 
+const hasFilters = computed(
+  () => !!(searchText.value.trim() || statusFilter.value || customerFilter.value),
+)
+
+function clearFilters() {
+  searchText.value = ''
+  statusFilter.value = ''
+  customerFilter.value = ''
+  pagination.page = 1
+  fetchList()
+}
+
 async function fetchList() {
   loading.value = true
   try {
@@ -154,6 +167,7 @@ function goCreate() {
 }
 
 async function handleDelete(row: RentalListItem) {
+  if (!(await confirmDelete('确定删除该设备？'))) return
   try {
     await deleteRental(row.id)
     ElMessage.success('已删除设备')
@@ -597,7 +611,10 @@ function getColumnProps(col: ColumnDef): ColumnProps {
 // ============================================================
 // 勾选复制：单选模式
 // ============================================================
+const tableRef = ref<any>(null)
 const selectedRow = ref<RentalListItem | null>(null)
+/** 程序化调整勾选时跳过 selection-change，避免递归 */
+let selectionSyncing = false
 
 /**
  * 复选框勾选事件：单选模式
@@ -605,12 +622,19 @@ const selectedRow = ref<RentalListItem | null>(null)
  *  - 取消勾选：清空
  */
 function handleSelect(selection: RentalListItem[]) {
+  if (selectionSyncing) return
   if (selection.length === 0) {
     selectedRow.value = null
     return
   }
-  // 单选模式：始终只保留最后一个被选中的行
-  selectedRow.value = selection[selection.length - 1]
+  const latest = selection[selection.length - 1]
+  if (selection.length > 1) {
+    selectionSyncing = true
+    tableRef.value?.clearSelection()
+    tableRef.value?.toggleRowSelection(latest, true)
+    selectionSyncing = false
+  }
+  selectedRow.value = latest
 }
 
 /** 跳转到创建页，并带上 copy_from 查询参数 */
@@ -640,75 +664,73 @@ onMounted(() => {
 
 <template>
   <div class="page-container">
-    <el-card shadow="never">
-      <template #header>
-        <div class="card-header">
-          <span class="title">
-            <el-icon><Document /></el-icon>
-            设备列表
-          </span>
-          <div class="header-actions">
-            <!-- 列自定义：支持拖拽排序 + 勾选显示 -->
-            <el-popover
-              v-model:visible="popoverVisible"
-              placement="bottom-end"
-              :width="260"
-              trigger="click"
-              popper-class="rental-column-popover"
-            >
-              <template #reference>
-                <el-button :icon="OperationIcon" :disabled="loading">列设置</el-button>
-              </template>
-              <div class="column-popover-body">
-                <div class="column-popover-header">
-                  <span>拖拽调整顺序 · 勾选显示</span>
-                  <el-link type="primary" :underline="false" @click="resetColumns">重置默认</el-link>
-                </div>
-                <div class="column-list">
-                  <template v-for="(col, idx) in orderedColumns" :key="col.key">
-                    <div
-                      v-if="idx > 0 && isPinned(col.key) !== isPinned(orderedColumns[idx - 1]?.key || '')"
-                      class="column-divider"
-                    />
-                    <div
-                      class="column-item"
-                      :class="{
-                        'drag-over': dragOverKey === col.key && dragKey !== col.key,
-                        dragging: dragKey === col.key,
-                      }"
-                      draggable="true"
-                      @dragstart="onDragStart($event, col.key)"
-                      @dragover="onDragOver($event, col.key)"
-                      @dragleave="onDragLeave(col.key)"
-                      @drop="onDrop($event, col.key)"
-                      @dragend="onDragEnd"
-                    >
-                      <span class="drag-handle" aria-hidden="true">⠿</span>
-                      <el-button
-                        link
-                        class="pin-btn"
-                        :class="{ active: isPinned(col.key) }"
-                        @click="pinColumn(col.key)"
-                        :title="isPinned(col.key) ? '取消置顶' : '置顶到最前'"
-                      >
-                        <el-icon><Top /></el-icon>
-                      </el-button>
-                      <el-checkbox
-                        :model-value="vis(col.key)"
-                        :disabled="col.required"
-                        @change="toggleColumn(col.key)"
-                      >
-                        {{ col.title }}<span v-if="col.required" class="required-tip">（必选）</span>
-                      </el-checkbox>
-                    </div>
-                  </template>
-                </div>
+    <div class="page-panel">
+      <div class="card-header">
+        <span class="title">
+          <el-icon><Document /></el-icon>
+          设备管理
+        </span>
+        <div class="header-actions">
+          <!-- 列自定义：支持拖拽排序 + 勾选显示 -->
+          <el-popover
+            v-model:visible="popoverVisible"
+            placement="bottom-end"
+            :width="260"
+            trigger="click"
+            popper-class="rental-column-popover"
+          >
+            <template #reference>
+              <el-button :icon="OperationIcon" :disabled="loading">列设置</el-button>
+            </template>
+            <div class="column-popover-body">
+              <div class="column-popover-header">
+                <span>拖拽调整顺序 · 勾选显示</span>
+                <el-link type="primary" :underline="false" @click="resetColumns">重置默认</el-link>
               </div>
-            </el-popover>
-            <el-button type="primary" @click="goCreate">+ 创建设备</el-button>
-          </div>
+              <div class="column-list">
+                <template v-for="(col, idx) in orderedColumns" :key="col.key">
+                  <div
+                    v-if="idx > 0 && isPinned(col.key) !== isPinned(orderedColumns[idx - 1]?.key || '')"
+                    class="column-divider"
+                  />
+                  <div
+                    class="column-item"
+                    :class="{
+                      'drag-over': dragOverKey === col.key && dragKey !== col.key,
+                      dragging: dragKey === col.key,
+                    }"
+                    draggable="true"
+                    @dragstart="onDragStart($event, col.key)"
+                    @dragover="onDragOver($event, col.key)"
+                    @dragleave="onDragLeave(col.key)"
+                    @drop="onDrop($event, col.key)"
+                    @dragend="onDragEnd"
+                  >
+                    <span class="drag-handle" aria-hidden="true">⠿</span>
+                    <el-button
+                      link
+                      class="pin-btn"
+                      :class="{ active: isPinned(col.key) }"
+                      @click="pinColumn(col.key)"
+                      :title="isPinned(col.key) ? '取消置顶' : '置顶到最前'"
+                    >
+                      <el-icon><Top /></el-icon>
+                    </el-button>
+                    <el-checkbox
+                      :model-value="vis(col.key)"
+                      :disabled="col.required"
+                      @change="toggleColumn(col.key)"
+                    >
+                      {{ col.title }}<span v-if="col.required" class="required-tip">（必选）</span>
+                    </el-checkbox>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </el-popover>
+          <el-button type="primary" @click="goCreate">+ 创建设备</el-button>
         </div>
-      </template>
+      </div>
 
       <!-- 筛选栏 -->
       <div class="toolbar">
@@ -766,33 +788,43 @@ onMounted(() => {
             <el-icon><Search /></el-icon>
           </template>
         </el-input>
-        <el-button @click="fetchList">刷新</el-button>
+        <el-button :icon="Refresh" :disabled="loading" @click="fetchList">刷新</el-button>
+        <el-button :icon="RefreshLeft" :disabled="!hasFilters" @click="clearFilters">重置</el-button>
         <el-button :disabled="!selectedRow" @click="handleCopy">复制</el-button>
       </div>
 
       <!-- 表格 -->
       <el-table
+        ref="tableRef"
         v-loading="loading"
         :data="list"
         row-key="id"
-        border
         stripe
+        class="rental-table"
         style="width: 100%"
-        empty-text="暂无设备"
         @selection-change="handleSelect"
         @sort-change="handleSort"
       >
-        <!-- 勾选列（单选模式：已选行禁止再勾选别的） -->
-        <el-table-column
-          type="selection"
-          width="50"
-          :selectable="(row: RentalListItem) => !selectedRow || selectedRow.id === row.id"
-        />
+        <template #empty>
+          <div class="table-empty">
+            <el-empty :description="hasFilters ? '未找到匹配设备' : '暂无设备'" :image-size="72" />
+          </div>
+        </template>
+        <!-- 勾选列（单选：点另一行自动切换） -->
+        <el-table-column type="selection" width="50" />
 
         <!-- 动态列：按 columnOrder 顺序渲染，只渲染可见的 -->
         <template v-for="col in orderedColumns" :key="col.key">
           <el-table-column v-if="vis(col.key)" v-bind="getColumnProps(col)">
-            <template v-if="col.key === 'status'" #default="{ row }">
+            <template v-if="col.key === 'machine_model'" #default="{ row }">
+              <span
+                v-if="row.machine_model"
+                class="col-name-link"
+                @click.stop="$router.push(`/rentals/${row.id}`)"
+              >{{ row.machine_model }}</span>
+              <span v-else class="col-muted">-</span>
+            </template>
+            <template v-else-if="col.key === 'status'" #default="{ row }">
               <el-popconfirm
                 v-if="row.status === '空闲中' || row.status === '已断电'"
                 :title="row.status === '空闲中' ? '确定将该设备设为「已断电」？' : '确定将该设备设为「空闲中」？'"
@@ -837,7 +869,11 @@ onMounted(() => {
               <span v-else>-</span>
             </template>
             <template v-else-if="col.key === 'public_ips'" #default="{ row }">
-              {{ Array.isArray((row as any).public_ips) ? (row as any).public_ips.join(', ') : '-' }}
+              <span
+                v-if="Array.isArray((row as any).public_ips) && (row as any).public_ips.length"
+                class="col-ip"
+              >{{ (row as any).public_ips.join(', ') }}</span>
+              <span v-else class="col-muted">-</span>
             </template>
             <template v-else-if="col.key === 'memory_gb'" #default="{ row }">
               {{ (row as any).memory_gb != null ? (row as any).memory_gb + ' GB' : '-' }}
@@ -870,17 +906,15 @@ onMounted(() => {
               {{ formatDateTime((row as any).updated_at) }}
             </template>
             <template v-else-if="col.key === 'actions'" #default="{ row }">
-              <el-button size="small" link type="primary" @click.stop="$router.push(`/rentals/${row.id}`)">
-                详情
-              </el-button>
-              <el-button size="small" link type="primary" @click.stop="goEdit(row)">
-                编辑
-              </el-button>
-              <el-popconfirm title="确定删除?" @confirm="handleDelete(row)">
-                <template #reference>
-                  <el-button size="small" link type="danger">删除</el-button>
-                </template>
-              </el-popconfirm>
+              <div class="action-buttons">
+                <el-button size="small" link type="primary" @click.stop="$router.push(`/rentals/${row.id}`)">
+                  详情
+                </el-button>
+                <el-button size="small" link type="primary" @click.stop="goEdit(row)">
+                  编辑
+                </el-button>
+                <el-button size="small" link type="danger" @click.stop="handleDelete(row)">删除</el-button>
+              </div>
             </template>
           </el-table-column>
         </template>
@@ -899,29 +933,16 @@ onMounted(() => {
           @size-change="handleSizeChange"
         />
       </div>
-    </el-card>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.page {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-.card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.card-header .title {
-  font-size: 16px;
-  font-weight: 600;
-}
 .header-actions {
   display: flex;
   gap: 8px;
   align-items: center;
+  flex-wrap: wrap;
 }
 .toolbar {
   display: flex;
@@ -930,12 +951,36 @@ onMounted(() => {
   margin-bottom: 16px;
   flex-wrap: wrap;
 }
-.pagination {
+.action-buttons {
   display: flex;
-  justify-content: flex-end;
-  margin-top: 16px;
+  align-items: center;
+  gap: 2px;
+  white-space: nowrap;
 }
-/* clickable-row 样式已移除：行点击事件取消 */
+.col-name-link {
+  color: var(--primary-color);
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.2s;
+}
+.col-name-link:hover {
+  color: var(--primary-hover);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.col-ip {
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+.col-muted {
+  color: #c0c4cc;
+}
+/* 单选：隐藏表头全选 */
+.rental-table :deep(.el-table__header-wrapper .el-table-column--selection .el-checkbox) {
+  display: none;
+}
 </style>
 
 <style>

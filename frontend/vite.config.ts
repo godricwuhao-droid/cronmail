@@ -16,7 +16,7 @@ export default defineConfig({
     proxy: {
       // 将 /api 请求代理到后端 FastAPI 服务
       '/api': {
-        target: 'http://192.168.180.170:30082',
+        target: 'http://192.168.180.173:30082',
         changeOrigin: true,
       },
     },

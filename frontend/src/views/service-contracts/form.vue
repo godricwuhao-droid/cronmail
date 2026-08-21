@@ -14,7 +14,7 @@
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
-import { Delete, Top, Bottom, MagicStick, Loading } from '@element-plus/icons-vue'
+import { ArrowLeft, Bottom, Delete, Document, InfoFilled, Loading, MagicStick, Top, WarningFilled } from '@element-plus/icons-vue'
 import request from '@/api'
 import {
   createServiceContract,
@@ -465,8 +465,8 @@ async function handleSubmit() {
 }
 
 function cancel() {
-  if (isEdit.value && contractId.value) {
-    router.push({ name: 'ServiceContractDetail', params: { id: contractId.value } })
+  if (window.history.state?.back != null) {
+    router.back()
   } else {
     router.push({ name: 'ServiceContractList' })
   }
@@ -607,17 +607,32 @@ onUnmounted(() => {
 
 <template>
   <div class="page-container" v-loading="loadingDetail">
-    <el-card shadow="never">
-      <template #header>
-        <div class="card-header">
-          <span class="title">
-            {{ isEdit ? '编辑算力服务合同' : '新建算力服务合同' }}
-          </span>
-          <div class="card-header-actions">
-            <el-button link @click="cancel">返回</el-button>
-          </div>
-        </div>
-      </template>
+    <div class="top-bar">
+      <el-button @click="cancel">
+        <el-icon><ArrowLeft /></el-icon>
+        返回
+      </el-button>
+    </div>
+
+    <div class="page-panel">
+      <div class="card-header">
+        <span class="title">
+          <el-icon><Document /></el-icon>
+          {{ isEdit ? '编辑算力服务合同' : '新建算力服务合同' }}
+        </span>
+      </div>
+
+      <div class="dialog-tip">
+        <el-icon><InfoFilled /></el-icon>
+        <span>
+          <template v-if="isEdit">
+            可更新合同信息与服务明细；客户不可修改。新建后可在详情页管理附件。
+          </template>
+          <template v-else>
+            填写合同基础信息与服务内容明细；支持拖拽 Word 合同智能填充，创建后可在详情页管理附件。
+          </template>
+        </span>
+      </div>
 
       <!-- 拖拽上传区（仅新建模式） -->
       <div v-if="!isEdit" class="parse-drop-zone" :class="{ 'is-dragover': isDragOver }">
@@ -641,169 +656,188 @@ onUnmounted(() => {
         ref="formRef"
         :model="form"
         :rules="rules"
-        label-width="140px"
+        label-position="top"
+        class="contract-form"
         @submit.prevent
       >
-        <!-- ============================================ -->
-        <!-- 合同基本信息区 -->
-        <!-- ============================================ -->
-        <div class="section-title">
-          <el-icon><Document /></el-icon>
-          合同基本信息
+        <!-- 基础信息 -->
+        <div class="dialog-section">
+          <div class="dialog-section-title">基础信息</div>
+          <el-row :gutter="16">
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="合同类型" prop="contract_type">
+                <el-radio-group v-model="form.contract_type">
+                  <el-radio-button value="sales">销售</el-radio-button>
+                  <el-radio-button value="procurement">采购</el-radio-button>
+                </el-radio-group>
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="客户" prop="customer_id">
+                <el-select
+                  v-model="form.customer_id"
+                  placeholder="请选择客户"
+                  filterable
+                  style="width: 100%"
+                  :disabled="isEdit"
+                >
+                  <el-option
+                    v-for="c in customerOptions"
+                    :key="c.id"
+                    :label="c.name"
+                    :value="c.id"
+                  />
+                </el-select>
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12">
+              <el-form-item :label="partyLabels.a" prop="party_a_name">
+                <el-input v-model="form.party_a_name" :placeholder="'请输入' + partyLabels.a" maxlength="255" />
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12">
+              <el-form-item :label="partyLabels.b" prop="party_b_name">
+                <el-input v-model="form.party_b_name" :placeholder="'请输入' + partyLabels.b" maxlength="255" />
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="合同名称" prop="name">
+                <el-input v-model="form.name" placeholder="如 算力服务合同-2026" maxlength="255" show-word-limit />
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="序号">
+                <el-input-number v-model="form.sort_order" :min="0" :step="1" placeholder="序号" style="width: 100%" />
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="合同编号" prop="contract_no">
+                <el-input v-model="form.contract_no" placeholder="可选，如 FW-2026-001" maxlength="100" show-word-limit />
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="所属项目" prop="project_name">
+                <el-input v-model="form.project_name" placeholder="可选，如 某项目一期" maxlength="255" show-word-limit />
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="关联合同">
+                <el-select
+                  v-model="form.related_contract_id"
+                  placeholder="可选，关联背靠背合同"
+                  clearable
+                  filterable
+                  style="width: 100%"
+                >
+                  <el-option
+                    v-for="c in relatedContractOptions"
+                    :key="c.id"
+                    :label="`${c.name} (${c.contract_no || '无编号'})`"
+                    :value="c.id"
+                  />
+                </el-select>
+              </el-form-item>
+            </el-col>
+          </el-row>
         </div>
 
-        <el-form-item label="合同类型" prop="contract_type">
-          <el-radio-group v-model="form.contract_type">
-            <el-radio-button value="sales">销售</el-radio-button>
-            <el-radio-button value="procurement">采购</el-radio-button>
-          </el-radio-group>
-        </el-form-item>
+        <!-- 日期与金额 -->
+        <div class="dialog-section">
+          <div class="dialog-section-title">日期与金额</div>
+          <el-row :gutter="16">
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="开始日期">
+                <el-date-picker
+                  v-model="form.start_date"
+                  type="date"
+                  placeholder="选择开始日期"
+                  format="YYYY-MM-DD"
+                  value-format="YYYY-MM-DD"
+                  style="width: 100%"
+                />
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="结束日期">
+                <el-date-picker
+                  v-model="form.end_date"
+                  type="date"
+                  placeholder="选择结束日期"
+                  format="YYYY-MM-DD"
+                  value-format="YYYY-MM-DD"
+                  style="width: 100%"
+                />
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="合同金额">
+                <el-input-number
+                  v-model="form.amount"
+                  :min="0"
+                  :precision="2"
+                  :controls="false"
+                  placeholder="留空则自动计算"
+                  style="width: 100%"
+                />
+                <div class="form-hint">留空则根据服务行自动汇总</div>
+              </el-form-item>
+            </el-col>
+          </el-row>
+        </div>
 
-        <el-form-item label="客户" prop="customer_id">
-          <el-select
-            v-model="form.customer_id"
-            placeholder="请选择客户"
-            filterable
-            style="width: 100%"
-            :disabled="isEdit"
-          >
-            <el-option
-              v-for="c in customerOptions"
-              :key="c.id"
-              :label="c.name"
-              :value="c.id"
+        <!-- 合同内容与要求 -->
+        <div class="dialog-section">
+          <div class="dialog-section-title">合同内容与要求</div>
+          <el-form-item label="合同内容">
+            <el-input
+              v-model="form.contract_content"
+              type="textarea"
+              :rows="4"
+              placeholder="可选，合同主要内容概述或长文本描述"
+              maxlength="5000"
+              show-word-limit
             />
-          </el-select>
-        </el-form-item>
-
-        <el-form-item :label="partyLabels.a" prop="party_a_name">
-          <el-input v-model="form.party_a_name" :placeholder="'请输入' + partyLabels.a" maxlength="255" />
-        </el-form-item>
-
-        <el-form-item :label="partyLabels.b" prop="party_b_name">
-          <el-input v-model="form.party_b_name" :placeholder="'请输入' + partyLabels.b" maxlength="255" />
-        </el-form-item>
-
-        <el-form-item label="合同名称" prop="name">
-          <el-input v-model="form.name" placeholder="如 算力服务合同-2026" maxlength="255" show-word-limit />
-        </el-form-item>
-
-        <el-form-item label="序号">
-          <el-input-number v-model="form.sort_order" :min="0" :step="1" placeholder="序号" />
-        </el-form-item>
-
-        <el-form-item label="合同编号" prop="contract_no">
-          <el-input v-model="form.contract_no" placeholder="可选，如 FW-2026-001" maxlength="100" show-word-limit />
-        </el-form-item>
-
-        <el-form-item label="所属项目" prop="project_name">
-          <el-input v-model="form.project_name" placeholder="可选，如 某项目一期" maxlength="255" show-word-limit />
-        </el-form-item>
-
-        <el-form-item label="合同金额">
-          <el-input-number
-            v-model="form.amount"
-            :min="0"
-            :precision="2"
-            :controls="false"
-            placeholder="留空则自动计算"
-            style="width: 300px"
-          />
-          <span class="form-hint">留空则根据服务行自动汇总</span>
-        </el-form-item>
-
-        <el-form-item label="开始日期">
-          <el-date-picker
-            v-model="form.start_date"
-            type="date"
-            placeholder="选择开始日期"
-            format="YYYY-MM-DD"
-            value-format="YYYY-MM-DD"
-            style="width: 240px"
-          />
-        </el-form-item>
-
-        <el-form-item label="结束日期">
-          <el-date-picker
-            v-model="form.end_date"
-            type="date"
-            placeholder="选择结束日期"
-            format="YYYY-MM-DD"
-            value-format="YYYY-MM-DD"
-            style="width: 240px"
-          />
-        </el-form-item>
-
-        <el-form-item label="关联合同">
-          <el-select
-            v-model="form.related_contract_id"
-            placeholder="可选，关联背靠背合同"
-            clearable
-            filterable
-            style="width: 100%"
-          >
-            <el-option
-              v-for="c in relatedContractOptions"
-              :key="c.id"
-              :label="`${c.name} (${c.contract_no || '无编号'})`"
-              :value="c.id"
+          </el-form-item>
+          <el-form-item label="交付要求">
+            <el-input
+              v-model="form.delivery_requirements"
+              type="textarea"
+              :rows="4"
+              placeholder="可选，合同交付标准/要求"
+              maxlength="5000"
+              show-word-limit
             />
-          </el-select>
-        </el-form-item>
+          </el-form-item>
+          <el-form-item label="过程记录">
+            <el-input
+              v-model="form.process_records"
+              type="textarea"
+              :rows="4"
+              placeholder="可选，合同执行过程中的记录，如问题、变更说明等"
+              maxlength="5000"
+              show-word-limit
+            />
+          </el-form-item>
+        </div>
 
-        <el-form-item label="备注">
-          <el-input
-            v-model="form.remark"
-            type="textarea"
-            :rows="3"
-            placeholder="可选"
-            maxlength="500"
-            show-word-limit
-          />
-        </el-form-item>
+        <!-- 备注 -->
+        <div class="dialog-section">
+          <div class="dialog-section-title">备注</div>
+          <el-form-item>
+            <el-input
+              v-model="form.remark"
+              type="textarea"
+              :rows="3"
+              placeholder="可选"
+              maxlength="500"
+              show-word-limit
+            />
+          </el-form-item>
+        </div>
 
-        <el-divider content-position="left">合同详细内容</el-divider>
-
-        <el-form-item label="合同内容">
-          <el-input
-            v-model="form.contract_content"
-            type="textarea"
-            :rows="4"
-            placeholder="可选，合同主要内容概述或长文本描述"
-            maxlength="5000"
-            show-word-limit
-          />
-        </el-form-item>
-
-        <el-form-item label="交付要求">
-          <el-input
-            v-model="form.delivery_requirements"
-            type="textarea"
-            :rows="4"
-            placeholder="可选，合同交付标准/要求"
-            maxlength="5000"
-            show-word-limit
-          />
-        </el-form-item>
-
-        <el-form-item label="过程记录">
-          <el-input
-            v-model="form.process_records"
-            type="textarea"
-            :rows="4"
-            placeholder="可选，合同执行过程中的记录，如问题、变更说明等"
-            maxlength="5000"
-            show-word-limit
-          />
-        </el-form-item>
-
-        <!-- ============================================ -->
         <!-- 服务行编辑器 -->
-        <!-- ============================================ -->
-        <div class="section-title" style="margin-top: 28px;">
-          <el-icon><List /></el-icon>
-          服务内容明细
-        </div>
+        <div class="dialog-section">
+          <div class="dialog-section-title">服务内容明细</div>
 
         <!-- 空状态 -->
         <div v-if="serviceLines.length === 0" class="lines-empty">
@@ -836,22 +870,24 @@ onUnmounted(() => {
             </div>
 
             <!-- 行字段 -->
-            <div class="line-fields">
-              <div class="line-field">
-                <label>服务大类</label>
-                <el-select v-model="line.category" style="width: 180px" @change="onCategoryChange(line)">
-                  <el-option
-                    v-for="cat in categoryOptions"
-                    :key="cat"
-                    :label="cat"
-                    :value="cat"
-                  />
-                </el-select>
-              </div>
+            <div class="line-body">
+              <div class="line-grid line-grid-2">
+                <div class="line-field">
+                  <label>服务大类</label>
+                  <el-select v-model="line.category" class="line-control" @change="onCategoryChange(line)">
+                    <el-option
+                      v-for="cat in categoryOptions"
+                      :key="cat"
+                      :label="cat"
+                      :value="cat"
+                    />
+                  </el-select>
+                </div>
 
-              <div class="line-field">
-                <label>服务项名称</label>
-                <el-input v-model="line.item_name" placeholder="如 通用CPU容器实例" style="width: 220px" />
+                <div class="line-field">
+                  <label>服务项名称</label>
+                  <el-input v-model="line.item_name" placeholder="如 通用CPU容器实例" class="line-control" />
+                </div>
               </div>
 
               <!-- 服务描述：所有大类都显示 -->
@@ -864,50 +900,55 @@ onUnmounted(() => {
                   placeholder="服务描述，如参数/服务描述详情"
                   maxlength="2000"
                   show-word-limit
+                  class="line-control"
                 />
               </div>
 
-              <div v-if="line.category === '算力服务'" class="line-field">
-                <label>vCPU核数</label>
-                <el-input-number v-model="line.vcpu_count" :min="0" :controls="false" style="width: 100px" />
+              <div v-if="line.category === '算力服务'" class="line-grid line-grid-3">
+                <div class="line-field">
+                  <label>vCPU核数</label>
+                  <el-input-number v-model="line.vcpu_count" :min="0" :controls="false" class="line-control" />
+                </div>
+
+                <div class="line-field">
+                  <label>内存(GB)</label>
+                  <el-input-number v-model="line.memory_gb" :min="0" :controls="false" class="line-control" />
+                </div>
+
+                <div class="line-field">
+                  <label>存储(GB)</label>
+                  <el-input-number v-model="line.storage_gb" :min="0" :controls="false" class="line-control" />
+                </div>
               </div>
 
-              <div v-if="line.category === '算力服务'" class="line-field">
-                <label>内存(GB)</label>
-                <el-input-number v-model="line.memory_gb" :min="0" :controls="false" style="width: 100px" />
+              <div class="line-grid line-grid-4">
+                <div class="line-field">
+                  <label>单位</label>
+                  <el-input v-model="line.unit" placeholder="如 个/月" class="line-control" />
+                </div>
+
+                <div class="line-field">
+                  <label>数量</label>
+                  <el-input-number v-model="line.quantity" :min="0" :controls="false" class="line-control" />
+                </div>
+
+                <div v-if="line.category !== '模型调优服务'" class="line-field">
+                  <label>周期(月)</label>
+                  <el-input-number v-model="line.period_months" :min="0" :controls="false" class="line-control" />
+                </div>
+
+                <div v-else class="line-field">
+                  <label>周期</label>
+                  <span class="line-period-hint">按套（不涉及服务周期）</span>
+                </div>
+
+                <div class="line-field">
+                  <label>单价(元)</label>
+                  <el-input-number v-model="line.unit_price" :min="0" :precision="2" :controls="false" class="line-control" />
+                </div>
               </div>
 
-              <div v-if="line.category === '算力服务'" class="line-field">
-                <label>存储(GB)</label>
-                <el-input-number v-model="line.storage_gb" :min="0" :controls="false" style="width: 100px" />
-              </div>
-
-              <div class="line-field">
-                <label>单位</label>
-                <el-input v-model="line.unit" placeholder="如 个/月" style="width: 120px" />
-              </div>
-
-              <div class="line-field">
-                <label>数量</label>
-                <el-input-number v-model="line.quantity" :min="0" :controls="false" style="width: 100px" />
-              </div>
-
-              <div v-if="line.category !== '模型调优服务'" class="line-field">
-                <label>周期(月)</label>
-                <el-input-number v-model="line.period_months" :min="0" :controls="false" style="width: 100px" />
-              </div>
-
-              <div v-if="line.category === '模型调优服务'" class="line-field">
-                <label>周期</label>
-                <span class="line-period-hint">按套（不涉及服务周期）</span>
-              </div>
-
-              <div class="line-field">
-                <label>单价(元)</label>
-                <el-input-number v-model="line.unit_price" :min="0" :precision="2" :controls="false" style="width: 140px" />
-              </div>
-
-              <div class="line-field" style="min-width: 180px;">
+              <div class="line-field line-field-total">
                 <label>总价(元)</label>
                 <el-input-number
                   v-model="line.manual_total"
@@ -915,7 +956,7 @@ onUnmounted(() => {
                   :precision="2"
                   :controls="false"
                   :placeholder="lineTotal(line).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })"
-                  style="width: 180px"
+                  class="line-control line-control-total"
                 />
                 <span v-if="line.manual_total !== null && line.manual_total !== undefined" class="line-total-hint manual">
                   已手动覆盖（自动值：¥{{ lineTotal(line).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}）
@@ -926,20 +967,20 @@ onUnmounted(() => {
 
             <!-- 规格 key-value 编辑器 -->
             <div class="spec-section">
-              <label class="spec-label">规格参数</label>
+              <div class="line-sub-title">规格参数</div>
               <div class="spec-kv-list">
                 <div v-for="(kv, ki) in line.spec_kv" :key="ki" class="spec-kv-row">
                   <el-input
                     v-model="kv.key"
                     placeholder="key"
-                    style="width: 140px"
+                    class="spec-kv-key"
                     size="small"
                   />
                   <span class="spec-kv-colon">:</span>
                   <el-input
                     v-model="kv.value"
                     placeholder="value"
-                    style="width: 180px"
+                    class="spec-kv-value"
                     size="small"
                   />
                   <el-button
@@ -960,23 +1001,23 @@ onUnmounted(() => {
 
             <!-- GPU 配置：仅「算力服务」大类显示 -->
             <div v-if="line.category === '算力服务'" class="gpu-section">
-              <el-divider content-position="left">GPU 配置（选填）</el-divider>
-              <div class="line-fields">
+              <div class="line-sub-title">GPU 配置（选填）</div>
+              <div class="line-grid line-grid-4">
                 <div class="line-field">
-                  <label class="line-label">GPU卡数</label>
-                  <el-input-number v-model="line.gpu_count" :min="0" :step="1" placeholder="每台几张卡" controls-position="right" style="width: 100%" />
+                  <label>GPU卡数</label>
+                  <el-input-number v-model="line.gpu_count" :min="0" :step="1" placeholder="每台几张卡" controls-position="right" class="line-control" />
                 </div>
                 <div class="line-field">
-                  <label class="line-label">GPU型号</label>
-                  <el-input v-model="line.gpu_model" placeholder="如 A100-80G / H800" maxlength="100" />
+                  <label>GPU型号</label>
+                  <el-input v-model="line.gpu_model" placeholder="如 A100-80G / H800" maxlength="100" class="line-control" />
                 </div>
                 <div class="line-field">
-                  <label class="line-label">单卡显存(GB)</label>
-                  <el-input-number v-model="line.gpu_memory_gb" :min="0" :precision="1" placeholder="如 80" controls-position="right" style="width: 100%" />
+                  <label>单卡显存(GB)</label>
+                  <el-input-number v-model="line.gpu_memory_gb" :min="0" :precision="1" placeholder="如 80" controls-position="right" class="line-control" />
                 </div>
                 <div class="line-field">
-                  <label class="line-label">单卡算力(TOPS)</label>
-                  <el-input-number v-model="line.gpu_tops" :min="0" :precision="0" placeholder="如 989" controls-position="right" style="width: 100%" />
+                  <label>单卡算力(TOPS)</label>
+                  <el-input-number v-model="line.gpu_tops" :min="0" :precision="0" placeholder="如 989" controls-position="right" class="line-control" />
                 </div>
               </div>
             </div>
@@ -985,7 +1026,7 @@ onUnmounted(() => {
 
         <!-- 新增行按钮 -->
         <div class="add-line-bar">
-          <el-button type="dashed" @click="addLine">
+          <el-button class="add-line-btn" @click="addLine">
             + 添加服务行
           </el-button>
         </div>
@@ -993,13 +1034,13 @@ onUnmounted(() => {
         <!-- 自动汇总金额 -->
         <div class="amount-summary">
           <div class="amount-summary-row">
-            <span class="amount-summary-label">明细汇总金额：</span>
+            <span class="amount-summary-label">明细汇总金额</span>
             <span class="amount-summary-value">
               ¥{{ autoCalcAmount.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}
             </span>
           </div>
           <div v-if="form.amount !== null" class="amount-summary-row">
-            <span class="amount-summary-label">合同金额：</span>
+            <span class="amount-summary-label">合同金额</span>
             <span class="amount-summary-value">
               ¥{{ form.amount.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}
             </span>
@@ -1009,16 +1050,16 @@ onUnmounted(() => {
             {{ amountWarning }}
           </div>
         </div>
+        </div>
       </el-form>
 
       <div class="form-actions">
         <el-button @click="cancel">取消</el-button>
-        <div class="spacer" />
         <el-button type="primary" :loading="submitting" @click="handleSubmit">
           {{ isEdit ? '保存' : '创建' }}
         </el-button>
       </div>
-    </el-card>
+    </div>
 
     <!-- 全页面拖拽遮罩 -->
     <Teleport to="body">
@@ -1031,176 +1072,246 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.card-header-actions {
+.top-bar {
+  margin-bottom: 0;
+}
+.contract-form :deep(.el-form-item__label) {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+.contract-form :deep(.el-form-item) {
+  margin-bottom: 16px;
+}
+.form-hint {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.form-actions {
   display: flex;
+  justify-content: flex-end;
   align-items: center;
   gap: 8px;
-}
-
-.form-hint {
-  margin-left: 10px;
-  font-size: 12px;
-  color: #909399;
+  margin-top: 8px;
+  padding-top: 16px;
+  border-top: 1px solid #e5e7eb;
 }
 
 /* 服务行编辑器 */
 .lines-empty {
   text-align: center;
-  padding: 24px;
-  color: #909399;
+  padding: 28px 16px;
+  color: var(--text-secondary);
+  background: #f8fafc;
+  border: 1px dashed #e2e8f0;
+  border-radius: 8px;
+  font-size: 13px;
+}
+.lines-empty p {
+  margin: 0;
 }
 
 .line-category-header {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin: 16px 0 8px 0;
-  padding: 6px 12px;
-  background: #f0f5ff;
-  border-radius: 6px;
+  margin: 16px 0 10px;
+  padding: 8px 12px;
+  background: rgba(37, 99, 235, 0.06);
+  border-radius: 8px;
 }
 .line-category-tag {
   font-weight: 600;
-  font-size: 14px;
-  color: #1a73e8;
+  font-size: 13px;
+  color: var(--primary-color);
 }
 .line-category-count {
   font-size: 12px;
-  color: #909399;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
 }
 
 .line-card {
-  border: 1px solid #e4e7ed;
-  border-radius: 8px;
-  padding: 12px 16px;
-  margin-bottom: 12px;
   position: relative;
-  background: #fcfdff;
+  margin-bottom: 12px;
+  padding: 16px 16px 14px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
 .line-card:hover {
-  border-color: #c0c4cc;
+  border-color: #cbd5e1;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
 }
 .line-actions {
   position: absolute;
-  top: 8px;
-  right: 12px;
+  top: 10px;
+  right: 10px;
+  z-index: 1;
   display: flex;
-  gap: 2px;
+  gap: 0;
+  padding: 2px;
+  border-radius: 6px;
+  background: #f8fafc;
+}
+.line-actions :deep(.el-button + .el-button) {
+  margin-left: 0;
 }
 
-.line-fields {
+.line-body {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: 12px;
+  padding-right: 96px;
+}
+.line-grid {
+  display: grid;
   gap: 12px 16px;
-  align-items: center;
-  padding-right: 100px;
+}
+.line-grid-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.line-grid-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.line-grid-4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 .line-field {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-}
-.line-field-wide {
-  flex: 1 1 100%;
-  min-width: 200px;
+  gap: 6px;
+  min-width: 0;
 }
 .line-field label {
   font-size: 12px;
-  color: #909399;
+  font-weight: 500;
+  color: var(--text-secondary);
+  line-height: 1.2;
 }
-.line-total-price {
-  font-weight: 700;
-  font-size: 15px;
-  color: #1a73e8;
-  white-space: nowrap;
+.line-field-wide,
+.line-field-total {
+  width: 100%;
+}
+.line-control {
+  width: 100%;
+}
+.line-control-total {
+  max-width: 280px;
+}
+.line-field :deep(.el-input-number) {
+  width: 100%;
+}
+.line-field :deep(.el-select) {
+  width: 100%;
 }
 .line-total-hint {
-  font-size: 11px;
+  font-size: 12px;
+  line-height: 1.4;
   margin-top: 2px;
-  display: block;
 }
 .line-total-hint.auto {
-  color: #909399;
+  color: var(--text-secondary);
+  opacity: 0.85;
 }
 .line-total-hint.manual {
-  color: #409eff;
+  color: var(--primary-color);
 }
 .line-period-hint {
-  font-size: 12px;
-  color: #909399;
-  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  font-size: 13px;
+  color: var(--text-secondary);
 }
 
-/* 规格编辑器 */
-.spec-section {
-  margin-top: 12px;
-  padding-top: 10px;
-  border-top: 1px dashed #e4e7ed;
-}
-.spec-label {
+.line-sub-title {
+  margin: 0 0 10px;
   font-size: 12px;
-  color: #909399;
-  margin-bottom: 4px;
-  display: block;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.spec-section,
+.gpu-section {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid #f1f5f9;
 }
 .spec-kv-list {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  margin-bottom: 4px;
+  gap: 8px;
+  margin-bottom: 8px;
 }
 .spec-kv-row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+}
+.spec-kv-key {
+  width: 160px;
+  flex-shrink: 0;
+}
+.spec-kv-value {
+  flex: 1;
+  min-width: 0;
+  max-width: 320px;
 }
 .spec-kv-colon {
-  color: #909399;
+  color: var(--text-secondary);
   font-weight: 600;
-}
-
-/* GPU 配置区域 */
-.gpu-section {
-  margin-top: 12px;
-}
-.gpu-section .line-fields {
-  padding-right: 0;
+  flex-shrink: 0;
 }
 
 .add-line-bar {
-  text-align: center;
-  padding: 12px 0;
+  display: flex;
+  justify-content: center;
+  padding: 4px 0 8px;
+}
+.add-line-btn {
+  width: 100%;
+  border-style: dashed;
+  border-color: #cbd5e1;
+  color: var(--text-secondary);
+  background: #f8fafc;
+}
+.add-line-btn:hover {
+  border-color: var(--primary-color);
+  color: var(--primary-color);
+  background: rgba(37, 99, 235, 0.04);
 }
 
-/* 金额汇总 */
 .amount-summary {
-  margin-top: 20px;
-  padding: 16px;
-  background: #fafbfc;
-  border: 1px solid #e4e7ed;
+  margin-top: 16px;
+  padding: 14px 16px;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
   border-radius: 8px;
 }
 .amount-summary-row {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 2px 0;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 0;
 }
 .amount-summary-label {
-  font-size: 14px;
-  color: #606266;
-  min-width: 120px;
+  font-size: 13px;
+  color: var(--text-secondary);
 }
 .amount-summary-value {
-  font-size: 16px;
+  font-size: 18px;
   font-weight: 700;
-  color: #303133;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
 }
 .amount-warning {
-  margin-top: 8px;
+  margin-top: 10px;
   padding: 8px 12px;
-  background: #fef3c7;
-  border: 1px solid #f0c94a;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
   border-radius: 6px;
   color: #92400e;
   font-size: 13px;
@@ -1209,15 +1320,33 @@ onUnmounted(() => {
   gap: 6px;
 }
 
-.form-actions {
-  display: flex;
-  align-items: center;
-  margin-top: 24px;
-  padding-top: 16px;
-  border-top: 1px solid #ebeef5;
+@media (max-width: 900px) {
+  .line-body {
+    padding-right: 0;
+    padding-top: 28px;
+  }
+  .line-grid-2,
+  .line-grid-3,
+  .line-grid-4 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .spec-kv-key {
+    width: 120px;
+  }
+  .spec-kv-value {
+    max-width: none;
+  }
 }
-.spacer {
-  flex: 1;
+
+@media (max-width: 640px) {
+  .line-grid-2,
+  .line-grid-3,
+  .line-grid-4 {
+    grid-template-columns: 1fr;
+  }
+  .line-control-total {
+    max-width: none;
+  }
 }
 
 /* ============================================

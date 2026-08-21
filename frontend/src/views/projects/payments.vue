@@ -24,6 +24,7 @@ import {
   View,
   Document,
 } from '@element-plus/icons-vue'
+import { confirmDelete } from '@/lib/confirm'
 import {
   getProjectContract,
   getPayments,
@@ -155,6 +156,7 @@ async function submitPayment() {
 }
 
 async function handleDeletePayment(id: string) {
+  if (!(await confirmDelete('确定删除该回款记录？'))) return
   try {
     await deletePayment(id)
     ElMessage.success('回款已删除')
@@ -639,14 +641,16 @@ onMounted(async () => {
     <!-- ============================================================ -->
     <!-- 顶部：返回 + 合同标题 -->
     <!-- ============================================================ -->
-    <div class="page-header">
+    <div class="top-bar">
       <el-button :icon="ArrowLeft" @click="goBack" size="default">返回</el-button>
-      <span class="page-title">
-        {{ contract?.name || '回款管理' }}
-        <span v-if="contract" class="contract-meta">
+    </div>
+    <div class="detail-header">
+      <div class="header-left">
+        <h1 class="header-title">{{ contract?.name || '回款管理' }}</h1>
+        <div v-if="contract" class="header-sub">
           {{ contract.party_a_name || '甲方' }} vs {{ contract.party_b_name || '乙方' }}
-        </span>
-      </span>
+        </div>
+      </div>
     </div>
 
     <!-- ============================================================ -->
@@ -656,7 +660,7 @@ onMounted(async () => {
       <!-- 左侧：主内容区 -->
       <div class="left-panel">
         <!-- 汇总卡片 -->
-        <el-card shadow="never" class="summary-card">
+        <div class="page-panel summary-card">
           <div class="summary-row">
             <div class="summary-item">
               <div class="summary-icon contract-icon">
@@ -696,10 +700,10 @@ onMounted(async () => {
             :status="paymentSummary.progress >= 100 ? 'success' : ''"
             class="summary-progress"
           />
-        </el-card>
+        </div>
 
         <!-- 操作栏 -->
-        <el-card shadow="never" class="actions-card">
+        <div class="page-panel actions-card">
           <div class="actions-row">
             <el-button type="primary" :icon="Plus" @click="showAddPaymentForm">
               新增回款
@@ -793,18 +797,22 @@ onMounted(async () => {
               </div>
             </div>
           </div>
-        </el-card>
+        </div>
 
         <!-- 回款列表 -->
-        <el-card shadow="never" class="list-card">
+        <div class="page-panel list-card">
+          <div class="dialog-section-title">回款记录</div>
           <el-table
             :data="paymentList"
-            border
             stripe
             style="width: 100%"
-            empty-text="暂无回款记录"
             size="default"
           >
+        <template #empty>
+          <div class="table-empty">
+            <el-empty description="暂无回款记录" :image-size="72" />
+          </div>
+        </template>
             <el-table-column prop="payment_date" label="日期" width="120" align="center">
               <template #default="{ row }">{{ formatDate(row.payment_date) }}</template>
             </el-table-column>
@@ -847,15 +855,11 @@ onMounted(async () => {
             <el-table-column label="操作" width="140" align="center" fixed="right">
               <template #default="{ row }">
                 <el-button size="small" text @click="editPayment(row)">编辑</el-button>
-                <el-popconfirm title="确定删除？" @confirm="handleDeletePayment(row.id)">
-                  <template #reference>
-                    <el-button size="small" text type="danger">删除</el-button>
-                  </template>
-                </el-popconfirm>
+                <el-button size="small" text type="danger" @click="handleDeletePayment(row.id)">删除</el-button>
               </template>
             </el-table-column>
           </el-table>
-        </el-card>
+        </div>
       </div>
       <!-- 右侧留空（Copilot 通过 Teleport 渲染到 body） -->
     </div>
@@ -924,7 +928,7 @@ onMounted(async () => {
         <div class="dialog-manual-title">或手动填写</div>
       </div>
 
-      <el-form :model="paymentForm" label-width="100px">
+      <el-form :model="paymentForm" label-position="top">
         <el-form-item label="回款金额" required>
           <el-input-number
             v-model="paymentForm.amount"
@@ -1091,37 +1095,29 @@ onMounted(async () => {
 .payments-page {
   max-width: 1400px;
   margin: 0 auto;
-  padding: 20px 24px;
-  background: #f5f7fa;
-  min-height: 100vh;
 }
 
 /* ============================================================
    顶部
    ============================================================ */
-.page-header {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  margin-bottom: 20px;
+.top-bar {
+  margin-bottom: 0;
 }
-
-.page-title {
+.detail-header {
+  padding: 20px;
+  border-radius: 8px;
+  margin-bottom: 16px;
+}
+.header-title {
+  margin: 0 0 8px 0;
   font-size: 20px;
-  font-weight: 700;
-  color: #1a3270;
-  display: flex;
-  align-items: center;
-  gap: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.3;
 }
-
-.contract-meta {
-  font-size: 13px;
-  font-weight: 400;
-  color: #909399;
-  padding: 2px 10px;
-  background: #ecf5ff;
-  border-radius: 4px;
+.header-sub {
+  color: var(--text-secondary);
+  font-size: 14px;
 }
 
 /* ============================================================
@@ -1135,16 +1131,16 @@ onMounted(async () => {
 .left-panel {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
 /* ============================================================
    汇总卡片
    ============================================================ */
 .summary-card {
-  margin-bottom: 16px;
   border-radius: 8px;
-  border: 1px solid #e4e7ed;
-  background: #fff;
 }
 
 .summary-row {
@@ -1220,10 +1216,7 @@ onMounted(async () => {
    操作栏
    ============================================================ */
 .actions-card {
-  margin-bottom: 16px;
   border-radius: 8px;
-  border: 1px solid #e4e7ed;
-  background: #fff;
 }
 
 .actions-row {
@@ -1340,10 +1333,10 @@ onMounted(async () => {
    列表卡片
    ============================================================ */
 .list-card {
-  margin-bottom: 16px;
   border-radius: 8px;
-  border: 1px solid #e4e7ed;
-  background: #fff;
+}
+.list-card > .dialog-section-title {
+  margin-bottom: 12px;
 }
 
 .amount-cell {

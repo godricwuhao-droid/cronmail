@@ -7,10 +7,11 @@
  *  - 附件状态汇总展示
  *  - 行内操作：详情、编辑、删除 + 附件下拉
  */
-import { onMounted, reactive, ref } from 'vue'
+import { onMounted, reactive, ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { DataAnalysis, Download, Search } from '@element-plus/icons-vue'
+import { DataAnalysis, Download, Search, ArrowDown, Refresh, RefreshLeft } from '@element-plus/icons-vue'
+import { confirmDelete } from '@/lib/confirm'
 import {
   deleteSatelliteContract,
   listSatelliteContracts,
@@ -64,6 +65,21 @@ function handleSearch() {
 }
 
 function handleFilterChange() {
+  pagination.page = 1
+  fetchList()
+}
+
+const hasFilters = computed(
+  () => !!(searchText.value.trim() || customerFilter.value),
+)
+
+const emptyDescription = computed(() =>
+  hasFilters.value ? '未找到匹配合同' : '暂无合同',
+)
+
+function clearFilters() {
+  searchText.value = ''
+  customerFilter.value = ''
   pagination.page = 1
   fetchList()
 }
@@ -131,6 +147,7 @@ function goAttachments(row: SatelliteContractItem) {
 }
 
 async function handleDelete(row: SatelliteContractItem) {
+  if (!(await confirmDelete('确定删除该合同？'))) return
   try {
     await deleteSatelliteContract(row.id)
     ElMessage.success('合同已删除')
@@ -189,17 +206,16 @@ onMounted(() => {
 
 <template>
   <div class="page-container">
-    <el-card shadow="never">
-      <template #header>
-        <div class="card-header">
-          <span class="title">
-            <el-icon><DataAnalysis /></el-icon>
-            卫星数据合同
-          </span>
-          <el-button :icon="Download" @click="handleExport" :disabled="loading">导出</el-button>
+    <div class="page-panel">
+      <div class="card-header">
+        <span class="title">
+          <el-icon><DataAnalysis /></el-icon>
+          卫星数据合同
+        </span>
+        <div class="header-actions">
           <el-button type="primary" @click="goCreate">+ 新建合同</el-button>
         </div>
-      </template>
+      </div>
 
       <!-- 筛选栏 -->
       <div class="toolbar">
@@ -230,7 +246,9 @@ onMounted(() => {
             <el-icon><Search /></el-icon>
           </template>
         </el-input>
-        <el-button @click="fetchList">刷新</el-button>
+        <el-button :icon="Refresh" :disabled="loading" @click="fetchList">刷新</el-button>
+        <el-button :icon="RefreshLeft" :disabled="!hasFilters" @click="clearFilters">重置</el-button>
+        <el-button :icon="Download" @click="handleExport" :disabled="loading">导出</el-button>
       </div>
 
       <!-- 表格 -->
@@ -238,15 +256,23 @@ onMounted(() => {
         v-loading="loading"
         :data="list"
         row-key="id"
-        border
         stripe
         style="width: 100%"
-        empty-text="暂无合同"
       >
-        <el-table-column prop="name" label="合同名称" min-width="200" show-overflow-tooltip />
+        <template #empty>
+          <div class="table-empty">
+            <el-empty :description="emptyDescription" :image-size="72" />
+          </div>
+        </template>
+        <el-table-column prop="name" label="合同名称" min-width="200" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span class="col-name-link" @click="goDetail(row)">{{ row.name }}</span>
+          </template>
+        </el-table-column>
         <el-table-column label="客户" min-width="160" show-overflow-tooltip>
           <template #default="{ row }">
-            {{ row.customer_name || '-' }}
+            <span v-if="row.customer_name">{{ row.customer_name }}</span>
+            <span v-else class="col-muted">-</span>
           </template>
         </el-table-column>
         <el-table-column prop="contract_no" label="合同编号" min-width="140" show-overflow-tooltip>
@@ -282,39 +308,35 @@ onMounted(() => {
         </el-table-column>
         <el-table-column label="操作" width="280" fixed="right">
           <template #default="{ row }">
-            <el-button size="small" link type="primary" @click="goDetail(row)">详情</el-button>
-            <el-button size="small" link type="primary" @click="goEdit(row)">编辑</el-button>
-            <el-popconfirm
-              title="确定删除该合同？"
-              confirm-button-text="删除"
-              cancel-button-text="取消"
-              @confirm="handleDelete(row)"
-            >
-              <template #reference>
-                <el-button size="small" link type="danger">删除</el-button>
-              </template>
-            </el-popconfirm>
-            <el-dropdown trigger="click" @command="goAttachments(row)">
-              <el-button size="small" link type="primary">
-                附件 <el-icon><ArrowDown /></el-icon>
-              </el-button>
-              <template #dropdown>
-                <el-dropdown-menu>
-                  <el-dropdown-item>
-                    <span class="status-dot-sm" :style="{ backgroundColor: statusDotColor(getSummary(row), 'contract_agreement') }" />
-                    合同协议
-                  </el-dropdown-item>
-                  <el-dropdown-item>
-                    <span class="status-dot-sm" :style="{ backgroundColor: statusDotColor(getSummary(row), 'acceptance_material') }" />
-                    交付材料
-                  </el-dropdown-item>
-                  <el-dropdown-item>
-                    <span class="status-dot-sm" :style="{ backgroundColor: statusDotColor(getSummary(row), 'process_material') }" />
-                    过程材料
-                  </el-dropdown-item>
-                </el-dropdown-menu>
-              </template>
-            </el-dropdown>
+            <div class="action-buttons">
+              <el-button size="small" link type="primary" @click="goDetail(row)">详情</el-button>
+              <el-divider direction="vertical" />
+              <el-button size="small" link type="primary" @click="goEdit(row)">编辑</el-button>
+              <el-divider direction="vertical" />
+              <el-button size="small" link type="danger" @click="handleDelete(row)">删除</el-button>
+              <el-divider direction="vertical" />
+              <el-dropdown trigger="click" @command="goAttachments(row)">
+                <el-button size="small" link type="primary">
+                  附件 <el-icon><ArrowDown /></el-icon>
+                </el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item>
+                      <span class="status-dot-sm" :style="{ backgroundColor: statusDotColor(getSummary(row), 'contract_agreement') }" />
+                      合同协议
+                    </el-dropdown-item>
+                    <el-dropdown-item>
+                      <span class="status-dot-sm" :style="{ backgroundColor: statusDotColor(getSummary(row), 'acceptance_material') }" />
+                      交付材料
+                    </el-dropdown-item>
+                    <el-dropdown-item>
+                      <span class="status-dot-sm" :style="{ backgroundColor: statusDotColor(getSummary(row), 'process_material') }" />
+                      过程材料
+                    </el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
+            </div>
           </template>
         </el-table-column>
       </el-table>
@@ -332,11 +354,59 @@ onMounted(() => {
           @size-change="handleSizeChange"
         />
       </div>
-    </el-card>
+    </div>
   </div>
 </template>
 
 <style scoped>
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.card-header .title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.card-header .title .el-icon {
+  color: var(--primary-color);
+  font-size: 18px;
+}
+.header-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.col-name-link {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+  color: var(--primary-color);
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.2s;
+}
+.col-name-link:hover {
+  color: var(--primary-hover);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
 .status-dot {
   display: inline-block;
   width: 10px;
@@ -352,5 +422,27 @@ onMounted(() => {
   border-radius: 50%;
   margin-right: 6px;
   vertical-align: middle;
+}
+.action-buttons {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+}
+.action-buttons :deep(.el-button + .el-button) {
+  margin-left: 0;
+}
+.action-buttons :deep(.el-divider--vertical) {
+  margin: 0 8px;
+  height: 12px;
+  border-color: #e5e7eb;
+}
+.pagination {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+.muted,
+.col-muted {
+  color: #c0c4cc;
 }
 </style>

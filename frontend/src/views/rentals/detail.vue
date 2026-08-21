@@ -141,10 +141,10 @@ onMounted(() => {
 
 <template>
   <div class="page-container" v-loading="loading">
-    <!-- 顶部返回 -->
-    <div style="margin-bottom: 16px;">
+    <div class="top-bar">
       <el-button @click="goBack">
-        <el-icon><ArrowLeft /></el-icon> 返回列表
+        <el-icon><ArrowLeft /></el-icon>
+        返回
       </el-button>
     </div>
 
@@ -158,7 +158,6 @@ onMounted(() => {
             v-if="record.status"
             :type="statusTagType(record.status)"
             size="small"
-            effect="dark"
           >{{ statusLabel(record.status) }}</el-tag>
         </div>
       </div>
@@ -170,7 +169,7 @@ onMounted(() => {
 
     <!-- 基本信息 -->
     <section class="detail-section">
-      <h3 class="section-title">基本信息</h3>
+      <div class="dialog-section-title">基本信息</div>
       <el-descriptions :column="3" border>
         <el-descriptions-item label="客户名称">{{ record.customer?.name || '-' }}</el-descriptions-item>
         <el-descriptions-item label="机器型号">{{ record.machine_model || '-' }}</el-descriptions-item>
@@ -201,7 +200,7 @@ onMounted(() => {
 
     <!-- 硬件配置 -->
     <section class="detail-section">
-      <h3 class="section-title">硬件配置</h3>
+      <div class="dialog-section-title">硬件配置</div>
       <el-descriptions :column="3" border>
         <el-descriptions-item label="CPU 型号">{{ record.cpu_model || '-' }}</el-descriptions-item>
         <el-descriptions-item label="内存容量">
@@ -231,7 +230,7 @@ onMounted(() => {
 
     <!-- 存储与网络 -->
     <section class="detail-section">
-      <h3 class="section-title">存储与网络</h3>
+      <div class="dialog-section-title">存储与网络</div>
       <el-descriptions :column="3" border>
         <el-descriptions-item label="内网 IP">{{ record.private_ip || '-' }}</el-descriptions-item>
         <el-descriptions-item label="公网 IP">
@@ -250,18 +249,18 @@ onMounted(() => {
 
     <!-- 登录凭证 -->
     <section class="detail-section">
-      <h3 class="section-title">登录凭证</h3>
+      <div class="dialog-section-title">登录凭证</div>
       <el-descriptions :column="3" border>
         <el-descriptions-item label="账号">{{ record.root_username || 'root' }}</el-descriptions-item>
         <el-descriptions-item label="密码" :span="2">
           <span
+            class="password-toggle"
             @click="showPassword = !showPassword"
-            style="cursor: pointer; display: inline-flex; align-items: center; gap: 8px;"
           >
-            <code style="background: #f3f4f6; padding: 4px 12px; border-radius: 4px; font-family: monospace;">
+            <code class="password-code">
               {{ showPassword ? (record.root_password || '-') : '••••••••' }}
             </code>
-            <el-icon style="color: #9ca3af;">
+            <el-icon class="password-icon">
               <View v-if="!showPassword" />
               <Hide v-else />
             </el-icon>
@@ -270,12 +269,12 @@ onMounted(() => {
       </el-descriptions>
     </section>
 
-    <!-- 关联合同信息卡片 -->
+    <!-- 关联合同信息 -->
     <section
       v-if="record.contract_info"
       class="detail-section"
     >
-      <h3 class="section-title">关联合同信息</h3>
+      <div class="dialog-section-title">关联合同信息</div>
       <el-descriptions :column="4" border size="small">
         <el-descriptions-item label="合同名称">
           <el-link
@@ -300,17 +299,24 @@ onMounted(() => {
 
     <!-- 变更记录（页面底部） -->
     <section id="changelog-section" class="detail-section">
-      <div class="section-header">
-        <h3>变更记录</h3>
-        <span class="muted">（共 {{ changeLogs.length }} 条）</span>
+      <div class="section-toolbar">
+        <div class="dialog-section-title">变更记录</div>
+        <span class="muted">共 {{ changeLogs.length }} 条</span>
       </div>
-      <el-table :data="changeLogs" size="small" stripe border empty-text="暂无变更记录" style="width:100%">
+      <el-table :data="changeLogs" stripe style="width:100%">
+        <template #empty>
+          <div class="table-empty table-empty--compact">
+            <el-empty description="暂无变更记录" :image-size="64" />
+          </div>
+        </template>
         <el-table-column prop="created_at" label="时间" width="180">
-          <template #default="{ row }">{{ formatChangelogTime(row.created_at) }}</template>
+          <template #default="{ row }">
+            <span class="col-secondary">{{ formatChangelogTime(row.created_at) }}</span>
+          </template>
         </el-table-column>
         <el-table-column prop="content" label="内容" show-overflow-tooltip />
       </el-table>
-      <div style="margin-top:12px; display:flex; gap:8px;">
+      <div class="changelog-add">
         <el-input v-model="newChangeContent" placeholder="输入变更内容" maxlength="500" show-word-limit style="flex:1" />
         <el-button type="primary" :disabled="!newChangeContent.trim()" :loading="changeSubmitting" @click="handleAddChangeLog">
           添加变更记录
@@ -321,58 +327,71 @@ onMounted(() => {
 </template>
 
 <style scoped>
+.top-bar {
+  margin-bottom: 0;
+}
+
 .detail-header {
-  background: #fff;
-  border-radius: 8px;
-  padding: 20px 24px;
-  margin-bottom: 16px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  padding: 20px;
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
   flex-wrap: wrap;
   gap: 12px;
-}
-.header-left {
-  min-width: 0;
+  border-radius: 8px;
 }
 .header-title {
   margin: 0 0 8px 0;
-  font-size: 22px;
+  font-size: 20px;
   font-weight: 600;
   color: var(--text-primary);
+  line-height: 1.3;
 }
 .header-sub {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   color: var(--text-secondary);
   font-size: 14px;
-}
-.header-customer {
-  margin-right: 4px;
 }
 .header-actions {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .detail-section {
-  background: #fff;
+  padding: 20px;
   border-radius: 8px;
-  padding: 20px 24px;
-  margin-bottom: 16px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+.detail-section > .dialog-section-title {
+  margin-bottom: 12px;
 }
 
-.section-title {
-  margin: 0 0 16px 0;
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--primary-color);
-  padding-bottom: 12px;
-  border-bottom: 2px solid var(--border-color);
+.section-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #e5e7eb;
+}
+.section-toolbar .dialog-section-title {
+  margin: 0;
+  padding-top: 0;
+  padding-right: 0;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.muted {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 400;
+  opacity: 0.85;
 }
 
 .highlight-value {
@@ -390,29 +409,33 @@ onMounted(() => {
   font-weight: 600;
 }
 
-.hint {
-  color: #909399;
-  font-size: 13px;
-  padding: 8px 0;
+.password-toggle {
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
-.muted {
-  color: #c0c4cc;
+.password-code {
+  background: #f3f4f6;
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-family: monospace;
+}
+.password-icon {
+  color: #9ca3af;
 }
 
-.section-header {
+.changelog-add {
+  margin-top: 12px;
   display: flex;
-  align-items: baseline;
   gap: 8px;
-  margin-bottom: 12px;
 }
-.section-header h3 {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--primary-color);
-}
+
 .storage-list { display: flex; flex-direction: column; gap: 4px; }
 .storage-item-detail { display: flex; align-items: center; padding: 2px 0; }
 .storage-dot { color: var(--primary-color); margin-right: 6px; font-size: 10px; }
 .storage-text { font-size: 13px; color: var(--text-primary); }
+.col-secondary {
+  color: var(--text-secondary);
+}
 </style>

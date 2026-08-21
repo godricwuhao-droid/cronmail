@@ -19,7 +19,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
-import { Document, FolderOpened, Connection, Monitor, Lock, EditPen } from '@element-plus/icons-vue'
+import { ArrowLeft, Document, InfoFilled } from '@element-plus/icons-vue'
 import {
   createRental,
   getRental,
@@ -266,199 +266,244 @@ onMounted(async () => {
 
 <template>
   <div class="page-container" v-loading="loadingDetail">
-    <el-card shadow="never">
-      <template #header>
-        <div class="card-header">
-          <span class="title">
-            {{ isEdit ? '编辑设备' : '创建设备' }}
-          </span>
-          <el-button link @click="cancel">返回</el-button>
-        </div>
-      </template>
+    <div class="top-bar">
+      <el-button @click="cancel">
+        <el-icon><ArrowLeft /></el-icon>
+        返回
+      </el-button>
+    </div>
+
+    <div class="page-panel">
+      <div class="card-header">
+        <span class="title">
+          <el-icon><Document /></el-icon>
+          {{ isEdit ? '编辑设备' : '创建设备' }}
+        </span>
+      </div>
+
+      <div class="dialog-tip">
+        <el-icon><InfoFilled /></el-icon>
+        <span>
+          <template v-if="isEdit">
+            仅可编辑硬件与登录信息；客户、日期、计费等由关联合同管理。
+          </template>
+          <template v-else>
+            填写设备硬件与网络信息；客户与计费在关联合同后自动继承。
+          </template>
+        </span>
+      </div>
 
       <!-- 编辑模式：展示从合同继承的信息 -->
-      <template v-if="isEdit && detail?.contract_info">
-        <div class="contract-info-card">
-          <el-descriptions
-            title="关联合同信息（只读，由合同管理）"
-            :column="4"
-            border
-            size="small"
-          >
-            <el-descriptions-item label="合同名称">
-              <el-link
-                type="primary"
-                :underline="false"
-                @click="router.push({ name: 'ContractDetail', params: { id: detail.contract_info!.id } })"
-              >
-                {{ detail.contract_info.name }}
-              </el-link>
-            </el-descriptions-item>
-            <el-descriptions-item label="客户">
-              {{ detail.customer?.name || '-' }}
-            </el-descriptions-item>
-            <el-descriptions-item label="到期时间">
-              {{ detail.contract_info.end_date }}
-            </el-descriptions-item>
-            <el-descriptions-item label="计费方式">
-              {{ billingLabel(detail.contract_info.billing_model) }}
-            </el-descriptions-item>
-          </el-descriptions>
-        </div>
-      </template>
+      <div v-if="isEdit && detail?.contract_info" class="dialog-section">
+        <div class="dialog-section-title">关联合同信息（只读）</div>
+        <el-descriptions :column="4" border size="small">
+          <el-descriptions-item label="合同名称">
+            <el-link
+              type="primary"
+              :underline="false"
+              @click="router.push({ name: 'ContractDetail', params: { id: detail.contract_info!.id } })"
+            >
+              {{ detail.contract_info.name }}
+            </el-link>
+          </el-descriptions-item>
+          <el-descriptions-item label="客户">
+            {{ detail.customer?.name || '-' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="到期时间">
+            {{ detail.contract_info.end_date }}
+          </el-descriptions-item>
+          <el-descriptions-item label="计费方式">
+            {{ billingLabel(detail.contract_info.billing_model) }}
+          </el-descriptions-item>
+        </el-descriptions>
+      </div>
 
       <el-form
         ref="formRef"
         :model="form"
         :rules="rules"
-        label-width="120px"
+        label-position="top"
         class="rental-form"
         @submit.prevent
       >
         <!-- 1. 基础信息 -->
-        <div class="section-title">
-          <el-icon><Document /></el-icon>
-          基础信息
+        <div class="dialog-section">
+          <div class="dialog-section-title">基础信息</div>
+          <el-row :gutter="16">
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="机器型号" prop="machine_model">
+                <el-input v-model="form.machine_model" placeholder="如 8卡4090" />
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="设备状态">
+                <el-select v-model="form.status" placeholder="选择状态" style="width: 100%">
+                  <el-option label="空闲中" value="空闲中" />
+                  <el-option label="已断电" value="已断电" />
+                  <el-option label="租赁中" value="租赁中" />
+                </el-select>
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="CPU 型号" prop="cpu_model">
+                <el-input v-model="form.cpu_model" placeholder="如 AMD EPYC 7K62 48C 2.60GHz * 2" />
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="内存 (GB)" prop="memory_gb">
+                <el-input-number
+                  v-model="form.memory_gb"
+                  :min="1"
+                  :max="65536"
+                  style="width: 100%"
+                />
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="GPU">
+                <el-input v-model="form.gpu_info" placeholder="如 8×NVIDIA 4090 24G" />
+              </el-form-item>
+            </el-col>
+          </el-row>
         </div>
-        <el-form-item label="机器型号" prop="machine_model">
-          <el-input v-model="form.machine_model" placeholder="如 8卡4090" />
-        </el-form-item>
-        <el-form-item label="CPU 型号" prop="cpu_model">
-          <el-input v-model="form.cpu_model" placeholder="如 AMD EPYC 7K62 48C 2.60GHz * 2" />
-        </el-form-item>
-        <el-form-item label="内存 (GB)" prop="memory_gb">
-          <el-input-number
-            v-model="form.memory_gb"
-            :min="1"
-            :max="65536"
-          />
-        </el-form-item>
-        <el-form-item label="GPU">
-          <el-input v-model="form.gpu_info" placeholder="如 8×NVIDIA 4090 24G" />
-        </el-form-item>
-        <el-form-item label="设备状态">
-          <el-select v-model="form.status" placeholder="选择状态" style="width: 100%">
-            <el-option label="空闲中" value="空闲中" />
-            <el-option label="已断电" value="已断电" />
-            <el-option label="租赁中" value="租赁中" />
-          </el-select>
-        </el-form-item>
 
         <!-- 2. 存储 -->
-        <div class="section-title">
-          <el-icon><FolderOpened /></el-icon>
-          存储
+        <div class="dialog-section">
+          <div class="dialog-section-title">存储</div>
+          <el-row :gutter="16">
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="系统盘" prop="system_disk">
+                <el-input v-model="form.system_disk" placeholder="如 480GB SATA SSD" />
+              </el-form-item>
+            </el-col>
+            <el-col :span="24">
+              <el-form-item label="数据盘">
+                <div class="storage-list">
+                  <div
+                    v-for="(disk, idx) in form.data_disks"
+                    :key="idx"
+                    class="storage-item"
+                  >
+                    <span class="storage-text">{{ disk }}</span>
+                    <el-button
+                      link
+                      type="danger"
+                      class="btn-link-small"
+                      @click="removeDisk(idx)"
+                    >
+                      删除
+                    </el-button>
+                  </div>
+                </div>
+                <div class="storage-add-row">
+                  <el-input
+                    v-model="newDiskText"
+                    placeholder="如 2000GB NVMe SSD"
+                    @keyup.enter="addDisk"
+                  />
+                  <el-button type="primary" @click="addDisk">+ 添加</el-button>
+                </div>
+              </el-form-item>
+            </el-col>
+          </el-row>
         </div>
-
-        <el-form-item label="系统盘" prop="system_disk">
-          <el-input v-model="form.system_disk" placeholder="如 480GB SATA SSD" />
-        </el-form-item>
-
-        <el-form-item label="数据盘">
-          <div class="storage-list">
-            <div
-              v-for="(disk, idx) in form.data_disks"
-              :key="idx"
-              class="storage-item"
-            >
-              <span class="storage-text">{{ disk }}</span>
-              <el-button
-                link
-                type="danger"
-                class="btn-link-small"
-                @click="removeDisk(idx)"
-              >
-                删除
-              </el-button>
-            </div>
-          </div>
-          <div class="storage-add-row">
-            <el-input
-              v-model="newDiskText"
-              placeholder="如 2000GB NVMe SSD"
-              @keyup.enter="addDisk"
-            />
-            <el-button type="primary" size="small" @click="addDisk">+ 添加</el-button>
-          </div>
-        </el-form-item>
 
         <!-- 3. 网络 -->
-        <div class="section-title">
-          <el-icon><Connection /></el-icon>
-          网络
+        <div class="dialog-section">
+          <div class="dialog-section-title">网络</div>
+          <el-row :gutter="16">
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="内网IP" prop="private_ip">
+                <el-input v-model="form.private_ip" placeholder="如 192.168.100.124" />
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="公网IP">
+                <el-input
+                  v-model="form.public_ips_text"
+                  placeholder="多个用逗号分隔，如 1.2.3.4,1.2.3.5"
+                />
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="SSH 端口" prop="ssh_port">
+                <el-input-number
+                  v-model="form.ssh_port"
+                  :min="1"
+                  :max="65535"
+                  style="width: 100%"
+                />
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="带宽 (Mbps)">
+                <el-input-number
+                  v-model="form.bandwidth_mbps"
+                  :min="1"
+                  :max="100000"
+                  style="width: 100%"
+                />
+              </el-form-item>
+            </el-col>
+          </el-row>
         </div>
-        <el-form-item label="内网IP" prop="private_ip">
-          <el-input v-model="form.private_ip" placeholder="如 192.168.100.124" />
-        </el-form-item>
-        <el-form-item label="公网IP">
-          <el-input
-            v-model="form.public_ips_text"
-            placeholder="多个用逗号分隔，如 1.2.3.4,1.2.3.5"
-          />
-        </el-form-item>
-        <el-form-item label="SSH 端口" prop="ssh_port">
-          <el-input-number
-            v-model="form.ssh_port"
-            :min="1"
-            :max="65535"
-          />
-        </el-form-item>
-        <el-form-item label="带宽 (Mbps)">
-          <el-input-number
-            v-model="form.bandwidth_mbps"
-            :min="1"
-            :max="100000"
-          />
-        </el-form-item>
 
         <!-- 4. 系统 -->
-        <div class="section-title">
-          <el-icon><Monitor /></el-icon>
-          系统
+        <div class="dialog-section">
+          <div class="dialog-section-title">系统</div>
+          <el-row :gutter="16">
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="操作系统" prop="os_version">
+                <el-input v-model="form.os_version" placeholder="如 ubuntu22.04 server TLS" />
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="机架位置">
+                <el-input v-model="form.rack_location" placeholder="如 E09-18U" />
+              </el-form-item>
+            </el-col>
+          </el-row>
         </div>
-        <el-form-item label="操作系统" prop="os_version">
-          <el-input v-model="form.os_version" placeholder="如 ubuntu22.04 server TLS" />
-        </el-form-item>
-        <el-form-item label="机架位置">
-          <el-input v-model="form.rack_location" placeholder="如 E09-18U" />
-        </el-form-item>
 
         <!-- 5. 凭证 -->
-        <div class="section-title">
-          <el-icon><Lock /></el-icon>
-          凭证
+        <div class="dialog-section">
+          <div class="dialog-section-title">凭证</div>
+          <el-row :gutter="16">
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="root 账号" prop="root_username">
+                <el-input v-model="form.root_username" />
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="root 密码" prop="root_password">
+                <el-input
+                  v-model="form.root_password"
+                  type="password"
+                  show-password
+                  placeholder="保存时会加密存储"
+                />
+              </el-form-item>
+            </el-col>
+          </el-row>
         </div>
-        <el-form-item label="root 账号" prop="root_username">
-          <el-input v-model="form.root_username" />
-        </el-form-item>
-        <el-form-item label="root 密码" prop="root_password">
-          <el-input
-            v-model="form.root_password"
-            type="password"
-            show-password
-            placeholder="保存时会加密存储"
-          />
-        </el-form-item>
 
         <!-- 备注 -->
-        <div class="section-title">
-          <el-icon><EditPen /></el-icon>
-          备注
+        <div class="dialog-section">
+          <div class="dialog-section-title">备注</div>
+          <el-form-item label="备注">
+            <el-input
+              v-model="form.remark"
+              type="textarea"
+              :rows="3"
+              placeholder="可选"
+              maxlength="500"
+              show-word-limit
+            />
+          </el-form-item>
         </div>
-        <el-form-item label="备注">
-          <el-input
-            v-model="form.remark"
-            type="textarea"
-            :rows="3"
-            placeholder="可选"
-            maxlength="500"
-            show-word-limit
-          />
-        </el-form-item>
       </el-form>
 
-      <!-- 操作按钮 -->
-      <div class="footer-actions">
+      <div class="form-actions">
         <el-button @click="cancel">取消</el-button>
         <el-button
           type="primary"
@@ -468,52 +513,21 @@ onMounted(async () => {
           {{ isEdit ? '保存' : '创建' }}
         </el-button>
       </div>
-    </el-card>
+    </div>
   </div>
 </template>
 
 <style scoped>
-/* ============================================================
-   页面级样式
-   ============================================================ */
-.page {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
+.top-bar {
+  margin-bottom: 0;
 }
-
-.card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+.rental-form :deep(.el-form-item__label) {
+  color: var(--text-secondary);
+  font-weight: 500;
 }
-.card-header .title {
-  font-size: 16px;
-  font-weight: 600;
+.rental-form :deep(.el-form-item) {
+  margin-bottom: 16px;
 }
-
-/* ============================================================
-   分区标题 — 对齐合同编辑页风格
-   ============================================================ */
-.section-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text-primary);
-  margin: 18px 0 12px;
-  padding-left: 10px;
-  border-left: 3px solid var(--primary-color);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.section-title .el-icon {
-  color: var(--primary-color);
-  font-size: 16px;
-}
-
-/* ============================================================
-   数据盘列表
-   ============================================================ */
 .storage-list {
   width: 100%;
 }
@@ -535,21 +549,15 @@ onMounted(async () => {
   gap: 8px;
   align-items: center;
   margin-top: 8px;
+  width: 100%;
 }
-
-/* ============================================================
-   底部操作栏 — 参考模板 .footer-actions
-   ============================================================ */
-.footer-actions {
+.form-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 12px;
-  margin-top: 24px;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
   padding-top: 16px;
-  border-top: 1px solid #e8eaf0;
-}
-
-.contract-info-card {
-  margin-bottom: 20px;
+  border-top: 1px solid #e5e7eb;
 }
 </style>

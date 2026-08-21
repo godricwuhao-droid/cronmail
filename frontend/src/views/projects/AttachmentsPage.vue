@@ -8,8 +8,9 @@
  */
 import { computed, onMounted, ref, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import type { CheckboxValueType } from 'element-plus'
+import { confirmDelete } from '@/lib/confirm'
 import {
   ArrowDown,
   ArrowLeft,
@@ -243,15 +244,7 @@ function handleExportAllAttachments() {
 // 删除
 // ============================================================
 async function handleDeleteFile(file: AttachmentFile) {
-  try {
-    await ElMessageBox.confirm(
-      `确定删除文件 "${file.filename}"？`,
-      '删除确认',
-      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' },
-    )
-  } catch {
-    return
-  }
+  if (!(await confirmDelete(`确定删除文件「${file.filename}」？`))) return
   try {
     await deleteAttachment(file.id)
     ElMessage.success('文件已删除')
@@ -295,6 +288,19 @@ const previewVisible = ref(false)
 const previewLoading = ref(false)
 const previewFile = ref<AttachmentFile | null>(null)
 const previewType = ref<'pdf' | 'docx' | 'xlsx' | 'pptx' | 'image' | 'text' | 'unknown'>('unknown')
+
+const previewTypeLabel = computed(() => {
+  const map: Record<typeof previewType.value, string> = {
+    pdf: 'PDF',
+    docx: 'Word',
+    xlsx: 'Excel',
+    pptx: 'PPT',
+    image: '图片',
+    text: '文本',
+    unknown: '文件',
+  }
+  return map[previewType.value]
+})
 
 let pdfPreviewObserver: IntersectionObserver | null = null
 
@@ -562,32 +568,38 @@ onMounted(async () => {
 
 <template>
   <div class="page-container" v-loading="loading">
-    <!-- 顶部返回 -->
     <div class="top-bar">
       <el-button @click="goBack">
-        <el-icon><ArrowLeft /></el-icon> 返回详情
+        <el-icon><ArrowLeft /></el-icon>
+        返回
       </el-button>
     </div>
 
     <!-- 标题栏 -->
-    <div class="title-bar">
-      <div>
-        <h1 class="title-text">附件管理</h1>
-        <div class="title-sub">项目管理合同</div>
+    <div class="detail-header">
+      <div class="header-left">
+        <h1 class="header-title">
+          <el-icon><Document /></el-icon>
+          附件管理
+        </h1>
+        <div class="header-sub">项目管理合同</div>
       </div>
-      <el-button :icon="Download" @click="handleExportAllAttachments" :disabled="loading">
-        一键导出附件
-      </el-button>
+      <div class="header-actions">
+        <el-button :icon="Download" @click="handleExportAllAttachments" :disabled="loading">
+          一键导出附件
+        </el-button>
+      </div>
     </div>
 
     <!-- 空状态 -->
     <div v-if="categories.length === 0" class="empty-section">
-      <el-empty description="暂无附件分类配置，请先在系统配置中配置附件分类" />
+      <div class="table-empty">
+        <el-empty description="暂无附件分类配置，请先在系统配置中配置附件分类" />
+      </div>
     </div>
 
     <!-- 双栏主体 -->
     <div v-else class="main-panels">
-      
       <!-- ====== 左侧：分类树 ====== -->
       <div class="left-tree">
         <div class="tree-title">附件分类</div>
@@ -600,23 +612,38 @@ onMounted(async () => {
             >
               <el-icon class="cat-arrow"><ArrowDown /></el-icon>
               <el-icon class="cat-icon"><Folder /></el-icon>
-              <span class="cat-name">{{ cat.category_name }}</span>
-              <span class="cat-count">{{ cat.items.reduce((s, it) => s + it.file_count, 0) }} 个文件</span>
+              <span class="cat-name" :title="cat.category_name">{{ cat.category_name }}</span>
+              <span class="cat-count">
+                {{ cat.items.reduce((s, it) => s + it.file_count, 0) }}
+              </span>
             </div>
             <div v-show="isExpanded(cat.category_id)" class="cat-items">
-              <div
+              <button
                 v-for="item in cat.items"
                 :key="item.item_id"
+                type="button"
                 class="tree-item"
-                :class="{ active: selectedItemId === item.item_id }"
+                :class="{
+                  active: selectedItemId === item.item_id,
+                  'is-confirmed': item.confirmed,
+                  'is-pending': !item.confirmed && item.file_count > 0,
+                  'is-empty': item.file_count === 0,
+                }"
                 @click="selectedItemId = item.item_id"
               >
-                <el-icon class="item-icon"><Document /></el-icon>
-                <span class="item-label">{{ item.item_name }}</span>
-                <span v-if="item.confirmed" class="item-badge badge-ok">已确认</span>
-                <span v-else-if="item.file_count > 0" class="item-badge badge-warn">未确认</span>
-                <span v-else class="item-badge badge-none">未上传</span>
-              </div>
+                <span
+                  class="item-status-dot"
+                  :title="item.confirmed ? '已确认' : item.file_count > 0 ? '未确认' : '未上传'"
+                />
+                <span class="item-label" :title="item.item_name">{{ item.item_name }}</span>
+                <span v-if="item.file_count > 0" class="item-file-count">{{ item.file_count }}</span>
+                <span
+                  class="item-badge"
+                  :class="item.confirmed ? 'badge-ok' : item.file_count > 0 ? 'badge-warn' : 'badge-none'"
+                >
+                  {{ item.confirmed ? '已确认' : item.file_count > 0 ? '未确认' : '未上传' }}
+                </span>
+              </button>
             </div>
           </div>
         </div>
@@ -640,86 +667,99 @@ onMounted(async () => {
                 <span class="item-name-text">{{ selectedItem.item_name }}</span>
               </el-checkbox>
               <span v-if="selectedItem.expected_type" class="item-type-badge">
-                ({{ selectedItem.expected_type.toUpperCase() }})
+                {{ selectedItem.expected_type.toUpperCase() }}
               </span>
             </div>
             <div class="item-status">
-              <el-tag :type="itemStatusTagType(selectedItem)" size="small" effect="plain">
+              <el-tag :type="itemStatusTagType(selectedItem)" size="small">
                 {{ itemStatusText(selectedItem) }}
               </el-tag>
               <span class="file-count-tag">{{ selectedItem.file_count }} 个文件</span>
             </div>
           </div>
 
-          <div class="file-section" v-if="selectedItem.files.length > 0">
-            <div
-              v-for="file in selectedItem.files"
-              :key="file.id"
-              class="file-row"
-            >
-              <div class="file-info">
-                <el-icon class="file-type-icon"><Document /></el-icon>
-                <span class="file-name" @click="handlePreview(file)" :title="file.filename">
-                  {{ file.filename }}
-                </span>
-                <span class="file-size">{{ formatFileSize(file.file_size) }}</span>
-                <span v-if="file.uploaded_at" class="file-time">
-                  {{ formatUploadTime(file.uploaded_at) }}
-                </span>
+          <div class="right-body">
+            <div class="file-section" v-if="selectedItem.files.length > 0">
+              <div class="file-list-head">
+                <span class="col-name">文件名</span>
+                <span class="col-size">大小</span>
+                <span class="col-time">上传时间</span>
+                <span class="col-actions">操作</span>
               </div>
-              <div class="file-actions">
-                <el-button size="small" link type="primary" @click="handleDownload(file)">
-                  <el-icon><Download /></el-icon> 下载
-                </el-button>
-                <el-button size="small" link type="danger" @click="handleDeleteFile(file)">
-                  <el-icon><Delete /></el-icon> 删除
-                </el-button>
+              <div
+                v-for="file in selectedItem.files"
+                :key="file.id"
+                class="file-row"
+              >
+                <div class="file-info">
+                  <el-icon class="file-type-icon"><Document /></el-icon>
+                  <span class="file-name" @click="handlePreview(file)" :title="file.filename">
+                    {{ file.filename }}
+                  </span>
+                </div>
+                <span class="file-size">{{ formatFileSize(file.file_size) }}</span>
+                <span class="file-time">
+                  {{ file.uploaded_at ? formatUploadTime(file.uploaded_at) : '—' }}
+                </span>
+                <div class="file-actions">
+                  <el-button size="small" link type="primary" @click="handleDownload(file)">
+                    <el-icon><Download /></el-icon> 下载
+                  </el-button>
+                  <el-button size="small" link type="danger" @click="handleDeleteFile(file)">
+                    <el-icon><Delete /></el-icon> 删除
+                  </el-button>
+                </div>
               </div>
             </div>
-          </div>
 
-          <div v-else class="file-empty">
-            <span class="empty-icon">📭</span>
-            <span class="empty-label">暂无文件，拖拽或点击下方区域上传</span>
-          </div>
-
-          <div class="upload-section" v-if="selectedItem">
-            <el-upload
-              :ref="(el: any) => { if (el) uploadRefs[selectedItem!.item_id] = el }"
-              :show-file-list="false"
-              :before-upload="(file: File) => handleBeforeUpload(file, selectedItem!.item_id)"
-              :disabled="uploadingMap[selectedItem!.item_id]"
-              drag
-              accept="*"
-              class="upload-drag-wrap"
-            >
-              <div class="upload-zone" :class="{ 'is-uploading': uploadingMap[selectedItem!.item_id] }">
-                <template v-if="!uploadingMap[selectedItem!.item_id] && uploadErrorMap[selectedItem!.item_id]">
-                  <el-icon class="upload-icon" style="color: #f56c6c"><WarningFilled /></el-icon>
-                  <span class="upload-text" style="color: #f56c6c">{{ uploadErrorMap[selectedItem!.item_id] }}</span>
-                </template>
-                <template v-else-if="!uploadingMap[selectedItem!.item_id]">
-                  <el-icon class="upload-icon"><Plus /></el-icon>
-                  <span class="upload-text">拖拽文件到此处 或 点击上传</span>
-                </template>
-                <template v-else>
-                  <el-icon class="upload-icon is-loading"><Loading /></el-icon>
-                  <span class="upload-text">上传中 {{ uploadProgressMap[selectedItem!.item_id] ?? 0 }}%</span>
-                  <el-progress
-                    :percentage="uploadProgressMap[selectedItem!.item_id] ?? 0"
-                    :show-text="false"
-                    :stroke-width="6"
-                    style="width: 80%; max-width: 300px; margin-top: 12px"
-                  />
-                </template>
+            <div v-else class="file-empty">
+              <div class="table-empty table-empty--compact">
+                <el-empty description="暂无文件，拖拽或点击下方区域上传" :image-size="64" />
               </div>
-            </el-upload>
+            </div>
+
+            <div class="upload-section">
+              <div class="upload-label">上传文件</div>
+              <el-upload
+                :ref="(el: any) => { if (el) uploadRefs[selectedItem!.item_id] = el }"
+                :show-file-list="false"
+                :before-upload="(file: File) => handleBeforeUpload(file, selectedItem!.item_id)"
+                :disabled="uploadingMap[selectedItem!.item_id]"
+                drag
+                accept="*"
+                class="upload-drag-wrap"
+              >
+                <div class="upload-zone" :class="{ 'is-uploading': uploadingMap[selectedItem!.item_id] }">
+                  <template v-if="!uploadingMap[selectedItem!.item_id] && uploadErrorMap[selectedItem!.item_id]">
+                    <el-icon class="upload-icon upload-icon--error"><WarningFilled /></el-icon>
+                    <span class="upload-text upload-text--error">{{ uploadErrorMap[selectedItem!.item_id] }}</span>
+                    <span class="upload-hint">点击或拖拽重新上传</span>
+                  </template>
+                  <template v-else-if="!uploadingMap[selectedItem!.item_id]">
+                    <el-icon class="upload-icon"><Plus /></el-icon>
+                    <span class="upload-text">拖拽文件到此处，或点击上传</span>
+                    <span class="upload-hint">支持多文件；上传后可预览、下载或删除</span>
+                  </template>
+                  <template v-else>
+                    <el-icon class="upload-icon is-loading"><Loading /></el-icon>
+                    <span class="upload-text">上传中 {{ uploadProgressMap[selectedItem!.item_id] ?? 0 }}%</span>
+                    <el-progress
+                      :percentage="uploadProgressMap[selectedItem!.item_id] ?? 0"
+                      :show-text="false"
+                      :stroke-width="6"
+                      class="upload-progress"
+                    />
+                  </template>
+                </div>
+              </el-upload>
+            </div>
           </div>
         </template>
 
         <div v-else class="no-selection">
-          <span class="no-select-icon">📂</span>
-          <span>请从左侧选择一个附件子项</span>
+          <div class="table-empty">
+            <el-empty description="请从左侧选择一个附件子项" :image-size="80" />
+          </div>
         </div>
       </div>
     </div>
@@ -727,22 +767,50 @@ onMounted(async () => {
     <!-- 文件预览弹窗 -->
     <el-dialog
       v-model="previewVisible"
-      :title="previewFile?.filename || '文件预览'"
-      width="85%"
-      top="3vh"
+      width="88%"
+      top="4vh"
       destroy-on-close
       :close-on-click-modal="false"
       class="preview-dialog"
       @closed="onPreviewDialogClosed"
     >
-      <div v-if="previewFile" style="text-align:right;margin-bottom:12px;">
-        <el-button size="small" type="primary" @click="handleDownload(previewFile)">
-          <el-icon><Download /></el-icon> 下载
-        </el-button>
+      <template #header>
+        <div class="preview-header">
+          <div class="preview-header-main">
+            <div class="preview-header-icon-wrap">
+              <el-icon><Document /></el-icon>
+            </div>
+            <div class="preview-header-text">
+              <div class="preview-filename" :title="previewFile?.filename">
+                {{ previewFile?.filename || '文件预览' }}
+              </div>
+              <div v-if="previewFile" class="preview-meta">
+                <span class="preview-meta-chip">{{ previewTypeLabel }}</span>
+                <span class="preview-meta-chip">{{ formatFileSize(previewFile.file_size) }}</span>
+                <span v-if="previewFile.uploaded_at" class="preview-meta-chip">
+                  {{ formatUploadTime(previewFile.uploaded_at) }}
+                </span>
+              </div>
+            </div>
+          </div>
+          <el-button
+            type="primary"
+            :icon="Download"
+            :disabled="!previewFile"
+            @click="previewFile && handleDownload(previewFile)"
+          >
+            下载
+          </el-button>
+        </div>
+      </template>
+
+      <div v-loading="previewLoading" class="preview-body">
+        <div id="preview-container" class="preview-container"></div>
       </div>
-      <div v-loading="previewLoading" style="min-height:300px;">
-        <div id="preview-container" style="overflow:auto;max-height:70vh;"></div>
-      </div>
+
+      <template #footer>
+        <el-button @click="previewVisible = false">关闭</el-button>
+      </template>
     </el-dialog>
 
     <!-- 全局拖拽上传遮罩 -->
@@ -758,169 +826,679 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-/* ====== 顶部 ====== */
-.top-bar { margin-bottom: 16px; }
-
-/* ====== 标题栏 ====== */
-.title-bar {
-  background: #fff; border-radius: 10px; padding: 18px 24px; margin-bottom: 16px;
-  box-shadow: 0 1px 3px rgba(0,0,0,.06);
-  display: flex; align-items: center; justify-content: space-between;
+.top-bar {
+  margin-bottom: 0;
 }
-.title-text { font-size: 20px; font-weight: 600; margin: 0; }
-.title-sub { font-size: 13px; color: #909399; margin-top: 4px; }
 
-/* ====== 空态 ====== */
+.detail-header {
+  padding: 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 12px;
+  border-radius: 8px;
+}
+.header-left {
+  min-width: 0;
+}
+.header-title {
+  margin: 0 0 6px 0;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.3;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.header-title .el-icon {
+  color: var(--primary-color);
+  font-size: 20px;
+}
+.header-sub {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.header-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .empty-section {
-  background: #fff; border-radius: 10px; padding: 60px 24px;
-  box-shadow: 0 1px 3px rgba(0,0,0,.06);
+  background: var(--card-bg);
+  border-radius: 8px;
+  padding: 24px;
 }
 
-/* ====== 双栏主体 ====== */
 .main-panels {
-  display: flex; gap: 0; border-radius: 10px; overflow: hidden;
-  box-shadow: 0 1px 3px rgba(0,0,0,.06); min-height: 520px;
+  display: flex;
+  gap: 0;
+  border-radius: 8px;
+  overflow: hidden;
+  min-height: 520px;
+  background: var(--card-bg);
 }
 
-/* ---- 左侧树 ---- */
 .left-tree {
-  width: 280px; background: #fff; border-right: 1px solid #e4e7ed;
-  display: flex; flex-direction: column; flex-shrink: 0;
+  width: 300px;
+  background: #f8fafc;
+  border-right: 1px solid #e5e7eb;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
 }
 .tree-title {
-  padding: 16px 18px 12px; font-size: 13px; color: #909399;
-  font-weight: 600; letter-spacing: .5px;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: 0;
+  padding: 14px 16px 12px;
+  background: #f8fafc;
+  border-bottom: 1px solid #e5e7eb;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
 }
-.tree-scroll { flex: 1; overflow-y: auto; padding: 0 8px 12px; }
+.tree-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px 10px 14px;
+}
 
-.tree-category { margin-bottom: 2px; }
+.tree-category {
+  margin-bottom: 8px;
+}
+.tree-category:last-child {
+  margin-bottom: 0;
+}
 .tree-cat-header {
-  display: flex; align-items: center; gap: 6px;
-  padding: 8px 10px; border-radius: 6px; cursor: pointer;
-  font-size: 13px; font-weight: 600; color: #303133; transition: background .15s;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  transition: background 0.15s;
+  user-select: none;
 }
-.tree-cat-header:hover { background: #f5f7fa; }
-.cat-arrow { font-size: 10px; color: #909399; transition: transform .2s; flex-shrink: 0; }
-.tree-cat-header.collapsed .cat-arrow { transform: rotate(-90deg); }
-.cat-icon { font-size: 15px; color: #e6a23c; }
-.cat-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cat-count { font-size: 11px; color: #c0c4cc; margin-left: auto; flex-shrink: 0; }
+.tree-cat-header:hover {
+  background: rgba(15, 23, 42, 0.04);
+}
+.cat-arrow {
+  font-size: 11px;
+  color: var(--text-secondary);
+  transition: transform 0.2s;
+  flex-shrink: 0;
+}
+.tree-cat-header.collapsed .cat-arrow {
+  transform: rotate(-90deg);
+}
+.cat-icon {
+  font-size: 15px;
+  color: var(--primary-color);
+  flex-shrink: 0;
+}
+.cat-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cat-count {
+  flex-shrink: 0;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 20px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
 
-.cat-items { padding-left: 4px; }
-.tree-item {
-  display: flex; align-items: center; gap: 6px;
-  padding: 7px 10px 7px 28px; border-radius: 6px; cursor: pointer;
-  font-size: 13px; color: #606266; transition: all .15s;
+.cat-items {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 2px;
+  padding: 0 0 2px 8px;
+  border-left: 1px solid #e2e8f0;
+  margin-left: 16px;
 }
-.tree-item:hover { background: #f0f5ff; color: #409eff; }
-.tree-item.active { background: #ecf5ff; color: #409eff; font-weight: 600; }
-.item-icon { font-size: 14px; flex-shrink: 0; }
-.item-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tree-item {
+  appearance: none;
+  border: none;
+  background: transparent;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-secondary);
+  text-align: left;
+  transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+  position: relative;
+}
+.tree-item:hover {
+  background: rgba(37, 99, 235, 0.06);
+  color: var(--text-primary);
+}
+.tree-item.active {
+  background: #ffffff;
+  color: var(--primary-color);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 1px 3px rgba(15, 23, 42, 0.03);
+}
+.tree-item.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 0 2px 2px 0;
+  background: var(--primary-color);
+}
+
+.item-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: #94a3b8;
+}
+.tree-item.is-confirmed .item-status-dot {
+  background: var(--success-color);
+}
+.tree-item.is-pending .item-status-dot {
+  background: var(--warning-color);
+}
+.tree-item.is-empty .item-status-dot {
+  background: #cbd5e1;
+}
+
+.item-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.item-file-count {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+}
+.tree-item.active .item-file-count {
+  color: var(--primary-color);
+  opacity: 1;
+}
 
 .item-badge {
-  font-size: 10px; padding: 1px 6px; border-radius: 3px; font-weight: 500; flex-shrink: 0;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-weight: 500;
+  flex-shrink: 0;
+  line-height: 1.4;
 }
-.badge-ok { background: #e1f3d8; color: #67c23a; }
-.badge-warn { background: #faecd8; color: #e6a23c; }
-.badge-none { background: #f4f4f5; color: #909399; }
+.badge-ok {
+  background: #ecfdf5;
+  color: #059669;
+}
+.badge-warn {
+  background: #fffbeb;
+  color: #d97706;
+}
+.badge-none {
+  background: #f1f5f9;
+  color: #64748b;
+}
 
-/* ---- 右侧面板 ---- */
 .right-panel {
-  flex: 1; background: #fff; display: flex; flex-direction: column; min-width: 0;
+  flex: 1;
+  background: var(--card-bg);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
 }
 
 .panel-header {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 16px 24px; border-bottom: 1px solid #ebeef5; flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 14px 20px 12px;
+  border-bottom: 1px solid #e5e7eb;
+  background: #fff;
+  flex-shrink: 0;
+  position: sticky;
+  top: 0;
+  z-index: 1;
 }
-.item-title { display: flex; align-items: center; gap: 10px; font-size: 15px; font-weight: 600; }
-.item-name-text { font-weight: 600; }
-.item-type-badge { font-size: 12px; color: #6b7280; font-weight: 700; }
-.item-status { display: flex; align-items: center; gap: 8px; }
-.file-count-tag { font-size: 12px; color: #909399; }
+.item-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 15px;
+  font-weight: 600;
+  min-width: 0;
+}
+.item-title :deep(.el-checkbox__label) {
+  padding-left: 8px;
+}
+.item-name-text {
+  font-weight: 600;
+  color: var(--text-primary);
+  font-size: 15px;
+}
+.item-type-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 4px;
+  background: #f1f5f9;
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.item-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.file-count-tag {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
 
-/* 文件列表 */
-.file-section { flex: 1; overflow-y: auto; padding: 12px 24px; }
+.right-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.file-section {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px 20px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.file-list-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 88px 150px 128px;
+  gap: 12px;
+  align-items: center;
+  padding: 0 14px 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  border-bottom: 1px solid #f1f5f9;
+  margin-bottom: 2px;
+}
+.file-list-head .col-size,
+.file-list-head .col-time,
+.file-list-head .col-actions {
+  text-align: right;
+}
 .file-row {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 9px 12px; border-radius: 6px; transition: background .15s;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 88px 150px 128px;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: #f8fafc;
+  transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
 }
-.file-row:hover { background: #f5f7fa; }
-.file-info { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
-.file-type-icon { font-size: 18px; color: #909399; flex-shrink: 0; }
+.file-row:hover {
+  background: #fff;
+  border-color: #e2e8f0;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+.file-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.file-type-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: #eff6ff;
+  color: var(--primary-color);
+  font-size: 16px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
 .file-name {
-  font-size: 13px; color: var(--text-primary);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  cursor: pointer; transition: color .2s; flex: 1;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 0.2s;
+  min-width: 0;
 }
-.file-name:hover { color: #409eff; text-decoration: underline; }
-.file-size { font-size: 12px; color: #909399; white-space: nowrap; min-width: 60px; text-align: right; }
-.file-time { font-size: 11px; color: #c0c4cc; white-space: nowrap; min-width: 130px; text-align: right; }
-.file-actions { display: flex; gap: 6px; margin-left: 12px; flex-shrink: 0; }
-
-/* 无文件空态 */
-.file-empty {
-  flex: 1; display: flex; flex-direction: column; align-items: center;
-  justify-content: center; color: #c0c4cc; gap: 8px;
+.file-name:hover {
+  color: var(--primary-color);
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
-.empty-icon { font-size: 40px; }
-.empty-label { font-size: 14px; }
+.file-size,
+.file-time {
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.file-time {
+  opacity: 0.9;
+}
+.file-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.file-actions :deep(.el-button + .el-button) {
+  margin-left: 0;
+}
 
-/* 未选中 */
+.file-empty,
 .no-selection {
-  flex: 1; display: flex; flex-direction: column; align-items: center;
-  justify-content: center; color: #c0c4cc; gap: 8px;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 200px;
 }
-.no-select-icon { font-size: 40px; }
 
-/* 上传区 */
 .upload-section {
-  padding: 12px 24px 20px; border-top: 1px solid #ebeef5;
-  background: #fafbfc; flex-shrink: 0;
+  padding: 12px 20px 20px;
+  border-top: 1px solid #e5e7eb;
+  background: #fff;
+  flex-shrink: 0;
 }
-.upload-drag-wrap { display: block; }
-.upload-drag-wrap :deep(.el-upload) { display: block; }
+.upload-label {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.upload-drag-wrap {
+  display: block;
+}
+.upload-drag-wrap :deep(.el-upload) {
+  display: block;
+}
 .upload-drag-wrap :deep(.el-upload-dragger) {
-  border: 2px dashed #dcdfe6; border-radius: 8px; padding: 24px;
-  background: #fafbfc; transition: border-color .25s, background .25s;
-  width: auto; height: auto;
+  border: 1px dashed #cbd5e1;
+  border-radius: 10px;
+  padding: 22px 16px;
+  background: #f8fafc;
+  transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
+  width: auto;
+  height: auto;
 }
-.upload-drag-wrap :deep(.el-upload-dragger:hover) {
-  border-color: #409eff; background: #f0f5ff;
-}
+.upload-drag-wrap :deep(.el-upload-dragger:hover),
 .upload-drag-wrap :deep(.el-upload-dragger.is-dragover) {
-  border-color: #409eff; background: #f0f5ff;
+  border-color: var(--primary-color);
+  background: rgba(37, 99, 235, 0.04);
+  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.12);
 }
 .upload-zone {
-  display: flex; flex-direction: column; align-items: center;
-  justify-content: center; gap: 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
 }
-.upload-zone.is-uploading { opacity: .7; }
-.upload-icon { font-size: 32px; color: #8c939d; }
-.upload-text { font-size: 13px; color: #909399; }
+.upload-zone.is-uploading {
+  opacity: 0.85;
+}
+.upload-icon {
+  font-size: 28px;
+  color: var(--primary-color);
+  margin-bottom: 4px;
+  opacity: 0.85;
+}
+.upload-icon--error {
+  color: var(--danger-color);
+  opacity: 1;
+}
+.upload-text {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+.upload-text--error {
+  color: var(--danger-color);
+}
+.upload-hint {
+  font-size: 12px;
+  color: var(--text-secondary);
+  opacity: 0.85;
+}
+.upload-progress {
+  width: 80%;
+  max-width: 300px;
+  margin-top: 12px;
+}
 
-/* 预览弹窗 */
-.preview-dialog :deep(.el-dialog__body) { padding: 12px 24px 24px; }
-.docx-preview { padding: 20px; background: #fff; }
-.docx-preview section { background: #fff; margin-bottom: 16px; box-shadow: 0 1px 4px rgba(0,0,0,.08); padding: 40px; }
+@media (max-width: 1100px) {
+  .file-list-head,
+  .file-row {
+    grid-template-columns: minmax(0, 1fr) 72px 110px 112px;
+    gap: 8px;
+  }
+}
 
-/* 全局拖拽遮罩 */
+.preview-body {
+  min-height: 360px;
+}
+.preview-container {
+  overflow: auto;
+  max-height: calc(88vh - 180px);
+  min-height: 360px;
+}
+
+@media (max-width: 900px) {
+  .main-panels {
+    flex-direction: column;
+    min-height: 0;
+  }
+  .left-tree {
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid #e5e7eb;
+    max-height: 280px;
+  }
+}
+</style>
+
+<!-- 弹窗 teleport 到 body，需非 scoped -->
+<style>
+.preview-dialog.el-dialog {
+  display: flex;
+  flex-direction: column;
+  max-height: 92vh;
+  margin-bottom: 0;
+}
+.preview-dialog .el-dialog__header {
+  padding: 14px 20px;
+  margin-right: 0;
+  border-bottom: 1px solid #e5e7eb;
+  flex-shrink: 0;
+}
+.preview-dialog .el-dialog__headerbtn {
+  top: 16px;
+  right: 16px;
+}
+.preview-dialog .preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-right: 36px;
+  min-width: 0;
+}
+.preview-dialog .preview-header-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  flex: 1;
+}
+.preview-dialog .preview-header-icon-wrap {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: #eff6ff;
+  color: var(--primary-color, #2563eb);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 20px;
+}
+.preview-dialog .preview-header-text {
+  min-width: 0;
+  flex: 1;
+}
+.preview-dialog .preview-filename {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary, #202e3f);
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.preview-dialog .preview-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.preview-dialog .preview-meta-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 4px;
+  background: #f1f5f9;
+  color: var(--text-secondary, #3f5573);
+  font-size: 12px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.preview-dialog .el-dialog__body {
+  padding: 0;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: #f1f5f9;
+}
+.preview-dialog .preview-body {
+  height: 100%;
+  min-height: 360px;
+  max-height: calc(92vh - 140px);
+}
+.preview-dialog .preview-container {
+  height: 100%;
+  max-height: calc(92vh - 140px);
+  min-height: 360px;
+  overflow: auto;
+  padding: 16px 20px 20px;
+  box-sizing: border-box;
+}
+.preview-dialog .el-dialog__footer {
+  padding: 12px 20px 16px;
+  border-top: 1px solid #e5e7eb;
+  background: #fff;
+  flex-shrink: 0;
+}
+.preview-dialog .docx-preview {
+  padding: 24px;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+}
+.preview-dialog .docx-preview section {
+  background: #fff;
+  margin-bottom: 16px;
+  box-shadow: none;
+  padding: 32px 40px;
+}
+.preview-dialog .preview-container > canvas,
+.preview-dialog .preview-container > img {
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+}
+.preview-dialog .preview-container > pre {
+  margin: 0;
+  background: #fff !important;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px !important;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+}
+.preview-dialog .xlsx-tab {
+  color: var(--text-secondary, #3f5573);
+}
+
+/* 全局拖拽遮罩（项目附件页） */
 .global-drop-overlay {
   position: fixed;
   inset: 0;
   z-index: 9999;
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(15, 23, 42, 0.45);
   display: flex;
   align-items: center;
   justify-content: center;
 }
 .global-drop-box {
   background: #fff;
-  border: 3px dashed #409eff;
+  border: 2px dashed var(--primary-color, #2563eb);
   border-radius: 12px;
-  padding: 48px 64px;
+  padding: 40px 56px;
   text-align: center;
-  color: #409eff;
-  font-size: 16px;
+  color: var(--primary-color, #2563eb);
+  font-size: 15px;
+  font-weight: 500;
+  box-shadow: 0 12px 40px rgba(15, 23, 42, 0.12);
+}
+.global-drop-box p {
+  margin: 12px 0 0;
 }
 </style>

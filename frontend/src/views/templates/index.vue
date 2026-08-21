@@ -8,10 +8,11 @@
  *  - 启用/停用切换（编辑页内操作）
  *  - 新建 / 编辑 / 删除
  */
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Message, Search } from '@element-plus/icons-vue'
+import { Message, Refresh, RefreshLeft, Search } from '@element-plus/icons-vue'
+import { confirmDelete } from '@/lib/confirm'
 import {
   deleteTemplate,
   getTemplates,
@@ -45,6 +46,13 @@ const TRIGGER_OPTIONS: Array<{ label: string; value: TriggerType }> = [
   { label: '回收通知', value: 'reclaim' },
 ]
 
+const hasFilters = computed(
+  () => !!(searchText.value.trim() || triggerFilter.value || activeFilter.value),
+)
+const emptyDescription = computed(() =>
+  hasFilters.value ? '未找到匹配模板' : '暂无模板',
+)
+
 let searchTimer: ReturnType<typeof setTimeout> | null = null
 function handleSearch() {
   if (searchTimer) clearTimeout(searchTimer)
@@ -55,6 +63,14 @@ function handleSearch() {
 }
 
 function handleFilterChange() {
+  pagination.page = 1
+  fetchList()
+}
+
+function clearFilters() {
+  searchText.value = ''
+  triggerFilter.value = ''
+  activeFilter.value = ''
   pagination.page = 1
   fetchList()
 }
@@ -98,6 +114,7 @@ function goEdit(row: TemplateListItem) {
 }
 
 async function handleDelete(row: TemplateListItem) {
+  if (!(await confirmDelete('确定删除该模板？'))) return
   try {
     await deleteTemplate(row.id)
     ElMessage.success('模板已删除')
@@ -138,16 +155,14 @@ onMounted(() => {
 
 <template>
   <div class="page-container">
-    <el-card shadow="never">
-      <template #header>
-        <div class="card-header">
-          <span class="title">
-            <el-icon><Message /></el-icon>
-            邮件模板
-          </span>
-          <el-button type="primary" @click="goCreate">+ 新建模板</el-button>
-        </div>
-      </template>
+    <div class="page-panel">
+      <div class="card-header">
+        <span class="title">
+          <el-icon><Message /></el-icon>
+          邮件模板
+        </span>
+        <el-button type="primary" @click="goCreate">+ 新建模板</el-button>
+      </div>
 
       <div class="toolbar">
         <el-select
@@ -184,21 +199,30 @@ onMounted(() => {
         >
           <template #prefix><el-icon><Search /></el-icon></template>
         </el-input>
-        <el-button @click="fetchList">刷新</el-button>
+        <el-button :icon="Refresh" :disabled="loading" @click="fetchList">刷新</el-button>
+        <el-button :icon="RefreshLeft" :disabled="!hasFilters" @click="clearFilters">重置</el-button>
       </div>
 
       <el-table
         v-loading="loading"
         :data="list"
-        border
+        row-key="id"
         stripe
         style="width: 100%"
-        empty-text="暂无模板"
       >
-        <el-table-column prop="name" label="模板名称" min-width="200" />
-        <el-table-column label="触发类型" width="140">
+        <template #empty>
+          <div class="table-empty">
+            <el-empty :description="emptyDescription" :image-size="72" />
+          </div>
+        </template>
+        <el-table-column prop="name" label="模板名称" min-width="200" show-overflow-tooltip>
           <template #default="{ row }">
-            <el-tag :type="TRIGGER_TYPE_TAG[row.trigger_type as TriggerType]" effect="light" size="small">
+            <span class="col-name-link" @click="goEdit(row)">{{ row.name }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="触发类型" width="140" align="center">
+          <template #default="{ row }">
+            <el-tag :type="TRIGGER_TYPE_TAG[row.trigger_type as TriggerType]" size="small">
               {{ TRIGGER_TYPE_LABEL[row.trigger_type as TriggerType] }}
             </el-tag>
           </template>
@@ -206,7 +230,7 @@ onMounted(() => {
         <el-table-column prop="subject_tpl" label="主题模板" min-width="240" show-overflow-tooltip />
         <el-table-column label="是否启用" width="100" align="center">
           <template #default="{ row }">
-            <el-tag :type="row.is_active ? 'success' : 'info'" effect="plain" size="small">
+            <el-tag :type="row.is_active ? 'success' : 'info'" size="small">
               {{ row.is_active ? '启用' : '停用' }}
             </el-tag>
           </template>
@@ -214,36 +238,29 @@ onMounted(() => {
         <el-table-column prop="version" label="版本" width="80" align="center" />
         <el-table-column label="更新时间" width="180">
           <template #default="{ row }">
-            {{ formatDateTime(row.updated_at) }}
+            <span class="col-datetime">{{ formatDateTime(row.updated_at) }}</span>
           </template>
         </el-table-column>
         <el-table-column label="操作" width="200" fixed="right">
           <template #default="{ row }">
-            <el-button size="small" type="primary" link @click="goEdit(row)">编辑</el-button>
-            <el-button
-              v-if="row.is_active"
-              size="small"
-              type="warning"
-              link
-              @click="toggleActive(row, false)"
-            >停用</el-button>
-            <el-button
-              v-else
-              size="small"
-              type="success"
-              link
-              @click="toggleActive(row, true)"
-            >启用</el-button>
-            <el-popconfirm
-              title="确认删除？"
-              confirm-button-text="删除"
-              cancel-button-text="取消"
-              @confirm="handleDelete(row)"
-            >
-              <template #reference>
-                <el-button size="small" type="danger" link>删除</el-button>
-              </template>
-            </el-popconfirm>
+            <div class="action-buttons">
+              <el-button size="small" type="primary" link @click="goEdit(row)">编辑</el-button>
+              <el-button
+                v-if="row.is_active"
+                size="small"
+                type="warning"
+                link
+                @click="toggleActive(row, false)"
+              >停用</el-button>
+              <el-button
+                v-else
+                size="small"
+                type="success"
+                link
+                @click="toggleActive(row, true)"
+              >启用</el-button>
+              <el-button size="small" type="danger" link @click="handleDelete(row)">删除</el-button>
+            </div>
           </template>
         </el-table-column>
       </el-table>
@@ -260,25 +277,11 @@ onMounted(() => {
           @size-change="handleSizeChange"
         />
       </div>
-    </el-card>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.page {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-.card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.card-header .title {
-  font-size: 16px;
-  font-weight: 600;
-}
 .toolbar {
   display: flex;
   align-items: center;
@@ -286,9 +289,31 @@ onMounted(() => {
   margin-bottom: 16px;
   flex-wrap: wrap;
 }
-.pagination {
+.col-name-link {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+  color: var(--primary-color);
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.2s;
+}
+.col-name-link:hover {
+  color: var(--primary-hover);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.col-datetime {
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.action-buttons {
   display: flex;
-  justify-content: flex-end;
-  margin-top: 16px;
+  align-items: center;
+  gap: 2px;
+  white-space: nowrap;
 }
 </style>

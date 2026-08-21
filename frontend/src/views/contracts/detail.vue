@@ -5,14 +5,15 @@
  * 设计要点：
  *  - 顶部 header：合同名称 + 客户 + 状态 tag + 操作按钮（编辑 / 删除）
  *  - 基本信息卡片：合同名 / 客户 / 合同编号 / 起止日期 / 计费方式 / 状态 / 设备数 / 联系人 / 备注
- *  - 关联设备卡片：表格 + 「关联设备」+「取消关联」按钮
+ *  - 关联设备卡片：表格 + 「关联设备」按钮；行内「取消关联」
  *  - 关联联系人卡片：表格
  *  - 「关联设备」弹窗：从客户下的可用设备中多选
  */
 import { onMounted, reactive, ref, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox, type FormInstance } from 'element-plus'
-import { ArrowLeft, Connection, User, Document } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { ArrowLeft, Connection, Document, Paperclip, InfoFilled } from '@element-plus/icons-vue'
+import { confirmDelete } from '@/lib/confirm'
 import {
   deleteContract,
   getContract,
@@ -128,19 +129,7 @@ function handleEdit() {
 }
 async function handleDelete() {
   if (!record.value?.id) return
-  try {
-    await ElMessageBox.confirm(
-      '确认删除该合同？关联的设备不会被删除，仅解除合同关联',
-      '删除确认',
-      {
-        type: 'warning',
-        confirmButtonText: '删除',
-        cancelButtonText: '取消',
-      },
-    )
-  } catch {
-    return
-  }
+  if (!(await confirmDelete('确认删除该合同？关联的设备不会被删除，仅解除合同关联'))) return
   acting.value = true
   try {
     await deleteContract(record.value.id)
@@ -206,6 +195,10 @@ function goContractDetail(id: string) {
   router.push({ name: 'ContractDetail', params: { id } })
 }
 
+function goRental(id: string) {
+  router.push({ name: 'RentalDetail', params: { id } })
+}
+
 function renewalRowClass({ row }: { row: { is_current?: boolean } }) {
   return row.is_current ? 'renewal-row-current' : 'renewal-row-clickable'
 }
@@ -220,7 +213,6 @@ function handleRenewalRowClick(row: { id: string; is_current?: boolean }) {
 // 关联设备弹窗
 // ============================================================
 const linkDialogVisible = ref(false)
-const linkFormRef = ref<FormInstance>()
 const linkForm = reactive<{ selected: string[] }>({ selected: [] })
 const linkSubmitting = ref(false)
 const availableRentals = ref<RentalListItem[]>([])
@@ -273,28 +265,13 @@ async function handleConfirmLink() {
 }
 
 // ============================================================
-// 取消关联设备（勾选 + 按钮）
+// 取消关联设备（表格行内操作）
 // ============================================================
-const selectedRentalIds = ref<string[]>([])
-
-// 单选模式：勾选行时清空旧选择
-function handleRentalSelect(selection: ContractRentalItem[]) {
-  if (selection.length === 0) {
-    selectedRentalIds.value = []
-    return
-  }
-  selectedRentalIds.value = selection.map((r) => r.id)
-}
-
-async function handleUnlink() {
+async function handleUnlink(row: ContractRentalItem) {
   if (!record.value?.id) return
-  if (selectedRentalIds.value.length === 0) {
-    ElMessage.warning('请先勾选要取消关联的设备')
-    return
-  }
   try {
     await ElMessageBox.confirm(
-      `确认取消关联选中的 ${selectedRentalIds.value.length} 台设备？`,
+      `确认取消关联设备「${row.machine_model || row.id}」？`,
       '取消关联确认',
       {
         type: 'warning',
@@ -307,9 +284,8 @@ async function handleUnlink() {
   }
   acting.value = true
   try {
-    await unlinkContractRentals(record.value.id, selectedRentalIds.value)
-    ElMessage.success(`已取消关联 ${selectedRentalIds.value.length} 台设备`)
-    selectedRentalIds.value = []
+    await unlinkContractRentals(record.value.id, [row.id])
+    ElMessage.success('已取消关联')
     fetchRecord()
   } catch {
     // 错误已统一处理
@@ -317,14 +293,6 @@ async function handleUnlink() {
     acting.value = false
   }
 }
-
-// 切换租间数据时清空选中状态
-watch(
-  () => record.value?.rentals,
-  () => {
-    selectedRentalIds.value = []
-  },
-)
 
 // ============================================================
 // 变更记录（页面底部预览表）
@@ -390,10 +358,10 @@ watch(
 
 <template>
   <div class="page-container" v-loading="loading">
-    <!-- 顶部返回 -->
-    <div style="margin-bottom: 16px;">
+    <div class="top-bar">
       <el-button @click="goBack">
-        <el-icon><ArrowLeft /></el-icon> 返回列表
+        <el-icon><ArrowLeft /></el-icon>
+        返回
       </el-button>
     </div>
 
@@ -407,7 +375,6 @@ watch(
             v-if="record?.status"
             :type="statusTagType(record.status)"
             size="small"
-            effect="dark"
           >{{ statusLabel(record.status) }}</el-tag>
         </div>
       </div>
@@ -422,14 +389,14 @@ watch(
         <el-button type="success" :disabled="acting || record?.has_renewal" @click="handleRenew">续期</el-button>
         <el-button @click="scrollToChangeLogs">变更记录</el-button>
         <el-button type="primary" @click="goAttachments">
-          <el-icon style="margin-right:4px"><Paperclip /></el-icon>附件管理
+          <el-icon class="btn-icon"><Paperclip /></el-icon>附件管理
         </el-button>
       </div>
     </div>
 
     <!-- 基本信息 -->
     <section class="detail-section">
-      <h3 class="section-title">合同信息</h3>
+      <div class="dialog-section-title">合同信息</div>
       <el-descriptions :column="3" border>
         <el-descriptions-item label="合同名称">{{ record?.name || '-' }}</el-descriptions-item>
         <el-descriptions-item label="客户">{{ record?.customer_name || '-' }}</el-descriptions-item>
@@ -467,11 +434,10 @@ watch(
 
     <!-- 续期链路 -->
     <section v-if="record?.renewal_chain && record.renewal_chain.length > 1" class="detail-section">
-      <h3 class="section-title">续期链路</h3>
+      <div class="dialog-section-title">续期链路</div>
       <el-table
         :data="record.renewal_chain"
         :show-header="false"
-        :border="false"
         size="small"
         style="width: 100%"
         :row-class-name="renewalRowClass"
@@ -505,59 +471,84 @@ watch(
     <!-- 关联设备 -->
     <section class="detail-section">
       <div class="section-toolbar">
-        <h3 class="section-title-inline">
-          <el-icon><Connection /></el-icon>
+        <div class="dialog-section-title">
           关联设备
           <span class="muted">（共 {{ record?.rentals?.length || 0 }} 台）</span>
-        </h3>
+        </div>
         <div v-if="record?.status !== 'reclaimed'" class="section-actions">
           <el-button
             type="primary"
             :icon="Connection"
             @click="openLinkDialog"
           >关联设备</el-button>
-          <el-button
-            type="danger"
-            plain
-            :disabled="selectedRentalIds.length === 0"
-            :loading="acting"
-            @click="handleUnlink"
-          >
-            取消关联 ({{ selectedRentalIds.length }})
-          </el-button>
         </div>
       </div>
       <el-table
         :data="record?.rentals || []"
-        size="small"
+        row-key="id"
         stripe
-        border
-        empty-text="尚未关联设备"
         style="width: 100%;"
-        @selection-change="handleRentalSelect"
       >
-        <el-table-column type="selection" width="50" />
-        <el-table-column prop="machine_model" label="机器型号" min-width="180" show-overflow-tooltip />
-        <el-table-column label="机架位置" min-width="140">
+        <template #empty>
+          <div class="table-empty table-empty--compact">
+            <el-empty description="尚未关联设备" :image-size="64" />
+          </div>
+        </template>
+        <el-table-column prop="machine_model" label="机器型号" min-width="200" show-overflow-tooltip>
           <template #default="{ row }">
-            {{ row.rack_location || '-' }}
+            <span
+              v-if="row.machine_model"
+              class="col-name-link"
+              @click="goRental(row.id)"
+            >{{ row.machine_model }}</span>
+            <span v-else class="col-muted">-</span>
           </template>
         </el-table-column>
-        <el-table-column label="公网 IP" min-width="160">
+        <el-table-column label="机架位置" min-width="140" show-overflow-tooltip>
           <template #default="{ row }">
-            {{ Array.isArray(row.public_ips) ? row.public_ips.join(', ') : '-' }}
+            <span v-if="row.rack_location">{{ row.rack_location }}</span>
+            <span v-else class="col-muted">-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="公网 IP" min-width="180" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span
+              v-if="Array.isArray(row.public_ips) && row.public_ips.length"
+              class="col-ip"
+            >{{ row.public_ips.join(', ') }}</span>
+            <span v-else class="col-muted">-</span>
           </template>
         </el-table-column>
         <el-table-column label="操作系统" min-width="160" show-overflow-tooltip>
           <template #default="{ row }">
-            {{ row.os_version || '-' }}
+            <span v-if="row.os_version" class="col-secondary">{{ row.os_version }}</span>
+            <span v-else class="col-muted">-</span>
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="100">
+        <el-table-column label="状态" width="100" align="center">
           <template #default="{ row }">
             <el-tag size="small" :type="rentalStatusTagType(row.status)">
               {{ rentalStatusLabel(row.status) }}
             </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column
+          v-if="record?.status !== 'reclaimed'"
+          label="操作"
+          width="110"
+          fixed="right"
+          align="center"
+        >
+          <template #default="{ row }">
+            <div class="action-buttons">
+              <el-button
+                size="small"
+                link
+                type="danger"
+                :loading="acting"
+                @click="handleUnlink(row)"
+              >取消关联</el-button>
+            </div>
           </template>
         </el-table-column>
       </el-table>
@@ -565,22 +556,34 @@ watch(
 
     <!-- 关联联系人 -->
     <section class="detail-section">
-      <h3 class="section-title-inline">
-        <el-icon><User /></el-icon>
+      <div class="dialog-section-title">
         关联联系人
         <span class="muted">（共 {{ record?.contacts?.length || 0 }} 人）</span>
-      </h3>
+      </div>
       <el-table
         :data="record?.contacts || []"
-        size="small"
+        row-key="contact_id"
         stripe
-        border
-        empty-text="尚未关联联系人"
         style="width: 100%;"
       >
-        <el-table-column prop="name" label="姓名" min-width="140" />
-        <el-table-column prop="email" label="邮箱" min-width="220" show-overflow-tooltip />
-        <el-table-column label="类型" width="100">
+        <template #empty>
+          <div class="table-empty table-empty--compact">
+            <el-empty description="尚未关联联系人" :image-size="64" />
+          </div>
+        </template>
+        <el-table-column prop="name" label="姓名" min-width="140" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span v-if="row.name" class="col-name">{{ row.name }}</span>
+            <span v-else class="col-muted">-</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="email" label="邮箱" min-width="220" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span v-if="row.email" class="col-secondary">{{ row.email }}</span>
+            <span v-else class="col-muted">-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="类型" width="100" align="center">
           <template #default="{ row }: { row: ContractContactItem }">
             <el-tag
               :type="row.recipient_type === 'to' ? 'primary' : 'info'"
@@ -598,90 +601,94 @@ watch(
       v-model="linkDialogVisible"
       title="关联设备到合同"
       width="560px"
+      destroy-on-close
       :close-on-click-modal="false"
+      class="create-dialog"
     >
-      <el-form ref="linkFormRef" :model="linkForm" label-width="80px" @submit.prevent>
-        <el-form-item label="选择设备">
-          <div v-if="candidateRentals.length === 0" class="hint">
-            暂无未关联的设备（该客户下所有设备已全部关联到此合同）
-          </div>
-          <el-select
-            v-else
-            v-model="linkForm.selected"
-            multiple
-            filterable
-            collapse-tags
-            collapse-tags-tooltip
-            placeholder="选择要关联的设备"
-            style="width: 100%"
-          >
-            <el-option
-              v-for="r in candidateRentals"
-              :key="r.id"
-              :label="rentalLabel(r)"
-              :value="r.id"
-            />
-          </el-select>
-        </el-form-item>
-      </el-form>
+      <div class="dialog-tip">
+        <el-icon><InfoFilled /></el-icon>
+        <span>从可用设备中多选关联到本合同；已关联设备不会出现在列表中。</span>
+      </div>
+      <div class="dialog-section">
+        <div class="dialog-section-title">选择设备</div>
+        <div v-if="candidateRentals.length === 0" class="table-empty table-empty--compact">
+          <el-empty description="暂无可关联设备" :image-size="64" />
+        </div>
+        <el-form v-else label-position="top" @submit.prevent>
+          <el-form-item label="可用设备">
+            <el-select
+              v-model="linkForm.selected"
+              multiple
+              filterable
+              collapse-tags
+              collapse-tags-tooltip
+              placeholder="选择要关联的设备"
+              style="width: 100%"
+            >
+              <el-option
+                v-for="r in candidateRentals"
+                :key="r.id"
+                :label="rentalLabel(r)"
+                :value="r.id"
+              />
+            </el-select>
+          </el-form-item>
+        </el-form>
+      </div>
       <template #footer>
-        <el-button @click="linkDialogVisible = false">取消</el-button>
-        <el-button
-          type="primary"
-          :loading="linkSubmitting"
-          :disabled="linkForm.selected.length === 0"
-          @click="handleConfirmLink"
-        >
-          关联（{{ linkForm.selected.length }}）
-        </el-button>
+        <div class="dialog-footer">
+          <el-button @click="linkDialogVisible = false">取消</el-button>
+          <el-button
+            type="primary"
+            :loading="linkSubmitting"
+            :disabled="linkForm.selected.length === 0"
+            @click="handleConfirmLink"
+          >
+            关联（{{ linkForm.selected.length }}）
+          </el-button>
+        </div>
       </template>
     </el-dialog>
 
     <!-- 附件状态 -->
     <section class="detail-section">
       <div class="section-toolbar">
-        <h3 class="section-title-inline">
-          <el-icon><Paperclip /></el-icon>
-          附件状态
-        </h3>
-        <div>
+        <div class="dialog-section-title">附件状态</div>
+        <div class="section-actions">
           <el-button type="primary" size="small" @click="goAttachments">
-            <el-icon style="margin-right:4px"><Paperclip /></el-icon>附件管理
+            <el-icon class="btn-icon"><Paperclip /></el-icon>附件管理
           </el-button>
         </div>
       </div>
       <div class="attachment-status-grid">
-        <el-card
+        <div
           v-for="(label, code) in attCategoryLabels"
           :key="code"
-          shadow="hover"
           class="status-card"
         >
-          <template #header>
-            <div class="status-card-header">
-              <span>{{ label }}</span>
-              <el-tag
-                :type="attStatusTagType(
-                  attachmentSummary?.items?.[code]?.confirmed ?? false,
-                  attachmentSummary?.items?.[code]?.file_count ?? 0
-                )"
-                size="small"
-              >
-                {{ attStatusText(
-                  attachmentSummary?.items?.[code]?.confirmed ?? false,
-                  attachmentSummary?.items?.[code]?.file_count ?? 0
-                ) }}
-              </el-tag>
-            </div>
-          </template>
+          <div class="status-card-header">
+            <span>{{ label }}</span>
+            <el-tag
+              :type="attStatusTagType(
+                attachmentSummary?.items?.[code]?.confirmed ?? false,
+                attachmentSummary?.items?.[code]?.file_count ?? 0
+              )"
+              size="small"
+            >
+              {{ attStatusText(
+                attachmentSummary?.items?.[code]?.confirmed ?? false,
+                attachmentSummary?.items?.[code]?.file_count ?? 0
+              ) }}
+            </el-tag>
+          </div>
           <div class="status-card-body">
             <span class="status-stat">
               <strong>{{ attachmentSummary?.items?.[code]?.file_count ?? 0 }}</strong> 个文件
             </span>
           </div>
-        </el-card>
+        </div>
       </div>
-      <div style="margin-top: 12px;">
+      <div class="attachment-summary">
         <span class="muted">
           总计：{{ attachmentSummary?.confirmed_items ?? 0 }} / {{ attachmentSummary?.total_items ?? 0 }} 项已确认
         </span>
@@ -689,7 +696,6 @@ watch(
           v-if="attachmentSummary?.all_confirmed"
           type="success"
           size="small"
-          style="margin-left: 8px;"
         >
           全部完成
         </el-tag>
@@ -698,19 +704,37 @@ watch(
 
     <!-- 变更记录（页面底部） -->
     <section id="changelog-section" class="detail-section">
-      <div class="section-header">
-        <h3>变更记录</h3>
+      <div class="dialog-section-title">
+        变更记录
         <span class="muted">（共 {{ changeLogs.length }} 条）</span>
       </div>
-      <el-table :data="changeLogs" size="small" stripe border empty-text="暂无变更记录" style="width:100%">
+      <el-table :data="changeLogs" stripe style="width:100%">
+        <template #empty>
+          <div class="table-empty table-empty--compact">
+            <el-empty description="暂无变更记录" :image-size="64" />
+          </div>
+        </template>
         <el-table-column prop="created_at" label="时间" width="180">
-          <template #default="{ row }">{{ formatChangelogTime(row.created_at) }}</template>
+          <template #default="{ row }">
+            <span class="col-secondary">{{ formatChangelogTime(row.created_at) }}</span>
+          </template>
         </el-table-column>
         <el-table-column prop="content" label="内容" show-overflow-tooltip />
       </el-table>
-      <div style="margin-top:12px; display:flex; gap:8px;">
-        <el-input v-model="newChangeContent" placeholder="输入变更内容" maxlength="500" show-word-limit style="flex:1" />
-        <el-button type="primary" :disabled="!newChangeContent.trim()" :loading="changeSubmitting" @click="handleAddChangeLog">
+      <div class="changelog-add">
+        <el-input
+          v-model="newChangeContent"
+          placeholder="输入变更内容"
+          maxlength="500"
+          show-word-limit
+          class="changelog-input"
+        />
+        <el-button
+          type="primary"
+          :disabled="!newChangeContent.trim()"
+          :loading="changeSubmitting"
+          @click="handleAddChangeLog"
+        >
           添加变更记录
         </el-button>
       </div>
@@ -719,144 +743,190 @@ watch(
 </template>
 
 <style scoped>
+.top-bar {
+  margin-bottom: 0;
+}
+
 .detail-header {
-  background: #fff;
-  border-radius: 8px;
-  padding: 20px 24px;
-  margin-bottom: 16px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  padding: 20px;
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
   flex-wrap: wrap;
   gap: 12px;
+  border-radius: 8px;
 }
 .header-title {
   margin: 0 0 8px 0;
-  font-size: 22px;
+  font-size: 20px;
   font-weight: 600;
   color: var(--text-primary);
+  line-height: 1.3;
 }
 .header-sub {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   color: var(--text-secondary);
   font-size: 14px;
 }
 .header-customer {
-  margin-right: 4px;
+  margin-right: 0;
 }
 .header-actions {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.btn-icon {
+  margin-right: 4px;
 }
 
 .detail-section {
-  background: #fff;
+  padding: 20px;
   border-radius: 8px;
-  padding: 20px 24px;
-  margin-bottom: 16px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
 }
 
-.section-title {
-  margin: 0 0 16px 0;
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--primary-color);
-  padding-bottom: 12px;
-  border-bottom: 2px solid var(--border-color);
-}
-.section-title-inline {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--primary-color);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.section-title-inline .el-icon {
-  color: var(--primary-color);
-  font-size: 16px;
-}
 .section-toolbar {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 12px;
+  gap: 12px;
   flex-wrap: wrap;
-  gap: 8px;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #e5e7eb;
+}
+.section-toolbar .dialog-section-title {
+  margin: 0;
+  padding-top: 0;
+  padding-right: 0;
+  padding-bottom: 0;
+  border-bottom: none;
 }
 .section-actions {
   display: flex;
   gap: 8px;
+  flex-wrap: wrap;
+}
+
+.detail-section > .dialog-section-title {
+  margin-bottom: 12px;
 }
 
 .hint {
-  color: #909399;
+  color: var(--text-secondary);
   font-size: 13px;
-  padding: 8px 0;
+  padding: 4px 0;
+  line-height: 1.5;
 }
 .muted {
-  color: #c0c4cc;
+  color: var(--text-secondary);
   font-size: 12px;
   margin-left: 4px;
   font-weight: 400;
+  opacity: 0.85;
 }
 
-.section-header {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-.section-header h3 {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--primary-color);
-}
-
-/* 附件状态卡片 */
 .attachment-status-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 16px;
+  gap: 12px;
 }
 .status-card {
+  background: #f8fafc;
   border-radius: 8px;
+  padding: 14px 16px;
 }
 .status-card-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 8px;
   font-weight: 600;
+  font-size: 13px;
+  color: var(--text-primary);
+  margin-bottom: 8px;
 }
 .status-card-body {
-  padding: 8px 0;
+  padding: 0;
 }
 .status-stat {
-  font-size: 14px;
+  font-size: 13px;
   color: var(--text-secondary);
 }
+.status-stat strong {
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.attachment-summary {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
 
-/* 续期链路表格 */
+.changelog-add {
+  margin-top: 12px;
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+.changelog-input {
+  flex: 1;
+  min-width: 0;
+}
+
 .renewal-row-current {
-  background-color: #ecf5ff;
+  background-color: rgba(37, 99, 235, 0.06);
 }
 .renewal-row-clickable {
   cursor: pointer;
 }
 .renewal-row-clickable:hover > td {
-  background-color: #f5f7fa !important;
+  background-color: rgba(37, 99, 235, 0.04) !important;
 }
 .renewal-name-current {
   font-weight: 600;
+  color: var(--text-primary);
 }
 .renewal-date {
   font-size: 13px;
-  color: #606266;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.col-muted {
+  color: #c0c4cc;
+}
+.col-name {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.col-name-link {
+  color: var(--primary-color);
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.2s;
+}
+.col-name-link:hover {
+  color: var(--primary-hover);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.col-ip {
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+.col-secondary {
+  color: var(--text-secondary);
+}
+.action-buttons {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
 }
 </style>

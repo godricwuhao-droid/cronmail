@@ -9,7 +9,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
-import { Document } from '@element-plus/icons-vue'
+import { Document, InfoFilled, ArrowLeft } from '@element-plus/icons-vue'
 import {
   createSatelliteContract,
   getSatelliteContract,
@@ -190,8 +190,8 @@ async function handleSubmit() {
 }
 
 function cancel() {
-  if (isEdit.value && contractId.value) {
-    router.push({ name: 'SatelliteContractDetail', params: { id: contractId.value } })
+  if (window.history.state?.back != null) {
+    router.back()
   } else {
     router.push({ name: 'SatelliteContractList' })
   }
@@ -207,186 +207,271 @@ onMounted(async () => {
 
 <template>
   <div class="page-container" v-loading="loadingDetail">
-    <el-card shadow="never">
-      <template #header>
-        <div class="card-header">
-          <span class="title">
-            {{ isEdit ? '编辑卫星数据合同' : '新建卫星数据合同' }}
-          </span>
-          <el-button link @click="cancel">返回</el-button>
-        </div>
-      </template>
+    <div class="top-bar">
+      <el-button @click="cancel">
+        <el-icon><ArrowLeft /></el-icon>
+        返回
+      </el-button>
+    </div>
+
+    <div class="page-panel">
+      <div class="card-header">
+        <span class="title">
+          <el-icon><Document /></el-icon>
+          {{ isEdit ? '编辑卫星数据合同' : '新建卫星数据合同' }}
+        </span>
+      </div>
+
+      <div class="dialog-tip">
+        <el-icon><InfoFilled /></el-icon>
+        <span>
+          <template v-if="isEdit">
+            可更新合同信息与扩展字段；客户不可修改。
+          </template>
+          <template v-else>
+            填写合同基础信息与扩展内容；创建后可在详情页管理附件。
+          </template>
+        </span>
+      </div>
 
       <el-form
         ref="formRef"
         :model="form"
         :rules="rules"
-        label-width="120px"
+        label-position="top"
+        class="contract-form"
         @submit.prevent
       >
         <!-- 基础信息 -->
-        <div class="section-title">
-          <el-icon><Document /></el-icon>
-          基础信息
+        <div class="dialog-section">
+          <div class="dialog-section-title">基础信息</div>
+          <el-row :gutter="16">
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="客户" prop="customer_id">
+                <el-select
+                  v-model="form.customer_id"
+                  placeholder="请选择客户"
+                  filterable
+                  style="width: 100%"
+                  :disabled="isEdit"
+                >
+                  <el-option
+                    v-for="c in customerOptions"
+                    :key="c.id"
+                    :label="c.name"
+                    :value="c.id"
+                  />
+                </el-select>
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="合同名称" prop="name">
+                <el-input
+                  v-model="form.name"
+                  placeholder="如 卫星数据合同-2026"
+                  maxlength="255"
+                  show-word-limit
+                />
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="合同编号" prop="contract_no">
+                <el-input
+                  v-model="form.contract_no"
+                  placeholder="可选，如 WX-2026-001"
+                  maxlength="100"
+                  show-word-limit
+                />
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="序号">
+                <el-input-number
+                  v-model="form.sort_order"
+                  :min="0"
+                  :step="1"
+                  placeholder="序号"
+                  style="width: 100%"
+                />
+              </el-form-item>
+            </el-col>
+          </el-row>
         </div>
-        <el-form-item label="客户" prop="customer_id">
-          <el-select
-            v-model="form.customer_id"
-            placeholder="请选择客户"
-            filterable
-            style="width: 100%"
-            :disabled="isEdit"
-          >
-            <el-option
-              v-for="c in customerOptions"
-              :key="c.id"
-              :label="c.name"
-              :value="c.id"
+
+        <!-- 合同扩展信息 -->
+        <div class="dialog-section">
+          <div class="dialog-section-title">合同扩展信息</div>
+          <el-row :gutter="16">
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="合同类型">
+                <el-input
+                  v-model="form.contract_type"
+                  placeholder="如 销售合同、采购合同"
+                  maxlength="100"
+                  show-word-limit
+                />
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="项目名称">
+                <el-input
+                  v-model="form.project_name"
+                  placeholder="项目名称"
+                  maxlength="255"
+                  show-word-limit
+                />
+              </el-form-item>
+            </el-col>
+          </el-row>
+        </div>
+
+        <!-- 日期与金额 -->
+        <div class="dialog-section">
+          <div class="dialog-section-title">日期与金额</div>
+          <el-row :gutter="16">
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="开始日期">
+                <el-date-picker
+                  v-model="form.start_date"
+                  type="date"
+                  placeholder="选择开始日期"
+                  value-format="YYYY-MM-DD"
+                  style="width: 100%"
+                />
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="结束日期">
+                <el-date-picker
+                  v-model="form.end_date"
+                  type="date"
+                  placeholder="选择结束日期"
+                  value-format="YYYY-MM-DD"
+                  style="width: 100%"
+                />
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="合同金额">
+                <el-input-number
+                  v-model="form.amount"
+                  :min="0"
+                  :precision="2"
+                  placeholder="合同金额"
+                  :controls="false"
+                  style="width: 100%"
+                />
+              </el-form-item>
+            </el-col>
+          </el-row>
+        </div>
+
+        <!-- 签约方信息 -->
+        <div class="dialog-section">
+          <div class="dialog-section-title">签约方信息</div>
+          <el-row :gutter="16">
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="甲方名称">
+                <el-input
+                  v-model="form.party_a_name"
+                  placeholder="甲方名称"
+                  maxlength="255"
+                  show-word-limit
+                />
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="乙方名称">
+                <el-input
+                  v-model="form.party_b_name"
+                  placeholder="乙方名称"
+                  maxlength="255"
+                  show-word-limit
+                />
+              </el-form-item>
+            </el-col>
+          </el-row>
+        </div>
+
+        <!-- 合同内容与要求 -->
+        <div class="dialog-section">
+          <div class="dialog-section-title">合同内容与要求</div>
+          <el-form-item label="合同内容">
+            <el-input
+              v-model="form.contract_content"
+              type="textarea"
+              :rows="4"
+              placeholder="合同主要内容"
+              maxlength="2000"
+              show-word-limit
             />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="合同名称" prop="name">
-          <el-input v-model="form.name" placeholder="如 卫星数据合同-2026" maxlength="255" show-word-limit />
-        </el-form-item>
-        <el-form-item label="合同编号" prop="contract_no">
-          <el-input v-model="form.contract_no" placeholder="可选，如 WX-2026-001" maxlength="100" show-word-limit />
-        </el-form-item>
-        <el-form-item label="序号">
-          <el-input-number v-model="form.sort_order" :min="0" :step="1" placeholder="序号" />
-        </el-form-item>
-
-        <!-- ADR-013 新增：基本信息扩展 -->
-        <el-divider />
-        <div class="section-title">
-          <el-icon><Document /></el-icon>
-          合同扩展信息
+          </el-form-item>
+          <el-form-item label="交付要求">
+            <el-input
+              v-model="form.delivery_requirements"
+              type="textarea"
+              :rows="4"
+              placeholder="交付要求"
+              maxlength="2000"
+              show-word-limit
+            />
+          </el-form-item>
+          <el-form-item label="过程记录">
+            <el-input
+              v-model="form.process_records"
+              type="textarea"
+              :rows="4"
+              placeholder="过程记录"
+              maxlength="2000"
+              show-word-limit
+            />
+          </el-form-item>
         </div>
-        <el-form-item label="合同类型">
-          <el-input v-model="form.contract_type" placeholder="如 销售合同、采购合同" maxlength="100" show-word-limit />
-        </el-form-item>
-        <el-form-item label="项目名称">
-          <el-input v-model="form.project_name" placeholder="项目名称" maxlength="255" show-word-limit />
-        </el-form-item>
-
-        <!-- ADR-013 新增：日期与金额 -->
-        <el-divider />
-        <div class="section-title">
-          <el-icon><Document /></el-icon>
-          日期与金额
-        </div>
-        <el-form-item label="开始日期">
-          <el-date-picker
-            v-model="form.start_date"
-            type="date"
-            placeholder="选择开始日期"
-            value-format="YYYY-MM-DD"
-            style="width: 100%"
-          />
-        </el-form-item>
-        <el-form-item label="结束日期">
-          <el-date-picker
-            v-model="form.end_date"
-            type="date"
-            placeholder="选择结束日期"
-            value-format="YYYY-MM-DD"
-            style="width: 100%"
-          />
-        </el-form-item>
-        <el-form-item label="合同金额">
-          <el-input-number
-            v-model="form.amount"
-            :min="0"
-            :precision="2"
-            placeholder="合同金额"
-            :controls="false"
-            style="width: 100%"
-          />
-        </el-form-item>
-
-        <!-- ADR-013 新增：甲乙方 -->
-        <el-divider />
-        <div class="section-title">
-          <el-icon><Document /></el-icon>
-          签约方信息
-        </div>
-        <el-form-item label="甲方名称">
-          <el-input v-model="form.party_a_name" placeholder="甲方名称" maxlength="255" show-word-limit />
-        </el-form-item>
-        <el-form-item label="乙方名称">
-          <el-input v-model="form.party_b_name" placeholder="乙方名称" maxlength="255" show-word-limit />
-        </el-form-item>
-
-        <!-- ADR-013 新增：长文本区 -->
-        <el-divider />
-        <div class="section-title">
-          <el-icon><Document /></el-icon>
-          合同内容与要求
-        </div>
-        <el-form-item label="合同内容">
-          <el-input
-            v-model="form.contract_content"
-            type="textarea"
-            :rows="4"
-            placeholder="合同主要内容"
-            maxlength="2000"
-            show-word-limit
-          />
-        </el-form-item>
-        <el-form-item label="交付要求">
-          <el-input
-            v-model="form.delivery_requirements"
-            type="textarea"
-            :rows="4"
-            placeholder="交付要求"
-            maxlength="2000"
-            show-word-limit
-          />
-        </el-form-item>
-        <el-form-item label="过程记录">
-          <el-input
-            v-model="form.process_records"
-            type="textarea"
-            :rows="4"
-            placeholder="过程记录"
-            maxlength="2000"
-            show-word-limit
-          />
-        </el-form-item>
 
         <!-- 备注 -->
-        <el-divider />
-        <el-form-item label="备注">
-          <el-input
-            v-model="form.remark"
-            type="textarea"
-            :rows="3"
-            placeholder="可选"
-            maxlength="500"
-            show-word-limit
-          />
-        </el-form-item>
+        <div class="dialog-section">
+          <div class="dialog-section-title">备注</div>
+          <el-form-item>
+            <el-input
+              v-model="form.remark"
+              type="textarea"
+              :rows="3"
+              placeholder="可选"
+              maxlength="500"
+              show-word-limit
+            />
+          </el-form-item>
+        </div>
       </el-form>
 
       <div class="form-actions">
         <el-button @click="cancel">取消</el-button>
-        <div class="spacer" />
         <el-button type="primary" :loading="submitting" @click="handleSubmit">
           {{ isEdit ? '保存' : '创建' }}
         </el-button>
       </div>
-    </el-card>
+    </div>
   </div>
 </template>
 
 <style scoped>
+.top-bar {
+  margin-bottom: 0;
+}
+.contract-form :deep(.el-form-item__label) {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+.contract-form :deep(.el-form-item) {
+  margin-bottom: 16px;
+}
 .form-actions {
   display: flex;
+  justify-content: flex-end;
   align-items: center;
-  margin-top: 24px;
+  gap: 8px;
+  margin-top: 8px;
   padding-top: 16px;
-  border-top: 1px solid #ebeef5;
-}
-.spacer {
-  flex: 1;
+  border-top: 1px solid #e5e7eb;
 }
 </style>

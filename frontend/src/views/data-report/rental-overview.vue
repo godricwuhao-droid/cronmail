@@ -1,8 +1,13 @@
 <template>
-  <div class="page-container">
-    <div class="page-title">
-      <el-icon :size="22" style="color: #409EFF; vertical-align: -3px;"><Odometer /></el-icon>
-      <span style="margin-left: 8px;">租赁概览</span>
+  <div class="page-container rental-overview-page">
+    <!-- 顶部标题栏 -->
+    <div class="page-header">
+      <div class="page-header__left">
+        <div class="page-header__icon">
+          <el-icon :size="18"><Odometer /></el-icon>
+        </div>
+        <span class="page-header__title">租赁概览</span>
+      </div>
     </div>
 
     <!-- 统计卡片 -->
@@ -11,31 +16,28 @@
         class="stat-card"
         v-for="card in statCards"
         :key="card.key"
-        :style="{ borderTopColor: card.color }"
         @click="openContractDialog(card.key)"
       >
-        <div class="stat-top">
-          <div class="stat-icon">
-            <el-icon :size="28" :color="card.color"><component :is="card.icon" /></el-icon>
-          </div>
+        <div class="stat-icon" :style="{ background: card.bg, color: card.color }">
+          <el-icon :size="20"><component :is="card.icon" /></el-icon>
+        </div>
+        <div class="stat-body">
+          <div class="stat-label">{{ card.label }}</div>
           <div class="stat-value" :style="{ color: card.color }">{{ card.value }}</div>
         </div>
-        <div class="stat-label">{{ card.label }}</div>
+        <span class="stat-card__action">
+          查看
+          <el-icon :size="12"><ArrowRightBold /></el-icon>
+        </span>
       </div>
     </div>
 
     <!-- 待处理提醒（合同维度） -->
-    <el-card shadow="never" style="border-radius: 12px;">
-      <template #header>
-        <div class="card-header">
-          <h2>
-            <el-icon style="color: #E6A23C; vertical-align: -2px;"><Bell /></el-icon>
-            <span style="margin-left: 6px;">待处理提醒</span>
-          </h2>
-        </div>
-      </template>
-
-      <div v-loading="loading">
+    <div class="panel-card">
+      <div class="panel-card__header">
+        <span class="panel-card__title">待处理提醒</span>
+      </div>
+      <div class="panel-card__body" v-loading="loading">
         <template v-if="expiringContracts.length === 0">
           <el-empty description="暂无待处理记录" />
         </template>
@@ -53,7 +55,7 @@
               </div>
               <div class="reminder-meta">
                 <span class="reminder-count">设备数：{{ row.rental_count ?? 0 }}</span>
-                <span class="reminder-date" style="color: #E6A23C; font-weight: 600;">到期：{{ formatDate(row.end_date) }}</span>
+                <span class="reminder-date">到期：{{ formatDate(row.end_date) }}</span>
                 <el-icon
                   class="expand-arrow"
                   :class="{ expanded: expandedMap[row.contract_id] }"
@@ -62,16 +64,39 @@
               </div>
             </div>
             <div class="reminder-body" v-show="expandedMap[row.contract_id]">
-              <el-table :data="row.rentals || []" size="small" border>
-                <el-table-column label="机架位置" min-width="140">
-                  <template #default="{ row: r }">{{ r.rack_location || '-' }}</template>
+              <el-table
+                :data="row.rentals || []"
+                row-key="id"
+                stripe
+                style="width: 100%"
+              >
+                <el-table-column prop="machine_model" label="设备型号" min-width="180" show-overflow-tooltip>
+                  <template #default="{ row: r }">
+                    <span
+                      v-if="r.machine_model"
+                      class="col-name-link"
+                      @click="goRental(r.id)"
+                    >{{ r.machine_model }}</span>
+                    <span v-else class="col-muted">-</span>
+                  </template>
                 </el-table-column>
-                <el-table-column prop="machine_model" label="设备型号" min-width="160" />
-                <el-table-column label="公网 IP" min-width="140">
-                  <template #default="{ row: r }">{{ formatIpList(r.public_ips) }}</template>
+                <el-table-column label="机架位置" min-width="140" show-overflow-tooltip>
+                  <template #default="{ row: r }">
+                    <span v-if="r.rack_location">{{ r.rack_location }}</span>
+                    <span v-else class="col-muted">-</span>
+                  </template>
                 </el-table-column>
-                <el-table-column label="内网 IP" min-width="140">
-                  <template #default="{ row: r }">{{ r.private_ip || '-' }}</template>
+                <el-table-column label="公网 IP" min-width="160" show-overflow-tooltip>
+                  <template #default="{ row: r }">
+                    <span v-if="formatIpList(r.public_ips) !== '-'" class="col-ip">{{ formatIpList(r.public_ips) }}</span>
+                    <span v-else class="col-muted">-</span>
+                  </template>
+                </el-table-column>
+                <el-table-column label="内网 IP" min-width="140" show-overflow-tooltip>
+                  <template #default="{ row: r }">
+                    <span v-if="r.private_ip" class="col-ip">{{ r.private_ip }}</span>
+                    <span v-else class="col-muted">-</span>
+                  </template>
                 </el-table-column>
               </el-table>
               <div class="reminder-actions">
@@ -82,7 +107,7 @@
           </div>
         </div>
       </div>
-    </el-card>
+    </div>
 
     <!-- 合同列表弹窗 -->
     <el-dialog
@@ -93,21 +118,41 @@
     >
       <el-table
         :data="dialogContracts"
-        border
         stripe
         v-loading="dialogLoading"
-        empty-text="暂无数据"
         style="width: 100%"
       >
-        <el-table-column prop="name" label="合同名称" min-width="180" show-overflow-tooltip />
+        <template #empty>
+          <div class="table-empty">
+            <el-empty description="暂无数据" :image-size="72" />
+          </div>
+        </template>
+        <el-table-column prop="name" label="合同名称" min-width="180" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span
+              v-if="row.name"
+              class="col-name-link"
+              @click="goContractDetail(row.id)"
+            >{{ row.name }}</span>
+            <span v-else class="col-muted">-</span>
+          </template>
+        </el-table-column>
         <el-table-column label="客户" min-width="140" show-overflow-tooltip>
-          <template #default="{ row }">{{ row.customer_name || '-' }}</template>
+          <template #default="{ row }">
+            <span v-if="row.customer_name">{{ row.customer_name }}</span>
+            <span v-else class="col-muted">-</span>
+          </template>
         </el-table-column>
         <el-table-column label="到期日期" width="120" align="center">
-          <template #default="{ row }">{{ formatDate(row.end_date) }}</template>
+          <template #default="{ row }">
+            <span class="col-secondary">{{ formatDate(row.end_date) }}</span>
+          </template>
         </el-table-column>
         <el-table-column label="设备数" width="80" align="center">
-          <template #default="{ row }">{{ row.rental_count ?? '-' }}</template>
+          <template #default="{ row }">
+            <span v-if="row.rental_count != null">{{ row.rental_count }}</span>
+            <span v-else class="col-muted">-</span>
+          </template>
         </el-table-column>
         <el-table-column label="状态" width="90" align="center">
           <template #default="{ row }">
@@ -127,132 +172,310 @@
 </template>
 
 <style scoped>
-.page-title {
-  margin-bottom: 24px;
-  font-size: 22px;
-  font-weight: 600;
-  color: var(--text-primary);
-  display: flex;
-  align-items: center;
-}
-
-/* ---- 统计卡片 ---- */
-.stat-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 16px;
-  margin-bottom: 24px;
-}
-@media (max-width: 1200px) {
-  .stat-grid { grid-template-columns: repeat(2, 1fr); }
-}
-@media (max-width: 640px) {
-  .stat-grid { grid-template-columns: 1fr; }
-}
-.stat-card {
-  background: #fff;
-  border-radius: 12px;
-  padding: 20px;
-  border-top: 4px solid;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
-  transition: box-shadow 0.2s;
-  cursor: pointer;
-}
-.stat-card:hover {
-  box-shadow: 0 4px 16px rgba(0,0,0,0.1);
-}
-.stat-top {
+/* ============================================================
+ * 页面头部
+ * ============================================================ */
+.page-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
 }
+
+.page-header__left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.page-header__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, var(--primary-color), var(--primary-hover));
+  color: #fff;
+}
+
+.page-header__title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: -0.3px;
+}
+
+/* ============================================================
+ * 统计卡片
+ * ============================================================ */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+}
+
+@media (max-width: 1200px) {
+  .stat-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .stat-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.stat-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: var(--card-bg);
+  border-radius: 12px;
+  padding: 18px 16px 18px 18px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+  transition: box-shadow 0.25s ease, transform 0.25s ease;
+  cursor: pointer;
+  user-select: none;
+}
+
+.stat-card:hover {
+  box-shadow: 0 8px 24px rgba(37, 99, 235, 0.08), 0 2px 6px rgba(15, 23, 42, 0.04);
+  transform: translateY(-2px);
+}
+
+.stat-card:hover .stat-card__action {
+  color: var(--primary-color);
+  opacity: 1;
+}
+
 .stat-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 48px;
-  height: 48px;
-  border-radius: 12px;
-  background: #f5f7fa;
-}
-.stat-value {
-  font-size: 32px;
-  font-weight: 700;
-}
-.stat-label {
-  color: #909399;
-  font-size: 14px;
-  margin-top: 8px;
+  width: 42px;
+  height: 42px;
+  border-radius: 10px;
+  flex-shrink: 0;
 }
 
-/* ---- 待处理提醒 ---- */
+.stat-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.stat-label {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.2;
+}
+
+.stat-value {
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.5px;
+}
+
+.stat-card__action {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  align-self: flex-start;
+  margin-top: 2px;
+  padding: 2px 0;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  opacity: 0.85;
+  transition: color 0.2s, opacity 0.2s;
+  flex-shrink: 0;
+}
+
+/* ============================================================
+ * 面板卡片
+ * ============================================================ */
+.panel-card {
+  background: var(--card-bg);
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+  overflow: hidden;
+  border: none;
+  transition: box-shadow 0.25s ease;
+}
+
+.panel-card:hover {
+  box-shadow: 0 8px 24px rgba(37, 99, 235, 0.08), 0 2px 6px rgba(15, 23, 42, 0.04);
+}
+
+.panel-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px 4px;
+  background: var(--card-bg);
+}
+
+.panel-card__title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  position: relative;
+  padding-left: 10px;
+}
+
+.panel-card__title::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 14px;
+  border-radius: 2px;
+  background: var(--primary-color);
+}
+
+.panel-card__body {
+  padding: 8px 20px 20px;
+}
+
+/* ============================================================
+ * 待处理提醒
+ * ============================================================ */
 .reminder-list {
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
+
 .reminder-card {
-  border: 1px solid #ebeef5;
+  border: none;
   border-radius: 10px;
   overflow: hidden;
+  background: #f8fafc;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
   transition: box-shadow 0.2s;
 }
+
 .reminder-card:hover {
-  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
 }
+
 .reminder-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 16px;
   padding: 14px 18px;
   cursor: pointer;
   user-select: none;
-  background: #fafbfc;
+  background: transparent;
   transition: background 0.15s;
 }
+
 .reminder-header:hover {
-  background: #f0f2f5;
+  background: rgba(37, 99, 235, 0.04);
 }
+
 .reminder-info {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
+  flex-wrap: wrap;
 }
+
 .reminder-name {
   font-weight: 600;
   font-size: 15px;
-  color: #303133;
+  color: var(--text-primary);
 }
+
 .reminder-customer {
   font-size: 13px;
-  color: #909399;
+  color: var(--text-secondary);
 }
+
 .reminder-meta {
   display: flex;
   align-items: center;
   gap: 14px;
   font-size: 13px;
-  color: #606266;
+  color: var(--text-secondary);
+  flex-shrink: 0;
 }
+
 .reminder-count {
-  color: #909399;
+  color: var(--text-secondary);
 }
+
+.reminder-date {
+  color: var(--warning-color);
+  font-weight: 600;
+}
+
 .expand-arrow {
   transition: transform 0.2s;
-  color: #909399;
+  color: var(--text-secondary);
 }
+
 .expand-arrow.expanded {
   transform: rotate(90deg);
 }
+
 .reminder-body {
-  padding: 12px 18px 16px;
-  background: #fff;
-  border-top: 1px solid #ebeef5;
+  padding: 4px 18px 16px;
+  background: var(--card-bg);
 }
+
 .reminder-actions {
   display: flex;
   gap: 8px;
   margin-top: 12px;
+}
+
+@media (max-width: 768px) {
+  .stat-value {
+    font-size: 22px;
+  }
+
+  .reminder-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .reminder-meta {
+    width: 100%;
+    justify-content: flex-start;
+  }
+}
+.col-name-link {
+  color: var(--primary-color);
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.2s;
+}
+.col-name-link:hover {
+  color: var(--primary-hover);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.col-ip {
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+.col-secondary {
+  color: var(--text-secondary);
+}
+.col-muted {
+  color: #c0c4cc;
 }
 </style>
 
@@ -260,7 +483,7 @@
 import { ref, computed, onMounted, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Odometer, Bell, Document, Clock, Checked, CircleCloseFilled, ArrowRightBold } from '@element-plus/icons-vue'
+import { Odometer, Document, Clock, Checked, CircleCloseFilled, ArrowRightBold } from '@element-plus/icons-vue'
 import { getDashboardStats, listContracts, type DashboardStats, type ContractItem, type ContractStatus } from '@/api/modules/contract'
 import { sendExpiryReminder } from '@/api/modules/rental'
 
@@ -281,12 +504,12 @@ function toggleExpand(contractId: string) {
   expandedMap[contractId] = !expandedMap[contractId]
 }
 
-/** 统计卡片数据 */
+/** 统计卡片数据（配色对齐全局主题） */
 const statCards = computed(() => [
-  { key: 'total', label: '合同总数', value: stats.value.totalContracts, color: '#409EFF', icon: Document },
-  { key: 'expiring', label: '即将到期', value: stats.value.expiring, color: '#E6A23C', icon: Clock },
-  { key: 'reclaimed', label: '已回收', value: stats.value.reclaimed, color: '#909399', icon: Checked },
-  { key: 'expired', label: '已到期', value: stats.value.expired, color: '#F56C6C', icon: CircleCloseFilled },
+  { key: 'total', label: '合同总数', value: stats.value.totalContracts, color: '#2563EB', bg: 'rgba(37, 99, 235, 0.1)', icon: Document },
+  { key: 'expiring', label: '即将到期', value: stats.value.expiring, color: '#f59e0b', bg: 'rgba(245, 158, 11, 0.1)', icon: Clock },
+  { key: 'reclaimed', label: '已回收', value: stats.value.reclaimed, color: '#64748b', bg: 'rgba(100, 116, 139, 0.1)', icon: Checked },
+  { key: 'expired', label: '已到期', value: stats.value.expired, color: '#ef4444', bg: 'rgba(239, 68, 68, 0.1)', icon: CircleCloseFilled },
 ])
 
 /** 合同状态标签颜色 */
@@ -340,6 +563,10 @@ async function openContractDialog(type: string) {
 function goContractDetail(contractId: string) {
   dialogVisible.value = false
   router.push({ name: 'ContractDetail', params: { id: contractId } })
+}
+
+function goRental(id: string) {
+  router.push({ name: 'RentalDetail', params: { id } })
 }
 
 const handleSendReminder = async (row: DashboardStats['expiring_contracts'][number]) => {

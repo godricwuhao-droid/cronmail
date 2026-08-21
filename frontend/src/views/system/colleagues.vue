@@ -11,7 +11,8 @@
  */
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
-import { UserFilled } from '@element-plus/icons-vue'
+import { Refresh, UserFilled, InfoFilled } from '@element-plus/icons-vue'
+import { confirmDelete } from '@/lib/confirm'
 import {
   createContact,
   deleteContact,
@@ -155,6 +156,7 @@ async function handleSubmit() {
 }
 
 async function handleDelete(row: Contact) {
+  if (!(await confirmDelete('确定删除该同事？'))) return
   try {
     await deleteContact(row.id)
     ElMessage.success('已删除（状态置为 inactive）')
@@ -174,64 +176,75 @@ onMounted(() => {
 
 <template>
   <div class="page-container">
-    <el-card shadow="never">
-      <template #header>
-        <div class="card-header">
-          <div class="title-area">
-            <span class="title">
-              <el-icon><UserFilled /></el-icon>
-              内部同事管理
-            </span>
-            <el-tag type="info" effect="plain">与客户联系人数据隔离</el-tag>
-          </div>
+    <div class="page-panel">
+      <div class="card-header">
+        <span class="title">
+          <el-icon><UserFilled /></el-icon>
+          内部同事管理
+        </span>
+        <div class="header-actions">
+          <el-button :icon="Refresh" :disabled="loading" @click="fetchList">刷新</el-button>
           <el-button type="primary" @click="openCreateDialog">+ 新建同事</el-button>
         </div>
-      </template>
+      </div>
+
+      <div class="dialog-tip">
+        <el-icon><InfoFilled /></el-icon>
+        <span>内部同事与客户联系人数据隔离，可用于邮件抄送等场景。</span>
+      </div>
 
       <el-table
         v-loading="loading"
         :data="list"
-        border
+        row-key="id"
         stripe
         style="width: 100%"
-        empty-text="暂无内部同事"
       >
-        <el-table-column prop="name" label="姓名" min-width="120" />
-        <el-table-column prop="email" label="邮箱" min-width="200" />
+        <template #empty>
+          <div class="table-empty">
+            <el-empty description="暂无内部同事" :image-size="72" />
+          </div>
+        </template>
+        <el-table-column prop="name" label="姓名" min-width="120" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span v-if="row.name" class="col-name">{{ row.name }}</span>
+            <span v-else class="col-muted">-</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="email" label="邮箱" min-width="200" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span v-if="row.email" class="col-secondary">{{ row.email }}</span>
+            <span v-else class="col-muted">-</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="phone" label="电话" min-width="140">
           <template #default="{ row }">
             <span v-if="row.phone">{{ row.phone }}</span>
-            <span v-else class="muted">-</span>
+            <span v-else class="col-muted">-</span>
           </template>
         </el-table-column>
         <el-table-column prop="department" label="部门" min-width="140">
           <template #default="{ row }">
             <span v-if="row.department">{{ row.department }}</span>
-            <span v-else class="muted">-</span>
+            <span v-else class="col-muted">-</span>
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="100">
+        <el-table-column label="状态" width="100" align="center">
           <template #default="{ row }">
-            <el-tag :type="row.is_active ? 'success' : 'info'" effect="light" size="small">
+            <el-tag :type="row.is_active ? 'success' : 'info'" size="small">
               {{ row.is_active ? '启用' : '已停用' }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="180" fixed="right">
+        <el-table-column label="操作" width="140" fixed="right" align="center">
           <template #default="{ row }">
-            <el-button size="small" link type="primary" @click="openEditDialog(row)">
-              编辑
-            </el-button>
-            <el-popconfirm
-              title="确定删除该同事？"
-              confirm-button-text="删除"
-              cancel-button-text="取消"
-              @confirm="handleDelete(row)"
-            >
-              <template #reference>
-                <el-button size="small" link type="danger">删除</el-button>
-              </template>
-            </el-popconfirm>
+            <div class="action-buttons">
+              <el-button size="small" link type="primary" @click="openEditDialog(row)">
+                编辑
+              </el-button>
+              <el-divider direction="vertical" />
+              <el-button size="small" link type="danger" @click="handleDelete(row)">删除</el-button>
+            </div>
           </template>
         </el-table-column>
       </el-table>
@@ -248,72 +261,114 @@ onMounted(() => {
           @size-change="handleSizeChange"
         />
       </div>
-    </el-card>
+    </div>
 
     <!-- 新建 / 编辑弹窗 -->
     <el-dialog
       v-model="dialogVisible"
       :title="dialogMode === 'create' ? '新建内部同事' : '编辑内部同事'"
-      width="520px"
+      width="560px"
+      destroy-on-close
       :close-on-click-modal="false"
+      class="create-dialog"
     >
+      <div class="dialog-tip">
+        <el-icon><InfoFilled /></el-icon>
+        <span>
+          {{
+            dialogMode === 'create'
+              ? '创建后可在邮件抄送等场景中选择该同事；与客户联系人相互独立。'
+              : '可更新同事姓名、联系方式与部门信息。'
+          }}
+        </span>
+      </div>
       <el-form
         ref="formRef"
         :model="form"
         :rules="rules"
-        label-width="80px"
+        label-position="top"
         @submit.prevent="handleSubmit"
       >
-        <el-form-item label="姓名" prop="name">
-          <el-input v-model="form.name" placeholder="请输入姓名" maxlength="128" show-word-limit />
-        </el-form-item>
-        <el-form-item label="邮箱" prop="email">
-          <el-input v-model="form.email" placeholder="请输入邮箱地址" maxlength="256" />
-        </el-form-item>
-        <el-form-item label="电话" prop="phone">
-          <el-input v-model="form.phone" placeholder="选填" maxlength="32" />
-        </el-form-item>
-        <el-form-item label="部门" prop="department">
-          <el-input v-model="form.department" placeholder="选填" maxlength="128" />
-        </el-form-item>
+        <div class="dialog-section">
+          <div class="dialog-section-title">基本信息</div>
+          <el-row :gutter="16">
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="姓名" prop="name">
+                <el-input
+                  v-model="form.name"
+                  placeholder="请输入姓名"
+                  maxlength="128"
+                  show-word-limit
+                />
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="部门" prop="department">
+                <el-input v-model="form.department" placeholder="选填" maxlength="128" />
+              </el-form-item>
+            </el-col>
+          </el-row>
+        </div>
+        <div class="dialog-section">
+          <div class="dialog-section-title">联系方式</div>
+          <el-row :gutter="16">
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="邮箱" prop="email">
+                <el-input v-model="form.email" placeholder="请输入邮箱地址" maxlength="256" />
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="电话" prop="phone">
+                <el-input v-model="form.phone" placeholder="选填" maxlength="32" />
+              </el-form-item>
+            </el-col>
+          </el-row>
+        </div>
       </el-form>
       <template #footer>
-        <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="submitting" @click="handleSubmit">
-          {{ dialogMode === 'create' ? '创建' : '保存' }}
-        </el-button>
+        <div class="dialog-footer">
+          <el-button @click="dialogVisible = false">取消</el-button>
+          <el-button type="primary" :loading="submitting" @click="handleSubmit">
+            {{ dialogMode === 'create' ? '创建' : '保存' }}
+          </el-button>
+        </div>
       </template>
     </el-dialog>
   </div>
 </template>
 
 <style scoped>
-.page {
+.header-actions {
   display: flex;
-  flex-direction: column;
-  gap: 16px;
+  gap: 8px;
+  flex-wrap: wrap;
 }
-.card-header {
-  display: flex;
+.action-buttons {
+  display: inline-flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  white-space: nowrap;
 }
-.title-area {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+.action-buttons :deep(.el-button + .el-button) {
+  margin-left: 0;
 }
-.title {
-  font-size: 16px;
+.action-buttons :deep(.el-divider--vertical) {
+  margin: 0 8px;
+  height: 12px;
+  border-color: #e5e7eb;
+}
+.col-name {
+  color: var(--text-primary);
   font-weight: 600;
+}
+.col-secondary {
+  color: var(--text-secondary);
+}
+.col-muted {
+  color: #c0c4cc;
 }
 .pagination {
   display: flex;
   justify-content: flex-end;
   margin-top: 16px;
-}
-.muted {
-  color: #c9cdd4;
 }
 </style>

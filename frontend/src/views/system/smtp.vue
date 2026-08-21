@@ -11,7 +11,7 @@
  */
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
-import { Message } from '@element-plus/icons-vue'
+import { Message, InfoFilled } from '@element-plus/icons-vue'
 import {
   getSmtpConfig,
   testSmtp,
@@ -173,6 +173,7 @@ function togglePasswordChange(val: boolean) {
 const testDialogVisible = ref(false)
 const testSubmitting = ref(false)
 const testFormRef = ref<FormInstance>()
+const testResult = ref<{ success: boolean; message: string } | null>(null)
 const testForm = reactive({ test_email: '' })
 const testRules: FormRules = {
   test_email: [
@@ -193,6 +194,7 @@ const testRules: FormRules = {
 function openTestDialog() {
   // 优先用发件人邮箱做默认值
   testForm.test_email = form.sender_email || form.username || ''
+  testResult.value = null
   testDialogVisible.value = true
   setTimeout(() => testFormRef.value?.clearValidate(), 0)
 }
@@ -205,11 +207,12 @@ async function handleTest() {
     return
   }
   testSubmitting.value = true
+  testResult.value = null
   try {
     const res = await testSmtp({ test_email: testForm.test_email.trim() })
+    testResult.value = { success: res.success, message: res.message }
     if (res.success) {
       ElMessage.success(res.message || '测试邮件已发送')
-      testDialogVisible.value = false
     } else {
       ElMessage.error(res.message || '测试失败')
     }
@@ -227,128 +230,184 @@ onMounted(() => {
 
 <template>
   <div class="page-container">
-    <el-card v-loading="loading" shadow="never">
-      <template #header>
-        <div class="card-header">
-          <span class="title">
-            <el-icon><Message /></el-icon>
-            SMTP 配置
-          </span>
-          <div class="header-actions">
-            <el-button :disabled="!hasConfig" @click="openTestDialog">测试连接</el-button>
-            <el-button type="primary" :loading="saving" @click="handleSave">保存</el-button>
-          </div>
+    <div class="page-panel" v-loading="loading">
+      <div class="card-header">
+        <span class="title">
+          <el-icon><Message /></el-icon>
+          SMTP 配置
+        </span>
+        <div class="header-actions">
+          <el-button :disabled="!hasConfig" @click="openTestDialog">测试连接</el-button>
+          <el-button type="primary" :loading="saving" @click="handleSave">保存</el-button>
         </div>
-      </template>
+      </div>
 
-      <el-alert
-        v-if="!hasConfig"
-        title="尚未配置 SMTP"
-        type="info"
-        :closable="false"
-        show-icon
-        description="请填写完整 SMTP 服务器信息后保存。首次保存后将自动启用。"
-        style="margin-bottom: 16px"
-      />
+      <div v-if="!hasConfig" class="dialog-tip">
+        <el-icon><InfoFilled /></el-icon>
+        <span>尚未配置 SMTP。请填写完整服务器信息后保存，首次保存后将自动启用。</span>
+      </div>
 
       <el-form
         ref="formRef"
         :model="form"
         :rules="rules"
-        label-width="110px"
-        style="max-width: 640px"
+        label-position="top"
+        class="config-form"
         @submit.prevent="handleSave"
       >
-        <el-form-item label="SMTP 服务器" prop="host">
-          <el-input v-model="form.host" placeholder="如 smtp.example.com" maxlength="256" />
-        </el-form-item>
-        <el-form-item label="端口" prop="port">
-          <el-input-number v-model="form.port" :min="1" :max="65535" />
-        </el-form-item>
-        <el-form-item label="用户名" prop="username">
-          <el-input v-model="form.username" placeholder="SMTP 登录账号（通常为邮箱）" maxlength="256" />
-        </el-form-item>
-        <el-form-item label="密码" prop="password">
-          <div class="password-area">
-            <el-input
-              v-model="form.password"
-              type="password"
-              show-password
-              :placeholder="hasConfig ? (changingPassword ? '请输入新密码' : '已配置（留空不修改）') : '请输入密码'"
-              :disabled="hasConfig && !changingPassword"
-              maxlength="256"
-            />
-            <el-checkbox
-              v-if="hasConfig"
-              :model-value="changingPassword"
-              @change="togglePasswordChange($event as boolean)"
-            >
-              修改密码
-            </el-checkbox>
-          </div>
-        </el-form-item>
-        <el-form-item label="发件人名称" prop="sender_name">
-          <el-input v-model="form.sender_name" placeholder="如 CronMail" maxlength="128" />
-        </el-form-item>
-        <el-form-item label="发件人邮箱" prop="sender_email">
-          <el-input v-model="form.sender_email" placeholder="发件人邮箱地址" maxlength="256" />
-        </el-form-item>
-        <el-form-item label="加密方式" prop="encryption">
-          <el-select v-model="form.encryption" style="width: 100%">
-            <el-option label="SSL/TLS (端口 465)" value="tls" />
-            <el-option label="STARTTLS (端口 587)" value="starttls" />
-            <el-option label="无加密 (端口 25)" value="none" />
-          </el-select>
-        </el-form-item>
+        <div class="dialog-section">
+          <div class="dialog-section-title">服务器连接</div>
+          <el-row :gutter="16">
+            <el-col :span="24">
+              <el-form-item label="SMTP 服务器" prop="host">
+                <el-input v-model="form.host" placeholder="如 smtp.example.com" maxlength="256" />
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="端口" prop="port">
+                <el-input-number v-model="form.port" :min="1" :max="65535" style="width: 100%" />
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="加密方式" prop="encryption">
+                <el-select v-model="form.encryption" style="width: 100%">
+                  <el-option label="SSL/TLS (端口 465)" value="tls" />
+                  <el-option label="STARTTLS (端口 587)" value="starttls" />
+                  <el-option label="无加密 (端口 25)" value="none" />
+                </el-select>
+              </el-form-item>
+            </el-col>
+          </el-row>
+        </div>
+
+        <div class="dialog-section">
+          <div class="dialog-section-title">账号认证</div>
+          <el-row :gutter="16">
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="用户名" prop="username">
+                <el-input v-model="form.username" placeholder="SMTP 登录账号（通常为邮箱）" maxlength="256" />
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="密码" prop="password">
+                <div class="password-area">
+                  <el-input
+                    v-model="form.password"
+                    type="password"
+                    show-password
+                    :placeholder="hasConfig ? (changingPassword ? '请输入新密码' : '已配置（留空不修改）') : '请输入密码'"
+                    :disabled="hasConfig && !changingPassword"
+                    maxlength="256"
+                  />
+                  <el-checkbox
+                    v-if="hasConfig"
+                    class="password-change"
+                    :model-value="changingPassword"
+                    @change="togglePasswordChange($event as boolean)"
+                  >
+                    修改密码
+                  </el-checkbox>
+                </div>
+              </el-form-item>
+            </el-col>
+          </el-row>
+        </div>
+
+        <div class="dialog-section">
+          <div class="dialog-section-title">发件人信息</div>
+          <el-row :gutter="16">
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="发件人名称" prop="sender_name">
+                <el-input v-model="form.sender_name" placeholder="如 CronMail" maxlength="128" />
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="发件人邮箱" prop="sender_email">
+                <el-input v-model="form.sender_email" placeholder="发件人邮箱地址" maxlength="256" />
+              </el-form-item>
+            </el-col>
+          </el-row>
+        </div>
       </el-form>
-    </el-card>
+    </div>
 
     <!-- 测试连接弹窗 -->
     <el-dialog
       v-model="testDialogVisible"
       title="测试 SMTP 连接"
-      width="440px"
+      width="560px"
+      destroy-on-close
       :close-on-click-modal="false"
+      class="create-dialog"
+      @closed="testResult = null"
     >
-      <el-form ref="testFormRef" :model="testForm" :rules="testRules" label-width="100px">
-        <el-form-item label="测试邮箱" prop="test_email">
-          <el-input v-model="testForm.test_email" placeholder="用于接收测试邮件的邮箱" maxlength="256" />
-        </el-form-item>
+      <div class="dialog-tip">
+        <el-icon><InfoFilled /></el-icon>
+        <span>将使用已保存的 SMTP 配置发送一封测试邮件，用于验证服务器连通与账号可用性。</span>
+      </div>
+
+      <el-form ref="testFormRef" :model="testForm" :rules="testRules" label-position="top">
+        <div class="dialog-section">
+          <div class="dialog-section-title">收件信息</div>
+          <el-form-item label="测试邮箱" prop="test_email">
+            <el-input
+              v-model="testForm.test_email"
+              placeholder="用于接收测试邮件的邮箱"
+              maxlength="256"
+            />
+          </el-form-item>
+        </div>
       </el-form>
+
+      <div v-if="testResult" class="test-result">
+        <el-alert
+          :title="testResult.success ? '发送成功' : '发送失败'"
+          :type="testResult.success ? 'success' : 'error'"
+          :description="testResult.message"
+          :closable="false"
+          show-icon
+        />
+      </div>
+
       <template #footer>
-        <el-button @click="testDialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="testSubmitting" @click="handleTest">发送测试邮件</el-button>
+        <div class="dialog-footer">
+          <el-button @click="testDialogVisible = false">关闭</el-button>
+          <el-button type="primary" :loading="testSubmitting" @click="handleTest">发送测试邮件</el-button>
+        </div>
       </template>
     </el-dialog>
   </div>
 </template>
 
 <style scoped>
-.page {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-.card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.title {
-  font-size: 16px;
-  font-weight: 600;
-}
 .header-actions {
   display: flex;
   gap: 8px;
+  flex-wrap: wrap;
+}
+.config-form {
+  max-width: 720px;
+}
+.config-form :deep(.el-form-item__label) {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+.config-form :deep(.el-form-item) {
+  margin-bottom: 16px;
 }
 .password-area {
   display: flex;
-  align-items: center;
-  gap: 12px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
   width: 100%;
 }
-.password-area :deep(.el-input) {
-  flex: 1;
+.password-change {
+  align-self: flex-start;
+  height: auto;
+  margin-right: 0;
+}
+.test-result {
+  margin-top: 4px;
 }
 </style>

@@ -6,8 +6,9 @@
  */
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowLeft, Document } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
+import { ArrowLeft, Document, Paperclip } from '@element-plus/icons-vue'
+import { confirmDelete } from '@/lib/confirm'
 import {
   deleteServiceContract,
   getServiceContract,
@@ -133,15 +134,7 @@ function goRelatedContract(id: string) {
 
 async function handleDelete() {
   if (!record.value?.id) return
-  try {
-    await ElMessageBox.confirm('确认删除该合同？', '删除确认', {
-      type: 'warning',
-      confirmButtonText: '删除',
-      cancelButtonText: '取消',
-    })
-  } catch {
-    return
-  }
+  if (!(await confirmDelete('确认删除该合同？'))) return
   try {
     await deleteServiceContract(record.value.id)
     ElMessage.success('合同已删除')
@@ -177,10 +170,10 @@ onMounted(() => {
 
 <template>
   <div class="page-container" v-loading="loading">
-    <!-- 顶部返回 -->
-    <div style="margin-bottom: 16px;">
+    <div class="top-bar">
       <el-button @click="goBack">
-        <el-icon><ArrowLeft /></el-icon> 返回列表
+        <el-icon><ArrowLeft /></el-icon>
+        返回
       </el-button>
     </div>
 
@@ -203,14 +196,14 @@ onMounted(() => {
         <el-button :icon="Document" @click="handleEdit">编辑</el-button>
         <el-button type="danger" @click="handleDelete">删除</el-button>
         <el-button type="primary" @click="goAttachments">
-          <el-icon style="margin-right:4px"><Paperclip /></el-icon>附件管理
+          <el-icon class="btn-icon"><Paperclip /></el-icon>附件管理
         </el-button>
       </div>
     </div>
 
     <!-- 合同基本信息 -->
     <section class="detail-section">
-      <h3 class="section-title">合同信息</h3>
+      <div class="dialog-section-title">合同信息</div>
       <el-descriptions :column="3" border>
         <el-descriptions-item label="合同名称">{{ record?.name || '-' }}</el-descriptions-item>
         <el-descriptions-item label="客户">{{ record?.customer_name || '-' }}</el-descriptions-item>
@@ -260,7 +253,7 @@ onMounted(() => {
 
     <!-- 合同详细内容 -->
     <section v-if="record?.contract_content || record?.delivery_requirements || record?.process_records" class="detail-section">
-      <h3 class="section-title">合同详细内容</h3>
+      <div class="dialog-section-title">合同详细内容</div>
       <el-descriptions :column="1" border>
         <el-descriptions-item v-if="record?.contract_content" label="合同内容">
           <div class="long-text">{{ record.contract_content }}</div>
@@ -276,7 +269,7 @@ onMounted(() => {
 
     <!-- 服务行表格 -->
     <section class="detail-section">
-      <h3 class="section-title">服务内容明细</h3>
+      <div class="dialog-section-title">服务内容明细</div>
       <div v-if="!record?.service_lines || record.service_lines.length === 0" class="lines-empty">
         暂无服务行数据
       </div>
@@ -284,7 +277,6 @@ onMounted(() => {
         v-else
         :data="record.service_lines"
         row-key="id"
-        border
         stripe
         style="width: 100%"
       >
@@ -359,8 +351,8 @@ onMounted(() => {
 
     <!-- 关联合同 -->
     <section v-if="record?.related_contract" class="detail-section">
-      <h3 class="section-title">关联合同</h3>
-      <el-card shadow="hover" class="related-contract-card" @click="goRelatedContract(record.related_contract!.id)">
+      <div class="dialog-section-title">关联合同</div>
+      <div class="related-contract-card" @click="goRelatedContract(record.related_contract!.id)">
         <div class="related-contract-info">
           <div class="related-contract-name">
             {{ record.related_contract.name }}
@@ -381,44 +373,48 @@ onMounted(() => {
         <div class="related-contract-arrow">
           查看详情 →
         </div>
-      </el-card>
+      </div>
     </section>
 
     <!-- 附件状态 -->
     <section class="detail-section">
-      <h3 class="section-title">附件状态</h3>
+      <div class="section-toolbar">
+        <div class="dialog-section-title">附件状态</div>
+        <div class="section-actions">
+          <el-button type="primary" size="small" @click="goAttachments">
+            <el-icon class="btn-icon"><Paperclip /></el-icon>附件管理
+          </el-button>
+        </div>
+      </div>
       <div class="attachment-status-grid">
-        <el-card
+        <div
           v-for="(label, code) in categoryLabels"
           :key="code"
-          shadow="hover"
           class="status-card"
         >
-          <template #header>
-            <div class="status-card-header">
-              <span>{{ label }}</span>
-              <el-tag
-                :type="statusTagType(
-                  summary?.items?.[code]?.confirmed ?? false,
-                  summary?.items?.[code]?.file_count ?? 0
-                )"
-                size="small"
-              >
-                {{ statusText(
-                  summary?.items?.[code]?.confirmed ?? false,
-                  summary?.items?.[code]?.file_count ?? 0
-                ) }}
-              </el-tag>
-            </div>
-          </template>
+          <div class="status-card-header">
+            <span>{{ label }}</span>
+            <el-tag
+              :type="statusTagType(
+                summary?.items?.[code]?.confirmed ?? false,
+                summary?.items?.[code]?.file_count ?? 0
+              )"
+              size="small"
+            >
+              {{ statusText(
+                summary?.items?.[code]?.confirmed ?? false,
+                summary?.items?.[code]?.file_count ?? 0
+              ) }}
+            </el-tag>
+          </div>
           <div class="status-card-body">
             <span class="status-stat">
               <strong>{{ summary?.items?.[code]?.file_count ?? 0 }}</strong> 个文件
             </span>
           </div>
-        </el-card>
+        </div>
       </div>
-      <div style="margin-top: 12px;">
+      <div class="attachment-summary">
         <span class="muted">
           总计：{{ summary?.confirmed_items ?? 0 }} / {{ summary?.total_items ?? 0 }} 项已确认
         </span>
@@ -426,7 +422,6 @@ onMounted(() => {
           v-if="summary?.all_confirmed"
           type="success"
           size="small"
-          style="margin-left: 8px;"
         >
           全部完成
         </el-tag>
@@ -436,28 +431,30 @@ onMounted(() => {
 </template>
 
 <style scoped>
+.top-bar {
+  margin-bottom: 0;
+}
+
 .detail-header {
-  background: #fff;
-  border-radius: 8px;
-  padding: 20px 24px;
-  margin-bottom: 16px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  padding: 20px;
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
   flex-wrap: wrap;
   gap: 12px;
+  border-radius: 8px;
 }
 .header-title {
   margin: 0 0 8px 0;
-  font-size: 22px;
+  font-size: 20px;
   font-weight: 600;
   color: var(--text-primary);
+  line-height: 1.3;
 }
 .header-sub {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   color: var(--text-secondary);
   font-size: 14px;
 }
@@ -465,23 +462,55 @@ onMounted(() => {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.btn-icon {
+  margin-right: 4px;
 }
 
 .detail-section {
-  background: #fff;
+  padding: 20px;
   border-radius: 8px;
-  padding: 20px 24px;
-  margin-bottom: 16px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+.detail-section > .dialog-section-title {
+  margin-bottom: 12px;
 }
 
-/* 服务行表格 */
+.section-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #e5e7eb;
+}
+.section-toolbar .dialog-section-title {
+  margin: 0;
+  padding-top: 0;
+  padding-right: 0;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+.section-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.muted {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 400;
+  opacity: 0.85;
+}
+
 .lines-empty {
   text-align: center;
   padding: 24px;
-  color: #909399;
+  color: var(--text-secondary);
 }
-/* 附加信息 chip */
 .line-extra {
   display: flex;
   flex-wrap: wrap;
@@ -489,8 +518,8 @@ onMounted(() => {
 }
 .info-chip {
   display: inline-block;
-  background: #f0f5ff;
-  color: #1a73e8;
+  background: #eff6ff;
+  color: var(--primary-color);
   padding: 2px 8px;
   border-radius: 4px;
   font-size: 12px;
@@ -507,22 +536,26 @@ onMounted(() => {
 }
 .line-total-price {
   font-weight: 700;
-  color: #1a73e8;
+  color: var(--primary-color);
 }
 .amount-diff-warn {
   color: #e6a23c;
   font-weight: 600;
 }
+.long-text {
+  white-space: pre-wrap;
+  line-height: 1.6;
+  word-break: break-word;
+}
 
-/* 汇总统计 */
 .lines-summary {
   display: flex;
   gap: 24px;
   margin-top: 16px;
   padding: 14px 18px;
-  background: #fafbfc;
-  border: 1px solid #e4e7ed;
+  background: #f8fafc;
   border-radius: 8px;
+  flex-wrap: wrap;
 }
 .summary-stat {
   display: flex;
@@ -531,32 +564,35 @@ onMounted(() => {
 }
 .summary-stat-label {
   font-size: 12px;
-  color: #909399;
+  color: var(--text-secondary);
 }
 .summary-stat-value {
   font-size: 16px;
   font-weight: 700;
-  color: #303133;
+  color: var(--text-primary);
 }
 
-/* 关联合同 */
 .related-contract-card {
+  position: relative;
   cursor: pointer;
   border-radius: 8px;
-  transition: box-shadow 0.2s;
+  padding: 16px 20px;
+  background: #f8fafc;
+  transition: background 0.2s;
 }
 .related-contract-card:hover {
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  background: #eff6ff;
 }
 .related-contract-info {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  padding-right: 100px;
 }
 .related-contract-name {
   font-size: 16px;
   font-weight: 600;
-  color: #303133;
+  color: var(--text-primary);
 }
 .related-contract-meta {
   display: flex;
@@ -566,51 +602,59 @@ onMounted(() => {
 }
 .related-contract-no {
   font-size: 13px;
-  color: #909399;
+  color: var(--text-secondary);
 }
 .related-contract-amount {
   font-size: 14px;
   font-weight: 600;
-  color: #303133;
+  color: var(--text-primary);
 }
 .related-contract-arrow {
   position: absolute;
   top: 50%;
   right: 20px;
   transform: translateY(-50%);
-  color: #1a73e8;
+  color: var(--primary-color);
   font-size: 14px;
   font-weight: 500;
 }
 
-/* 附件状态 */
 .attachment-status-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 16px;
+  gap: 12px;
 }
 .status-card {
+  background: #f8fafc;
   border-radius: 8px;
+  padding: 14px 16px;
 }
 .status-card-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 8px;
   font-weight: 600;
+  font-size: 13px;
+  color: var(--text-primary);
+  margin-bottom: 8px;
 }
 .status-card-body {
-  padding: 8px 0;
+  padding: 0;
 }
 .status-stat {
-  font-size: 14px;
+  font-size: 13px;
   color: var(--text-secondary);
 }
-
-/* 长文本内容 */
-.long-text {
-  white-space: pre-wrap;
-  word-break: break-word;
-  line-height: 1.7;
-  color: #303133;
+.status-stat strong {
+  color: var(--text-primary);
+  font-size: 18px;
+  margin-right: 2px;
+}
+.attachment-summary {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 </style>

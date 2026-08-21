@@ -8,7 +8,8 @@
  *  - 分类/子项的 CRUD 和排序
  */
 import { onMounted, ref, computed } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
+import { confirmDelete } from '@/lib/confirm'
 import {
   FolderOpened,
   Plus,
@@ -17,6 +18,7 @@ import {
   Top,
   Bottom,
   ArrowDown,
+  InfoFilled,
 } from '@element-plus/icons-vue'
 import {
   listAttachmentCategories,
@@ -130,15 +132,7 @@ async function handleSaveType() {
 }
 
 async function handleDeleteType(type: ProjectTypeResponse) {
-  try {
-    await ElMessageBox.confirm(
-      `确定删除项目类型「${type.name}」？删除后该类型下的附件分类不受影响。`,
-      '删除确认',
-      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' },
-    )
-  } catch {
-    return
-  }
+  if (!(await confirmDelete(`确定删除项目类型「${type.name}」？删除后该类型下的附件分类不受影响。`))) return
   try {
     await deleteProjectType(type.id)
     ElMessage.success('项目类型已删除')
@@ -257,15 +251,7 @@ async function handleSaveCategory() {
 }
 
 async function handleDeleteCategory(cat: AttachmentCategoryConfig) {
-  try {
-    await ElMessageBox.confirm(
-      `确定删除分类「${cat.name}」？已有关联数据不受影响。`,
-      '删除确认',
-      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' },
-    )
-  } catch {
-    return
-  }
+  if (!(await confirmDelete(`确定删除分类「${cat.name}」？已有关联数据不受影响。`))) return
   try {
     await deleteAttachmentCategory(cat.id)
     ElMessage.success('分类已删除')
@@ -370,15 +356,7 @@ async function handleSaveItem() {
 }
 
 async function handleDeleteItem(item: AttachmentCategoryItem) {
-  try {
-    await ElMessageBox.confirm(
-      `确定删除子项「${item.name}」？已有关联数据不受影响。`,
-      '删除确认',
-      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' },
-    )
-  } catch {
-    return
-  }
+  if (!(await confirmDelete(`确定删除子项「${item.name}」？已有关联数据不受影响。`))) return
   try {
     await deleteAttachmentCategoryItem(item.id)
     ElMessage.success('子项已删除')
@@ -421,143 +399,176 @@ onMounted(async () => {
 
 <template>
   <div class="page-container">
-    <!-- 顶部：项目类型管理区 -->
-    <el-card shadow="never" class="type-selector-card">
-      <div class="type-selector-header">
-        <div class="type-selector-label">
-          <el-icon :size="18"><FolderOpened /></el-icon>
-          <span>项目类型管理</span>
-        </div>
-      </div>
-      <div class="type-tags-row">
-        <el-tag
-          v-for="t in projectTypes"
-          :key="t.id"
-          :type="selectedTypeId === t.id ? 'primary' : 'info'"
-          :effect="selectedTypeId === t.id ? 'dark' : 'plain'"
-          size="large"
-          class="type-tag"
-          @click="handleTypeSelect(t.id)"
-        >
-          {{ t.name }}
-        </el-tag>
-        <el-button
-          type="primary"
-          :icon="Plus"
-          size="small"
-          plain
-          @click="openCreateType"
-        >
-          新建项目类型
-        </el-button>
-      </div>
-      <div class="type-tags-row" v-if="projectTypes.length > 0">
-        <span class="type-ops-hint">点击标签可编辑或删除：</span>
-        <span
-          v-for="t in projectTypes"
-          :key="'ops-' + t.id"
-          class="type-ops-item"
-        >
-          <el-button size="small" :icon="Edit" link type="primary" @click="openEditType(t)">编辑</el-button>
-          <el-button size="small" :icon="Delete" link type="danger" @click="handleDeleteType(t)">删除</el-button>
+    <div class="page-panel">
+      <div class="card-header">
+        <span class="title">
+          <el-icon><FolderOpened /></el-icon>
+          项目配置
         </span>
-      </div>
-    </el-card>
-
-    <!-- 下方：分类管理区 -->
-    <el-card shadow="never" class="categories-card">
-      <template #header>
-        <div class="card-header">
-          <span class="title">
-            当前：{{ currentTypeLabel }} 的附件分类
-          </span>
-          <el-button type="primary" :icon="Plus" @click="openCreateCategory">
+        <div class="header-actions">
+          <el-button :icon="Plus" @click="openCreateType">
+            新建项目类型
+          </el-button>
+          <el-button
+            type="primary"
+            :icon="Plus"
+            :disabled="!selectedType"
+            @click="openCreateCategory"
+          >
             新建分类
           </el-button>
         </div>
-      </template>
+      </div>
 
-      <!-- 分类列表 -->
-      <div v-loading="loading">
-        <div v-if="categories.length === 0" class="empty-state">
-          <el-empty :description="`「${currentTypeLabel}」下暂无分类，请新建`" />
+      <div class="dialog-tip">
+        <el-icon><InfoFilled /></el-icon>
+        <span>先选择项目类型，再维护该类型下的附件分类与子项。</span>
+      </div>
+
+      <!-- 项目类型 -->
+      <div class="dialog-section">
+        <div class="section-toolbar">
+          <div class="dialog-section-title">项目类型</div>
+          <div v-if="selectedType" class="type-ops">
+            <el-button size="small" link type="primary" :icon="Edit" @click="openEditType(selectedType)">
+              编辑
+            </el-button>
+            <el-divider direction="vertical" />
+            <el-button size="small" link type="danger" :icon="Delete" @click="handleDeleteType(selectedType)">
+              删除
+            </el-button>
+          </div>
+        </div>
+        <div class="type-tags-row">
+          <el-tag
+            v-for="t in projectTypes"
+            :key="t.id"
+            :type="selectedTypeId === t.id ? 'primary' : 'info'"
+            :effect="selectedTypeId === t.id ? 'dark' : 'plain'"
+            size="large"
+            class="type-tag"
+            @click="handleTypeSelect(t.id)"
+          >
+            {{ t.name }}
+          </el-tag>
+          <span v-if="projectTypes.length === 0" class="muted">暂无项目类型，请先新建</span>
+        </div>
+      </div>
+
+      <!-- 附件分类 -->
+      <div class="dialog-section">
+        <div class="dialog-section-title">
+          附件分类
+          <span class="muted">（{{ currentTypeLabel }}）</span>
         </div>
 
-        <div
-          v-for="(cat, catIdx) in categories"
-          :key="cat.id"
-          class="category-card"
-        >
-          <!-- 分类头部 -->
-          <div class="cat-header">
-            <div class="cat-header-left" @click="toggleExpand(cat.id)" style="cursor: pointer; flex: 1;">
-              <el-icon
-                class="expand-icon"
-                :class="{ rotated: !isExpanded(cat.id) }"
-              >
-                <ArrowDown />
-              </el-icon>
-              <span class="cat-name">{{ cat.name }}</span>
-              <el-tag size="small" type="info" style="margin-left: 8px;">{{ cat.code }}</el-tag>
-              <span class="cat-meta">排序: {{ cat.sort_order }}</span>
-            </div>
-            <div class="cat-header-right">
-              <el-button size="small" :icon="Top" :disabled="catIdx === 0" @click="handleMoveCategoryUp(cat, catIdx)" />
-              <el-button size="small" :icon="Bottom" :disabled="catIdx >= categories.length - 1" @click="handleMoveCategoryDown(cat, catIdx)" />
-              <el-button size="small" :icon="Edit" @click="openEditCategory(cat)">编辑</el-button>
-              <el-button size="small" :icon="Delete" type="danger" @click="handleDeleteCategory(cat)">删除</el-button>
-            </div>
+        <div v-loading="loading" class="category-list">
+          <div v-if="!selectedType" class="table-empty">
+            <el-empty description="请先选择或新建项目类型" :image-size="72" />
+          </div>
+          <div v-else-if="categories.length === 0" class="table-empty">
+            <el-empty :description="`「${currentTypeLabel}」下暂无分类，请新建`" :image-size="72" />
           </div>
 
-          <!-- 子项列表 -->
-          <div v-show="isExpanded(cat.id)" class="cat-items">
-            <div
-              v-for="(item, itemIdx) in cat.items"
-              :key="item.id"
-              class="item-row"
-            >
-              <div class="item-info">
-                <span class="item-name">{{ item.name }}</span>
-                <span v-if="item.expected_type" class="item-type-tag">
-                  {{ item.expected_type.toUpperCase() }}
-                </span>
-                <span v-if="item.description" class="item-desc">{{ item.description }}</span>
+          <div
+            v-for="(cat, catIdx) in categories"
+            :key="cat.id"
+            class="category-block"
+          >
+            <div class="cat-header">
+              <div class="cat-header-left" @click="toggleExpand(cat.id)">
+                <el-icon
+                  class="expand-icon"
+                  :class="{ rotated: !isExpanded(cat.id) }"
+                >
+                  <ArrowDown />
+                </el-icon>
+                <span class="cat-name">{{ cat.name }}</span>
+                <el-tag size="small" type="info">{{ cat.code }}</el-tag>
+                <span class="cat-meta">排序 {{ cat.sort_order }}</span>
               </div>
-              <div class="item-actions">
-                <el-button size="small" :icon="Top" :disabled="itemIdx === 0" @click="handleMoveItemUp(item, cat.items, itemIdx)" />
-                <el-button size="small" :icon="Bottom" :disabled="itemIdx >= cat.items.length - 1" @click="handleMoveItemDown(item, cat.items, itemIdx)" />
-                <el-button size="small" :icon="Edit" link type="primary" @click="openEditItem(item, cat.id)">编辑</el-button>
-                <el-button size="small" :icon="Delete" link type="danger" @click="handleDeleteItem(item)">删除</el-button>
+              <div class="cat-header-right">
+                <el-button size="small" :icon="Top" :disabled="catIdx === 0" @click="handleMoveCategoryUp(cat, catIdx)" />
+                <el-button size="small" :icon="Bottom" :disabled="catIdx >= categories.length - 1" @click="handleMoveCategoryDown(cat, catIdx)" />
+                <el-divider direction="vertical" />
+                <el-button size="small" link type="primary" :icon="Edit" @click="openEditCategory(cat)">编辑</el-button>
+                <el-button size="small" link type="danger" :icon="Delete" @click="handleDeleteCategory(cat)">删除</el-button>
               </div>
             </div>
-            <div class="add-item-row">
-              <el-button size="small" :icon="Plus" link type="primary" @click="openCreateItem(cat.id, cat.items)">
-                添加子项
-              </el-button>
+
+            <div v-show="isExpanded(cat.id)" class="cat-items">
+              <div
+                v-for="(item, itemIdx) in cat.items"
+                :key="item.id"
+                class="item-row"
+              >
+                <div class="item-info">
+                  <span class="item-name">{{ item.name }}</span>
+                  <span v-if="item.expected_type" class="item-type-tag">
+                    {{ item.expected_type.toUpperCase() }}
+                  </span>
+                  <span v-if="item.description" class="item-desc">{{ item.description }}</span>
+                </div>
+                <div class="item-actions">
+                  <el-button size="small" :icon="Top" :disabled="itemIdx === 0" @click="handleMoveItemUp(item, cat.items, itemIdx)" />
+                  <el-button size="small" :icon="Bottom" :disabled="itemIdx >= cat.items.length - 1" @click="handleMoveItemDown(item, cat.items, itemIdx)" />
+                  <el-divider direction="vertical" />
+                  <el-button size="small" link type="primary" @click="openEditItem(item, cat.id)">编辑</el-button>
+                  <el-button size="small" link type="danger" @click="handleDeleteItem(item)">删除</el-button>
+                </div>
+              </div>
+              <div class="add-item-row">
+                <el-button size="small" :icon="Plus" link type="primary" @click="openCreateItem(cat.id, cat.items)">
+                  添加子项
+                </el-button>
+              </div>
             </div>
           </div>
         </div>
       </div>
-    </el-card>
+    </div>
 
     <!-- 项目类型弹窗 -->
     <el-dialog
       v-model="typeDialogVisible"
       :title="typeDialogTitle"
-      width="480px"
+      width="560px"
+      destroy-on-close
       :close-on-click-modal="false"
+      class="create-dialog"
     >
-      <el-form :model="typeForm" label-width="100px" @submit.prevent>
-        <el-form-item label="名称" required>
-          <el-input v-model="typeForm.name" placeholder="如 算力服务合同" maxlength="100" />
-        </el-form-item>
-        <el-form-item label="排序">
-          <el-input-number v-model="typeForm.sort_order" :min="1" :max="999" />
-        </el-form-item>
+      <div class="dialog-tip">
+        <el-icon><InfoFilled /></el-icon>
+        <span>
+          {{
+            editingTypeId
+              ? '可更新项目类型名称与排序。'
+              : '项目类型用于区分不同业务线下的附件分类配置。'
+          }}
+        </span>
+      </div>
+      <el-form :model="typeForm" label-position="top" class="dialog-form" @submit.prevent>
+        <div class="dialog-section">
+          <div class="dialog-section-title">类型信息</div>
+          <el-row :gutter="16">
+            <el-col :xs="24" :sm="16">
+              <el-form-item label="名称" required>
+                <el-input v-model="typeForm.name" placeholder="如 算力服务合同" maxlength="100" />
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="8">
+              <el-form-item label="排序">
+                <el-input-number v-model="typeForm.sort_order" :min="1" :max="999" style="width: 100%" />
+              </el-form-item>
+            </el-col>
+          </el-row>
+        </div>
       </el-form>
       <template #footer>
-        <el-button @click="typeDialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="handleSaveType">保存</el-button>
+        <div class="dialog-footer">
+          <el-button @click="typeDialogVisible = false">取消</el-button>
+          <el-button type="primary" @click="handleSaveType">保存</el-button>
+        </div>
       </template>
     </el-dialog>
 
@@ -565,23 +576,48 @@ onMounted(async () => {
     <el-dialog
       v-model="categoryDialogVisible"
       :title="categoryDialogTitle"
-      width="480px"
+      width="560px"
+      destroy-on-close
       :close-on-click-modal="false"
+      class="create-dialog"
     >
-      <el-form :model="categoryForm" label-width="100px" @submit.prevent>
-        <el-form-item label="名称" required>
-          <el-input v-model="categoryForm.name" placeholder="如 合同协议" maxlength="50" />
-        </el-form-item>
-        <el-form-item label="编码" required>
-          <el-input v-model="categoryForm.code" placeholder="如 contract_agreement" maxlength="50" />
-        </el-form-item>
-        <el-form-item label="排序">
-          <el-input-number v-model="categoryForm.sort_order" :min="1" :max="999" />
-        </el-form-item>
+      <div class="dialog-tip">
+        <el-icon><InfoFilled /></el-icon>
+        <span>
+          {{
+            editingCategoryId
+              ? '可更新分类名称、编码与排序。'
+              : `将为「${currentTypeLabel}」创建附件分类；编码建议使用英文下划线风格。`
+          }}
+        </span>
+      </div>
+      <el-form :model="categoryForm" label-position="top" class="dialog-form" @submit.prevent>
+        <div class="dialog-section">
+          <div class="dialog-section-title">分类信息</div>
+          <el-row :gutter="16">
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="名称" required>
+                <el-input v-model="categoryForm.name" placeholder="如 合同协议" maxlength="50" />
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="编码" required>
+                <el-input v-model="categoryForm.code" placeholder="如 contract_agreement" maxlength="50" />
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="排序">
+                <el-input-number v-model="categoryForm.sort_order" :min="1" :max="999" style="width: 100%" />
+              </el-form-item>
+            </el-col>
+          </el-row>
+        </div>
       </el-form>
       <template #footer>
-        <el-button @click="categoryDialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="handleSaveCategory">保存</el-button>
+        <div class="dialog-footer">
+          <el-button @click="categoryDialogVisible = false">取消</el-button>
+          <el-button type="primary" @click="handleSaveCategory">保存</el-button>
+        </div>
       </template>
     </el-dialog>
 
@@ -589,220 +625,218 @@ onMounted(async () => {
     <el-dialog
       v-model="itemDialogVisible"
       :title="itemDialogTitle"
-      width="480px"
+      width="560px"
+      destroy-on-close
       :close-on-click-modal="false"
+      class="create-dialog"
     >
-      <el-form :model="itemForm" label-width="100px" @submit.prevent>
-        <el-form-item label="名称" required>
-          <el-input v-model="itemForm.name" placeholder="如 合同扫描件" maxlength="50" />
-        </el-form-item>
-        <el-form-item label="描述">
-          <el-input v-model="itemForm.description" placeholder="如 合同扫描件PDF" maxlength="200" />
-        </el-form-item>
-        <el-form-item label="期望类型">
-          <el-select v-model="itemForm.expected_type" placeholder="选择文件类型" clearable style="width: 100%">
-            <el-option label="PDF" value="pdf" />
-            <el-option label="图片" value="image" />
-            <el-option label="Excel" value="excel" />
-            <el-option label="Word" value="word" />
-            <el-option label="其他" value="other" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="排序">
-          <el-input-number v-model="itemForm.sort_order" :min="1" :max="999" />
-        </el-form-item>
+      <div class="dialog-tip">
+        <el-icon><InfoFilled /></el-icon>
+        <span>
+          {{
+            editingItemId
+              ? '可更新子项名称、描述、期望类型与排序。'
+              : '子项用于约束该分类下可上传的附件条目。'
+          }}
+        </span>
+      </div>
+      <el-form :model="itemForm" label-position="top" class="dialog-form" @submit.prevent>
+        <div class="dialog-section">
+          <div class="dialog-section-title">子项信息</div>
+          <el-row :gutter="16">
+            <el-col :span="24">
+              <el-form-item label="名称" required>
+                <el-input v-model="itemForm.name" placeholder="如 合同扫描件" maxlength="50" />
+              </el-form-item>
+            </el-col>
+            <el-col :span="24">
+              <el-form-item label="描述">
+                <el-input v-model="itemForm.description" placeholder="如 合同扫描件PDF" maxlength="200" />
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="期望类型">
+                <el-select v-model="itemForm.expected_type" placeholder="选择文件类型" clearable style="width: 100%">
+                  <el-option label="PDF" value="pdf" />
+                  <el-option label="图片" value="image" />
+                  <el-option label="Excel" value="excel" />
+                  <el-option label="Word" value="word" />
+                  <el-option label="其他" value="other" />
+                </el-select>
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="排序">
+                <el-input-number v-model="itemForm.sort_order" :min="1" :max="999" style="width: 100%" />
+              </el-form-item>
+            </el-col>
+          </el-row>
+        </div>
       </el-form>
       <template #footer>
-        <el-button @click="itemDialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="handleSaveItem">保存</el-button>
+        <div class="dialog-footer">
+          <el-button @click="itemDialogVisible = false">取消</el-button>
+          <el-button type="primary" @click="handleSaveItem">保存</el-button>
+        </div>
       </template>
     </el-dialog>
   </div>
 </template>
 
 <style scoped>
-.page-container {
+.header-actions {
   display: flex;
-  flex-direction: column;
-  gap: 16px;
+  gap: 8px;
+  flex-wrap: wrap;
 }
-
-/* ============================================================
-   项目类型管理区
-   ============================================================ */
-.type-selector-card {
-  --el-card-padding: 16px 20px;
-}
-
-.type-selector-header {
+.section-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
   margin-bottom: 12px;
 }
-
-.type-selector-label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 14px;
-  font-weight: 600;
-  color: #303133;
+.section-toolbar .dialog-section-title {
+  margin: 0;
+  padding-bottom: 0;
+  border-bottom: none;
+  flex: 1;
+}
+.section-toolbar .dialog-section-title::before {
+  content: '';
+  width: 3px;
+  height: 13px;
+  border-radius: 1px;
+  background: var(--primary-color);
   flex-shrink: 0;
 }
-
+.type-ops {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+.type-ops :deep(.el-divider--vertical),
+.cat-header-right :deep(.el-divider--vertical),
+.item-actions :deep(.el-divider--vertical) {
+  margin: 0 8px;
+  height: 12px;
+  border-color: #e5e7eb;
+}
 .type-tags-row {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
 }
-
-.type-tags-row + .type-tags-row {
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px dashed #e4e7ed;
-}
-
 .type-tag {
   cursor: pointer;
   user-select: none;
-  transition: all 0.2s;
 }
-
-.type-tag:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+.muted {
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 400;
 }
-
-.type-ops-hint {
-  font-size: 12px;
-  color: #909399;
-  margin-right: 4px;
+.category-list {
+  min-height: 120px;
 }
-
-.type-ops-item {
-  display: flex;
-  align-items: center;
-  gap: 0;
+.category-block + .category-block {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #e5e7eb;
 }
-
-/* ============================================================
-   分类管理区
-   ============================================================ */
-.categories-card .card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.categories-card .card-header .title {
-  font-size: 15px;
-  font-weight: 600;
-}
-
-.empty-state {
-  padding: 40px 0;
-}
-
-.category-card {
-  border: 1px solid #ebeef5;
-  border-radius: 8px;
-  margin-bottom: 12px;
-  overflow: hidden;
-}
-
 .cat-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 16px;
-  background: #f8fafc;
-  border-bottom: 1px solid #ebeef5;
+  gap: 12px;
+  padding: 8px 0;
+  flex-wrap: wrap;
 }
-
 .cat-header-left {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
 }
-
 .cat-header-right {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex-shrink: 0;
-}
-
-.expand-icon {
-  transition: transform 0.2s;
-  color: #909399;
-}
-
-.expand-icon.rotated {
-  transform: rotate(-90deg);
-}
-
-.cat-name {
-  font-weight: 600;
-  font-size: 15px;
-}
-
-.cat-meta {
-  font-size: 12px;
-  color: #909399;
-  margin-left: 8px;
-}
-
-/* 子项 */
-.cat-items {
-  padding: 8px 16px 12px;
-}
-
-.item-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 12px;
-  margin-top: 6px;
-  background: #fafbfc;
-  border-radius: 6px;
-  border: 1px solid #ebeef5;
-}
-
-.item-info {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.item-name {
-  font-weight: 500;
-  font-size: 14px;
-}
-
-.item-type-tag {
-  font-size: 11px;
-  color: #909399;
-  background: #e5e7eb;
-  padding: 1px 6px;
-  border-radius: 3px;
-}
-
-.item-desc {
-  font-size: 12px;
-  color: #909399;
-}
-
-.item-actions {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 2px;
   flex-shrink: 0;
 }
-
+.expand-icon {
+  transition: transform 0.2s;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+.expand-icon.rotated {
+  transform: rotate(-90deg);
+}
+.cat-name {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+.cat-meta {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.cat-items {
+  padding: 4px 0 8px 24px;
+}
+.item-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid #f1f5f9;
+  flex-wrap: wrap;
+}
+.item-row:last-of-type {
+  border-bottom: none;
+}
+.item-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+  flex-wrap: wrap;
+}
+.item-name {
+  font-weight: 500;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+.item-type-tag {
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: #f1f5f9;
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+.item-desc {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.item-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
 .add-item-row {
-  margin-top: 8px;
-  padding-left: 12px;
+  margin-top: 4px;
+}
+.dialog-form :deep(.el-form-item__label) {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+.dialog-form :deep(.el-form-item) {
+  margin-bottom: 16px;
 }
 </style>

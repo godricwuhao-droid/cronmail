@@ -11,7 +11,8 @@
 import { onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
-import { UserFilled, Back, Notebook } from '@element-plus/icons-vue'
+import { ArrowLeft, InfoFilled } from '@element-plus/icons-vue'
+import { confirmDelete } from '@/lib/confirm'
 import {
   createContact,
   deleteContact,
@@ -260,6 +261,7 @@ async function handleSubmit() {
 }
 
 async function handleDelete(row: Contact) {
+  if (!(await confirmDelete('确定删除该联系人？'))) return
   try {
     await deleteContact(row.id)
     ElMessage.success('已删除（状态置为 inactive）')
@@ -276,6 +278,30 @@ function goBack() {
   router.push({ name: 'CustomerList' })
 }
 
+function goContract(row: UnifiedContract) {
+  router.push({ name: row.route_name, params: { id: row.id } })
+}
+
+function formatDateTime(s?: string | null) {
+  if (!s) return '-'
+  return s.replace('T', ' ').slice(0, 19)
+}
+
+function contractStatusLabel(s: string) {
+  if (s === 'active') return '生效中'
+  if (s === 'expiring') return '临期'
+  if (s === 'expired') return '已到期'
+  if (s === 'reclaimed') return '已回收'
+  return s
+}
+
+function contractStatusTag(s: string) {
+  if (s === 'active') return 'success'
+  if (s === 'expiring') return 'warning'
+  if (s === 'expired') return 'danger'
+  return 'info'
+}
+
 onMounted(() => {
   fetchCustomer()
   fetchList()
@@ -284,86 +310,104 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="page-container">
-    <el-card shadow="never">
-      <template #header>
-        <div class="card-header">
-          <div class="title-area">
-            <el-button :icon="Back" text @click="goBack">返回客户列表</el-button>
-            <span class="title">
-              <el-icon><UserFilled /></el-icon>
-              联系人管理
-            </span>
-            <span v-if="customer" class="customer-subtitle">
-              — {{ customer.name }}
-            </span>
-            <el-tag v-else-if="!customerLoading" type="danger" effect="plain">客户不存在</el-tag>
-            <template v-if="customer?.business_types?.length">
-              <el-tag
-                v-for="bt in customer.business_types"
-                :key="bt"
-                size="small"
-                effect="plain"
-                type="primary"
-              >
-                {{ bt }}
-              </el-tag>
-            </template>
-          </div>
-          <el-button type="primary" :disabled="!customer" @click="openCreateDialog">
-            + 新建联系人
-          </el-button>
-        </div>
-      </template>
+  <div class="page-container" v-loading="customerLoading">
+    <div class="top-bar">
+      <el-button @click="goBack">
+        <el-icon><ArrowLeft /></el-icon>
+        返回
+      </el-button>
+    </div>
 
+    <div class="detail-header">
+      <div class="header-left">
+        <h1 class="header-title">{{ customer?.name || (customerLoading ? '...' : '客户不存在') }}</h1>
+        <div class="header-sub">
+          <template v-if="customer?.business_types?.length">
+            <span class="biz-text">{{ customer.business_types.join('、') }}</span>
+          </template>
+          <span v-else class="muted">未设置业务类型</span>
+        </div>
+      </div>
+    </div>
+
+    <section class="detail-section">
+      <div class="dialog-section-title">基本信息</div>
+      <el-descriptions :column="3" border>
+        <el-descriptions-item label="客户名称">{{ customer?.name || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="业务类型">
+          <span v-if="customer?.business_types?.length">{{ customer.business_types.join('、') }}</span>
+          <span v-else class="muted">-</span>
+        </el-descriptions-item>
+        <el-descriptions-item label="联系人">{{ list.length }} 人</el-descriptions-item>
+        <el-descriptions-item label="合同数">{{ customerContracts.length }} 份</el-descriptions-item>
+        <el-descriptions-item label="创建时间">{{ formatDateTime(customer?.created_at) }}</el-descriptions-item>
+        <el-descriptions-item label="更新时间">{{ formatDateTime(customer?.updated_at) }}</el-descriptions-item>
+      </el-descriptions>
+    </section>
+
+    <section class="detail-section">
+      <div class="section-toolbar">
+        <div class="dialog-section-title">
+          联系人
+          <span class="muted">（共 {{ total }} 人）</span>
+        </div>
+        <el-button type="primary" :disabled="!customer" @click="openCreateDialog">
+          + 新建联系人
+        </el-button>
+      </div>
       <el-table
         v-loading="loading"
         :data="list"
-        border
+        row-key="id"
         stripe
         style="width: 100%"
-        empty-text="该客户下暂无联系人"
       >
-        <el-table-column prop="name" label="姓名" min-width="120" />
-        <el-table-column prop="email" label="邮箱" min-width="200" />
+        <template #empty>
+          <div class="table-empty">
+            <el-empty description="该客户下暂无联系人" :image-size="72" />
+          </div>
+        </template>
+        <el-table-column prop="name" label="姓名" min-width="120" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span v-if="row.name" class="col-name">{{ row.name }}</span>
+            <span v-else class="col-muted">-</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="email" label="邮箱" min-width="200" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span v-if="row.email" class="col-secondary">{{ row.email }}</span>
+            <span v-else class="col-muted">-</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="phone" label="电话" min-width="140">
           <template #default="{ row }">
             <span v-if="row.phone">{{ row.phone }}</span>
-            <span v-else class="muted">-</span>
+            <span v-else class="col-muted">-</span>
           </template>
         </el-table-column>
         <el-table-column prop="department" label="部门" min-width="140">
           <template #default="{ row }">
             <span v-if="row.department">{{ row.department }}</span>
-            <span v-else class="muted">-</span>
+            <span v-else class="col-muted">-</span>
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="100">
+        <el-table-column label="状态" width="100" align="center">
           <template #default="{ row }">
-            <el-tag :type="row.is_active ? 'success' : 'info'" effect="light" size="small">
+            <el-tag :type="row.is_active ? 'success' : 'info'" size="small">
               {{ row.is_active ? '启用' : '已停用' }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="180" fixed="right">
+        <el-table-column label="操作" width="160" fixed="right" align="center">
           <template #default="{ row }">
-            <el-button size="small" link type="primary" @click="openEditDialog(row)">
-              编辑
-            </el-button>
-            <el-popconfirm
-              title="确定删除该联系人？"
-              confirm-button-text="删除"
-              cancel-button-text="取消"
-              @confirm="handleDelete(row)"
-            >
-              <template #reference>
-                <el-button size="small" link type="danger">删除</el-button>
-              </template>
-            </el-popconfirm>
+            <div class="action-buttons">
+              <el-button size="small" link type="primary" @click="openEditDialog(row)">编辑</el-button>
+              <el-divider direction="vertical" />
+              <el-button size="small" link type="danger" @click="handleDelete(row)">删除</el-button>
+            </div>
           </template>
         </el-table-column>
       </el-table>
-
       <div class="pagination">
         <el-pagination
           v-model:current-page="query.page"
@@ -376,45 +420,49 @@ onMounted(() => {
           @size-change="handleSizeChange"
         />
       </div>
-    </el-card>
+    </section>
 
-    <!-- 合同列表 -->
-    <el-card shadow="never" style="margin-top: 16px;" v-loading="contractsLoading">
-      <template #header>
-        <span class="title">
-          <el-icon><Notebook /></el-icon>
-          合同列表
-        </span>
-      </template>
+    <section class="detail-section" v-loading="contractsLoading">
+      <div class="dialog-section-title">
+        合同列表
+        <span class="muted">（共 {{ customerContracts.length }} 份）</span>
+      </div>
       <el-table
         :data="customerContracts"
-        border
         stripe
         style="width: 100%"
-        empty-text="该客户下暂无合同"
-        size="small"
       >
-        <el-table-column prop="name" label="合同名称" min-width="200" show-overflow-tooltip />
-        <el-table-column label="合同类型" width="110" align="center">
+        <template #empty>
+          <div class="table-empty">
+            <el-empty description="该客户下暂无合同" :image-size="72" />
+          </div>
+        </template>
+        <el-table-column label="合同名称" min-width="200" show-overflow-tooltip>
           <template #default="{ row }">
-            <el-tag
-              size="small"
-              effect="plain"
-              :type="row.contract_type === '算力租赁' ? 'primary' : row.contract_type === '算力服务' ? 'success' : 'warning'"
-            >
-              {{ row.contract_type }}
-            </el-tag>
+            <el-tooltip content="点击查看详情" placement="top" :show-after="300">
+              <span class="col-name-link" @click="goContract(row)">{{ row.name }}</span>
+            </el-tooltip>
           </template>
         </el-table-column>
-        <el-table-column prop="contract_no" label="合同编号" min-width="140" show-overflow-tooltip />
+        <el-table-column label="合同类型" width="110" align="center">
+          <template #default="{ row }">
+            <span>{{ row.contract_type }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="contract_no" label="合同编号" min-width="140" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span v-if="row.contract_no">{{ row.contract_no }}</span>
+            <span v-else class="muted">-</span>
+          </template>
+        </el-table-column>
         <el-table-column label="状态" width="100" align="center">
           <template #default="{ row }">
             <el-tag
               v-if="row.status && row.status !== '-'"
               size="small"
-              :type="row.status === 'active' ? 'success' : row.status === 'expiring' ? 'warning' : row.status === 'expired' ? 'danger' : 'info'"
+              :type="contractStatusTag(row.status)"
             >
-              {{ row.status === 'active' ? '生效中' : row.status === 'expiring' ? '临期' : row.status === 'expired' ? '已到期' : row.status === 'reclaimed' ? '已回收' : row.status }}
+              {{ contractStatusLabel(row.status) }}
             </el-tag>
             <span v-else class="muted">-</span>
           </template>
@@ -427,85 +475,183 @@ onMounted(() => {
             <span v-else class="muted">-</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="80" align="center" fixed="right">
+        <el-table-column label="操作" width="90" align="center" fixed="right">
           <template #default="{ row }">
-            <el-button size="small" link type="primary" @click="$router.push({ name: row.route_name, params: { id: row.id } })">
-              详情
-            </el-button>
+            <el-button size="small" link type="primary" @click="goContract(row)">详情</el-button>
           </template>
         </el-table-column>
       </el-table>
-    </el-card>
+    </section>
 
     <!-- 新建 / 编辑弹窗 -->
     <el-dialog
       v-model="dialogVisible"
       :title="dialogMode === 'create' ? '新建联系人' : '编辑联系人'"
-      width="520px"
+      width="560px"
+      destroy-on-close
       :close-on-click-modal="false"
+      class="create-dialog"
     >
+      <div class="dialog-tip">
+        <el-icon><InfoFilled /></el-icon>
+        <span>
+          {{
+            dialogMode === 'create'
+              ? `将为客户「${customer?.name || ''}」添加联系人，可用于合同通知与邮件发送。`
+              : '可更新联系人姓名、邮箱、电话与部门。'
+          }}
+        </span>
+      </div>
       <el-form
         ref="formRef"
         :model="form"
         :rules="rules"
-        label-width="80px"
+        label-position="top"
         @submit.prevent="handleSubmit"
       >
-        <el-form-item label="姓名" prop="name">
-          <el-input v-model="form.name" placeholder="请输入姓名" maxlength="128" show-word-limit />
-        </el-form-item>
-        <el-form-item label="邮箱" prop="email">
-          <el-input v-model="form.email" placeholder="请输入邮箱地址" maxlength="256" />
-        </el-form-item>
-        <el-form-item label="电话" prop="phone">
-          <el-input v-model="form.phone" placeholder="选填" maxlength="32" />
-        </el-form-item>
-        <el-form-item label="部门" prop="department">
-          <el-input v-model="form.department" placeholder="选填" maxlength="128" />
-        </el-form-item>
+        <div class="dialog-section">
+          <div class="dialog-section-title">基础信息</div>
+          <el-form-item label="姓名" prop="name">
+            <el-input
+              v-model="form.name"
+              placeholder="请输入姓名"
+              maxlength="128"
+              show-word-limit
+              clearable
+            />
+          </el-form-item>
+          <el-form-item label="邮箱" prop="email">
+            <el-input
+              v-model="form.email"
+              placeholder="请输入邮箱地址"
+              maxlength="256"
+              clearable
+            />
+          </el-form-item>
+        </div>
+        <div class="dialog-section">
+          <div class="dialog-section-title">其他信息</div>
+          <el-form-item label="电话" prop="phone">
+            <el-input v-model="form.phone" placeholder="选填" maxlength="32" clearable />
+          </el-form-item>
+          <el-form-item label="部门" prop="department">
+            <el-input v-model="form.department" placeholder="选填" maxlength="128" clearable />
+          </el-form-item>
+        </div>
       </el-form>
       <template #footer>
-        <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="submitting" @click="handleSubmit">
-          {{ dialogMode === 'create' ? '创建' : '保存' }}
-        </el-button>
+        <div class="dialog-footer">
+          <el-button @click="dialogVisible = false">取消</el-button>
+          <el-button type="primary" :loading="submitting" @click="handleSubmit">
+            {{ dialogMode === 'create' ? '创建' : '保存' }}
+          </el-button>
+        </div>
       </template>
     </el-dialog>
   </div>
 </template>
 
 <style scoped>
-.page {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
+.top-bar {
+  margin-bottom: 0;
 }
-.card-header {
+
+.detail-header {
+  padding: 20px;
   display: flex;
-  align-items: center;
   justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
   gap: 12px;
+  border-radius: 8px;
 }
-.title-area {
+.header-title {
+  margin: 0 0 8px 0;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.3;
+}
+.header-sub {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
+  color: var(--text-secondary);
+  font-size: 14px;
+  flex-wrap: wrap;
 }
-.title {
-  font-size: 16px;
+.biz-text {
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+.detail-section {
+  padding: 20px;
+  border-radius: 8px;
+}
+
+.section-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #e5e7eb;
+}
+.section-toolbar .dialog-section-title {
+  margin: 0;
+  padding-top: 0;
+  padding-right: 0;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.detail-section > .dialog-section-title {
+  margin-bottom: 12px;
+}
+
+.col-name {
+  color: var(--text-primary);
   font-weight: 600;
 }
-.customer-subtitle {
-  font-size: 15px;
-  font-weight: 500;
-  color: #303133;
+.col-name-link {
+  color: var(--primary-color);
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.2s;
 }
-.pagination {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 16px;
+.col-name-link:hover {
+  color: var(--primary-hover);
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
+.col-secondary {
+  color: var(--text-secondary);
+}
+.col-muted {
+  color: #c0c4cc;
+}
+
+.action-buttons {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+}
+.action-buttons :deep(.el-button + .el-button) {
+  margin-left: 0;
+}
+.action-buttons :deep(.el-divider--vertical) {
+  margin: 0 8px;
+  height: 12px;
+  border-color: #e5e7eb;
+}
+
 .muted {
-  color: #c9cdd4;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 400;
+  opacity: 0.85;
 }
 </style>

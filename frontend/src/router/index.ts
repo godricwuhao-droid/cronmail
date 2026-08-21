@@ -251,13 +251,13 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '编辑模板', icon: 'Message', hidden: true },
       },
 
-      // ---------- 发送日志 ----------
-      {
-        path: 'logs',
-        name: 'EmailLogList',
-        component: () => import('@/views/logs/index.vue'),
-        meta: { title: '发送日志', icon: 'Tickets' },
-      },
+      // ---------- 发送日志（临时禁用：views/logs/index.vue 缺失） ----------
+      // {
+      //   path: 'logs',
+      //   name: 'EmailLogList',
+      //   component: () => import('@/views/logs/index.vue'),
+      //   meta: { title: '发送日志', icon: 'Tickets' },
+      // },
 
       // ---------- 系统配置（菜单含子菜单） ----------
       {

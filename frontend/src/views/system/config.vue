@@ -151,49 +151,45 @@ onMounted(() => {
 
 <template>
   <div class="page-container">
-    <el-card v-loading="loading" shadow="never">
-      <template #header>
-        <div class="card-header">
-          <span class="title">
-            <el-icon><Clock /></el-icon>
-            系统配置
-          </span>
-          <div class="header-actions">
-            <el-button type="primary" :loading="saving" @click="handleSave">保存</el-button>
-          </div>
+    <div class="page-panel" v-loading="loading">
+      <div class="card-header">
+        <span class="title">
+          <el-icon><Clock /></el-icon>
+          系统配置
+        </span>
+        <div class="header-actions">
+          <el-button type="primary" :loading="saving" @click="handleSave">保存</el-button>
         </div>
-      </template>
+      </div>
 
       <el-form
         ref="formRef"
         :model="form"
         :rules="rules"
-        label-width="140px"
-        style="max-width: 560px"
+        label-position="top"
+        class="config-form"
         @submit.prevent="handleSave"
       >
-        <el-form-item label="临期提醒天数" prop="expiry_warning_days">
-          <el-input
-            v-model="form.expiry_warning_days"
-            placeholder="如 7,3"
-            maxlength="64"
-          >
-            <template #append>天</template>
-          </el-input>
-          <div class="form-tip">逗号分隔多个天数，定时任务将按这些天数发送临期提醒</div>
-        </el-form-item>
+        <div class="dialog-section">
+          <div class="dialog-section-title">提醒规则</div>
+          <el-form-item label="临期提醒天数" prop="expiry_warning_days">
+            <el-input
+              v-model="form.expiry_warning_days"
+              placeholder="如 7,3"
+              maxlength="64"
+              style="max-width: 320px"
+            >
+              <template #append>天</template>
+            </el-input>
+            <div class="form-tip">逗号分隔多个天数，定时任务将按这些天数发送临期提醒</div>
+          </el-form-item>
+        </div>
 
-        <el-divider />
-
-        <div v-loading="scheduleLoading" class="schedule-section">
-          <div class="section-title">
-            <el-icon><Clock /></el-icon>
-            通知时间配置
-          </div>
+        <div v-loading="scheduleLoading" class="dialog-section">
+          <div class="dialog-section-title">通知时间配置</div>
           <div class="schedule-hint">
             设置 Celery Beat 定时任务的每日执行时间（北京时间）
           </div>
-
           <div class="schedule-items">
             <div class="schedule-item">
               <span class="schedule-label">临期提醒通知</span>
@@ -228,47 +224,35 @@ onMounted(() => {
           </div>
         </div>
       </el-form>
-    </el-card>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.title {
-  font-size: 16px;
-  font-weight: 600;
-}
 .header-actions {
   display: flex;
   gap: 8px;
 }
+.config-form {
+  max-width: 560px;
+}
+.config-form :deep(.el-form-item__label) {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+.config-form :deep(.el-form-item) {
+  margin-bottom: 16px;
+}
 .form-tip {
   font-size: 12px;
-  color: #909399;
+  color: var(--text-secondary);
   margin-top: 6px;
   line-height: 1.5;
 }
-
-/* 通知时间配置 */
-.schedule-section {
-  margin-top: 0;
-}
-.section-title {
-  font-size: 15px;
-  font-weight: 600;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 6px;
-}
 .schedule-hint {
   font-size: 12px;
-  color: #909399;
-  margin-bottom: 16px;
+  color: var(--text-secondary);
+  margin: -4px 0 16px;
 }
 .schedule-items {
   display: flex;
@@ -283,7 +267,7 @@ onMounted(() => {
 .schedule-label {
   width: 120px;
   font-size: 14px;
-  color: #606266;
+  color: var(--text-secondary);
   flex-shrink: 0;
 }
 </style>

@@ -1,47 +1,198 @@
 <template>
   <div class="page-container overview-page" v-loading="loading">
-    <div class="page-title">
-      <el-icon :size="22" style="color: #409EFF; vertical-align: -3px;"><DataAnalysis /></el-icon>
-      <span style="margin-left: 8px;">运营概览</span>
+    <!-- 顶部标题栏 -->
+    <div class="page-header">
+      <div class="page-header__left">
+        <div class="page-header__icon">
+          <el-icon :size="18"><DataAnalysis /></el-icon>
+        </div>
+        <span class="page-header__title">运营概览</span>
+      </div>
     </div>
 
     <!-- 第一行：柱状图 + 扇形图 -->
-    <el-row :gutter="16" style="margin-bottom: 16px;">
-      <el-col :span="14">
-        <el-card shadow="never">
-          <div id="chart-customer" style="width: 100%; height: 360px;"></div>
-        </el-card>
+    <el-row :gutter="16" class="chart-row">
+      <el-col :xs="24" :lg="14" class="chart-col">
+        <div class="panel-card">
+          <div class="panel-card__header">
+            <span class="panel-card__title">客户租用设备排行</span>
+          </div>
+          <div class="panel-card__body">
+            <div v-if="stats.rental_by_customer.length === 0" class="chart-empty">暂无数据</div>
+            <div v-else id="chart-customer" class="chart-container"></div>
+          </div>
+        </div>
       </el-col>
-      <el-col :span="10">
-        <el-card shadow="never">
-          <div id="chart-model" style="width: 100%; height: 360px;"></div>
-        </el-card>
+      <el-col :xs="24" :lg="10" class="chart-col">
+        <div class="panel-card">
+          <div class="panel-card__header">
+            <span class="panel-card__title">机器型号分布</span>
+          </div>
+          <div class="panel-card__body">
+            <div v-if="stats.rental_by_model.length === 0" class="chart-empty">暂无数据</div>
+            <div v-else id="chart-model" class="chart-container"></div>
+          </div>
+        </div>
       </el-col>
     </el-row>
 
     <!-- 第二行：趋势图 -->
-    <el-row>
-      <el-col :span="24">
-        <el-card shadow="never">
-          <div id="chart-trend" style="width: 100%; height: 320px;"></div>
-        </el-card>
-      </el-col>
-    </el-row>
+    <div class="panel-card">
+      <div class="panel-card__header">
+        <span class="panel-card__title">合同趋势（近12个月）</span>
+      </div>
+      <div class="panel-card__body">
+        <div v-if="stats.contract_trend.length === 0" class="chart-empty chart-empty--trend">暂无数据</div>
+        <div v-else id="chart-trend" class="chart-container chart-container--trend"></div>
+      </div>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.overview-page .el-card {
-  border: 1px solid #ebeef5;
-}
-
-.page-title {
-  margin-bottom: 24px;
-  font-size: 22px;
-  font-weight: 600;
-  color: var(--text-primary);
+/* ============================================================
+ * 页面头部
+ * ============================================================ */
+.page-header {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0;
+}
+
+.page-header__left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.page-header__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, var(--primary-color), var(--primary-hover));
+  color: #fff;
+}
+
+.page-header__title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: -0.3px;
+}
+
+/* ============================================================
+ * 面板卡片
+ * ============================================================ */
+.chart-row {
+  margin-bottom: 0;
+}
+
+.chart-col {
+  margin-bottom: 0;
+}
+
+@media (max-width: 1199px) {
+  .chart-col {
+    margin-bottom: 16px;
+  }
+
+  .chart-col:last-child {
+    margin-bottom: 0;
+  }
+}
+
+.panel-card {
+  background: var(--card-bg);
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+  overflow: hidden;
+  border: none;
+  height: 100%;
+  transition: box-shadow 0.25s ease;
+}
+
+.panel-card:hover {
+  box-shadow: 0 8px 24px rgba(37, 99, 235, 0.08), 0 2px 6px rgba(15, 23, 42, 0.04);
+}
+
+.panel-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px 4px;
+  background: var(--card-bg);
+  border-bottom: none;
+}
+
+.panel-card__title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  position: relative;
+  padding-left: 10px;
+}
+
+.panel-card__title::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 14px;
+  border-radius: 2px;
+  background: var(--primary-color);
+}
+
+.panel-card__body {
+  padding: 8px 20px 20px;
+}
+
+/* ============================================================
+ * 图表区域
+ * ============================================================ */
+.chart-container {
+  width: 100%;
+  height: 360px;
+}
+
+.chart-container--trend {
+  height: 320px;
+}
+
+.chart-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 360px;
+  color: #c0c4cc;
+  font-size: 14px;
+}
+
+.chart-empty--trend {
+  height: 320px;
+}
+
+@media (max-width: 768px) {
+  .chart-container {
+    height: 280px;
+  }
+
+  .chart-container--trend {
+    height: 260px;
+  }
+
+  .chart-empty {
+    height: 280px;
+  }
+
+  .chart-empty--trend {
+    height: 260px;
+  }
 }
 </style>
 
@@ -79,6 +230,22 @@ const loading = ref(false)
 let customerChart: echarts.ECharts | null = null
 let modelChart: echarts.ECharts | null = null
 let trendChart: echarts.ECharts | null = null
+
+// ============================================================
+// 主题色（与 global.css 一致）
+// ============================================================
+const themeColors = [
+  '#2563EB', '#10b981', '#f59e0b', '#ef4444', '#64748b',
+  '#0ea5e9', '#8b5cf6', '#f97316',
+]
+
+const tooltipStyle = {
+  backgroundColor: 'rgba(32, 46, 63, 0.92)',
+  borderWidth: 0,
+  padding: [10, 14],
+  textStyle: { color: '#fff', fontSize: 12 },
+  extraCssText: 'border-radius: 8px; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.18);',
+}
 
 // ============================================================
 // 数据获取
@@ -123,41 +290,82 @@ function initCustomerChart() {
   data.forEach((c) => c.models.forEach((m) => modelSet.add(m.machine_model)))
   const models = Array.from(modelSet)
 
-  // 颜色
-  const colors = [
-    '#409eff', '#67c23a', '#e6a23c', '#f56c6c', '#909399',
-    '#36b4c1', '#8e5ce5', '#f0a732',
-  ]
-
   customerChart.setOption({
-    title: {
-      text: '客户租用设备排行',
-      left: 'center',
-      textStyle: { fontSize: 14 },
-    },
+    color: themeColors,
     tooltip: {
+      ...tooltipStyle,
       trigger: 'axis',
-      axisPointer: { type: 'shadow' },
+      axisPointer: {
+        type: 'shadow',
+        shadowStyle: { color: 'rgba(37, 99, 235, 0.06)' },
+      },
+      formatter: (params: any[]) => {
+        if (!params?.length) return ''
+        const name = params[0].axisValue
+        let total = 0
+        let rows = ''
+        params.forEach((p: any) => {
+          total += Number(p.value) || 0
+          rows += `<div style="display:flex;align-items:center;justify-content:space-between;gap:24px;margin-top:6px;">
+            <span style="display:inline-flex;align-items:center;gap:6px;">
+              <span style="width:8px;height:8px;border-radius:50%;background:${p.color};"></span>${p.seriesName}
+            </span>
+            <strong>${p.value}</strong>
+          </div>`
+        })
+        return `<div style="font-weight:600;margin-bottom:4px;">${name}</div>
+          <div style="opacity:.75;font-size:11px;margin-bottom:2px;">合计 ${total} 台</div>${rows}`
+      },
     },
-    legend: { data: models, bottom: 0 },
-    color: colors,
+    legend: {
+      data: models,
+      bottom: 0,
+      icon: 'roundRect',
+      itemWidth: 12,
+      itemHeight: 8,
+      itemGap: 16,
+      textStyle: { fontSize: 12, color: '#3F5573' },
+    },
+    grid: { left: '2%', right: '3%', bottom: '16%', top: '10%', containLabel: true },
     xAxis: {
       type: 'category',
       data: data.map((c) => c.customer_name),
-      axisLabel: { rotate: 30, fontSize: 11 },
+      axisLine: { lineStyle: { color: '#e5e7eb' } },
+      axisTick: { show: false },
+      axisLabel: {
+        rotate: data.length > 5 ? 30 : 0,
+        fontSize: 11,
+        color: '#64748b',
+        interval: 0,
+      },
     },
-    yAxis: { type: 'value', name: '台' },
-    series: models.map((modelName) => ({
+    yAxis: {
+      type: 'value',
+      name: '台',
+      minInterval: 1,
+      nameTextStyle: { color: '#94a3b8', fontSize: 11, padding: [0, 28, 0, 0] },
+      axisLine: { show: false },
+      axisTick: { show: false },
+      axisLabel: { color: '#94a3b8', fontSize: 11 },
+      splitLine: { lineStyle: { color: '#f1f5f9', type: 'dashed' } },
+    },
+    series: models.map((modelName, idx) => ({
       name: modelName,
       type: 'bar',
       stack: 'total',
+      barMaxWidth: 36,
       emphasis: { focus: 'series' },
+      itemStyle: {
+        color: themeColors[idx % themeColors.length],
+        borderRadius: idx === models.length - 1 ? [4, 4, 0, 0] : 0,
+      },
       data: data.map((c) => {
         const found = c.models.find((m) => m.machine_model === modelName)
         return found ? found.count : 0
       }),
     })),
-    grid: { left: '3%', right: '4%', bottom: '20%', top: '12%', containLabel: true },
+    animationDuration: 600,
+    animationEasing: 'cubicOut',
   })
 }
 
@@ -171,28 +379,84 @@ function initModelChart() {
   modelChart?.dispose()
   modelChart = echarts.init(dom)
 
+  const pieData = stats.value.rental_by_model.map((r) => ({
+    name: r.machine_model,
+    value: r.count,
+  }))
+  const total = pieData.reduce((sum, d) => sum + d.value, 0)
+
   modelChart.setOption({
-    title: {
-      text: '机器型号分布',
-      left: 'center',
-      textStyle: { fontSize: 14 },
-    },
+    color: themeColors,
     tooltip: {
+      ...tooltipStyle,
       trigger: 'item',
-      formatter: '{b}: {c} 台 ({d}%)',
+      formatter: (p: any) =>
+        `<div style="font-weight:600;margin-bottom:6px;">${p.name}</div>
+         <div>${p.value} 台 · <strong>${p.percent}%</strong></div>`,
     },
-    legend: { bottom: 10 },
+    legend: {
+      bottom: 0,
+      icon: 'circle',
+      itemWidth: 8,
+      itemHeight: 8,
+      itemGap: 14,
+      textStyle: { fontSize: 12, color: '#3F5573' },
+    },
+    title: {
+      text: `{num|${total}}\n{unit|台}`,
+      left: 'center',
+      top: '40%',
+      textStyle: {
+        rich: {
+          num: {
+            fontSize: 28,
+            fontWeight: 700,
+            color: '#202E3F',
+            lineHeight: 34,
+            fontFamily: 'DIN Alternate, Segoe UI, sans-serif',
+          },
+          unit: {
+            fontSize: 12,
+            color: '#94a3b8',
+            lineHeight: 20,
+          },
+        },
+      },
+    },
     series: [
       {
         type: 'pie',
-        radius: ['40%', '70%'],
-        data: stats.value.rental_by_model.map((r) => ({
-          name: r.machine_model,
-          value: r.count,
-        })),
-        label: { formatter: '{b}\n{d}%' },
+        radius: ['48%', '72%'],
+        center: ['50%', '46%'],
+        padAngle: 2,
+        data: pieData,
+        label: {
+          formatter: '{d}%',
+          color: '#64748b',
+          fontSize: 11,
+        },
+        labelLine: {
+          length: 12,
+          length2: 8,
+          lineStyle: { color: '#cbd5e1' },
+        },
+        itemStyle: {
+          borderRadius: 6,
+          borderColor: '#fff',
+          borderWidth: 2,
+        },
+        emphasis: {
+          scale: true,
+          scaleSize: 6,
+          itemStyle: {
+            shadowBlur: 12,
+            shadowColor: 'rgba(37, 99, 235, 0.25)',
+          },
+        },
       },
     ],
+    animationDuration: 600,
+    animationEasing: 'cubicOut',
   })
 }
 
@@ -206,36 +470,99 @@ function initTrendChart() {
   trendChart?.dispose()
   trendChart = echarts.init(dom)
 
+  const primary = '#2563EB'
+  const danger = '#ef4444'
+
   trendChart.setOption({
-    title: {
-      text: '合同趋势（近12个月）',
-      left: 'center',
-      textStyle: { fontSize: 14 },
+    tooltip: {
+      ...tooltipStyle,
+      trigger: 'axis',
+      axisPointer: {
+        type: 'line',
+        lineStyle: { color: 'rgba(37, 99, 235, 0.35)', type: 'dashed' },
+      },
+      formatter: (params: any[]) => {
+        if (!params?.length) return ''
+        let html = `<div style="font-weight:600;margin-bottom:6px;">${params[0].axisValue}</div>`
+        params.forEach((p: any) => {
+          html += `<div style="display:flex;align-items:center;justify-content:space-between;gap:24px;margin-top:6px;">
+            <span style="display:inline-flex;align-items:center;gap:6px;">
+              <span style="width:8px;height:8px;border-radius:50%;background:${p.color};"></span>${p.seriesName}
+            </span>
+            <strong>${p.value}</strong>
+          </div>`
+        })
+        return html
+      },
     },
-    tooltip: { trigger: 'axis' },
-    legend: { data: ['新签', '到期'], bottom: 0 },
+    legend: {
+      data: ['新签', '到期'],
+      bottom: 0,
+      icon: 'roundRect',
+      itemWidth: 12,
+      itemHeight: 8,
+      itemGap: 20,
+      textStyle: { fontSize: 12, color: '#3F5573' },
+    },
+    grid: { left: '2%', right: '3%', bottom: '14%', top: '10%', containLabel: true },
     xAxis: {
       type: 'category',
+      boundaryGap: false,
       data: stats.value.contract_trend.map((r) => r.month.slice(0, 7)),
+      axisLine: { lineStyle: { color: '#e5e7eb' } },
+      axisTick: { show: false },
+      axisLabel: { color: '#64748b', fontSize: 11 },
     },
-    yAxis: { type: 'value', name: '个' },
+    yAxis: {
+      type: 'value',
+      name: '个',
+      minInterval: 1,
+      nameTextStyle: { color: '#94a3b8', fontSize: 11, padding: [0, 28, 0, 0] },
+      axisLine: { show: false },
+      axisTick: { show: false },
+      axisLabel: { color: '#94a3b8', fontSize: 11 },
+      splitLine: { lineStyle: { color: '#f1f5f9', type: 'dashed' } },
+    },
     series: [
       {
         name: '新签',
         type: 'line',
         data: stats.value.contract_trend.map((r) => r.created_count),
         smooth: true,
-        itemStyle: { color: '#67c23a' },
+        symbol: 'circle',
+        symbolSize: 7,
+        showSymbol: false,
+        lineStyle: { color: primary, width: 3 },
+        itemStyle: { color: primary, borderColor: '#fff', borderWidth: 2 },
+        emphasis: { focus: 'series', itemStyle: { borderWidth: 2 } },
+        areaStyle: {
+          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+            { offset: 0, color: 'rgba(37, 99, 235, 0.18)' },
+            { offset: 1, color: 'rgba(37, 99, 235, 0.02)' },
+          ]),
+        },
       },
       {
         name: '到期',
         type: 'line',
         data: stats.value.contract_trend.map((r) => r.expired_count),
         smooth: true,
-        itemStyle: { color: '#f56c6c' },
+        symbol: 'circle',
+        symbolSize: 7,
+        showSymbol: false,
+        lineStyle: { color: danger, width: 3 },
+        itemStyle: { color: danger, borderColor: '#fff', borderWidth: 2 },
+        emphasis: { focus: 'series', itemStyle: { borderWidth: 2 } },
+        areaStyle: {
+          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+            { offset: 0, color: 'rgba(239, 68, 68, 0.12)' },
+            { offset: 1, color: 'rgba(239, 68, 68, 0.02)' },
+          ]),
+        },
       },
     ],
-    grid: { left: '3%', right: '4%', bottom: '10%', containLabel: true },
+    animationDuration: 600,
+    animationEasing: 'cubicOut',
   })
 }
 

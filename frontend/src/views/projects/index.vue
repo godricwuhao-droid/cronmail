@@ -13,13 +13,13 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Download, FolderOpened, Operation as OperationIcon, Search, Top } from '@element-plus/icons-vue'
+import { Download, FolderOpened, Operation as OperationIcon, Refresh, RefreshLeft, Search, Top } from '@element-plus/icons-vue'
+import { confirmDelete } from '@/lib/confirm'
 import {
   deleteProjectContract,
   listProjectContracts,
   type ProjectContractItem,
   type ProjectContractListParams,
-  COMPANY_MAP,
   CONTRACT_TYPE_LABEL,
   CONTRACT_TYPE_TAG,
   type ContractType,
@@ -78,6 +78,18 @@ function handleSearch() {
     pagination.page = 1
     fetchList()
   }, 300)
+}
+
+const hasFilters = computed(() => !!searchText.value.trim())
+
+const emptyDescription = computed(() =>
+  hasFilters.value ? '未找到匹配合同' : '暂无合同',
+)
+
+function clearFilters() {
+  searchText.value = ''
+  pagination.page = 1
+  fetchList()
 }
 
 async function fetchList() {
@@ -189,6 +201,7 @@ function goPayments(row: ProjectContractItem) {
 }
 
 async function handleDelete(row: ProjectContractItem) {
+  if (!(await confirmDelete('确定删除该合同？'))) return
   try {
     await deleteProjectContract(row.id)
     ElMessage.success('合同已删除')
@@ -504,7 +517,6 @@ function getColumnProps(col: ColumnDef): ColumnProps {
     base.prop = 'name'
     base.label = '合同名称'
     base['min-width'] = 200
-    base['show-overflow-tooltip'] = true
   } else if (key === 'contract_no') {
     base.prop = 'contract_no'
     base.label = '合同编号'
@@ -526,6 +538,7 @@ function getColumnProps(col: ColumnDef): ColumnProps {
   } else if (key === 'amount') {
     base.label = '合同金额'
     base.width = 140
+    base.align = 'right'
   } else if (key === 'start_date') {
     base.prop = 'start_date'
     base.label = '开始日期'
@@ -633,76 +646,74 @@ onMounted(() => {
 
 <template>
   <div class="page-container">
-    <el-card shadow="never">
-      <template #header>
-        <div class="card-header">
-          <span class="title">
-            <el-icon><FolderOpened /></el-icon>
-            项目管理
-          </span>
-          <div class="header-actions">
-            <!-- 列自定义 -->
-            <el-popover
-              v-model:visible="popoverVisible"
-              placement="bottom-end"
-              :width="260"
-              trigger="click"
-              popper-class="project-contract-column-popover"
-            >
-              <template #reference>
-                <el-button :icon="OperationIcon" :disabled="loading">列设置</el-button>
-              </template>
-              <div class="column-popover-body">
-                <div class="column-popover-header">
-                  <span>拖拽调整顺序 · 勾选显示</span>
-                  <el-link type="primary" :underline="false" @click="resetColumns">重置默认</el-link>
-                </div>
-                <div class="column-list">
-                  <template v-for="(col, idx) in orderedColumns" :key="col.key">
-                    <div
-                      v-if="idx > 0 && isPinned(col.key) !== isPinned(orderedColumns[idx - 1]?.key || '')"
-                      class="column-divider"
-                    />
-                    <div
-                      class="column-item"
-                      :class="{
-                        'drag-over': dragOverKey === col.key && dragKey !== col.key,
-                        dragging: dragKey === col.key,
-                      }"
-                      draggable="true"
-                      @dragstart="onDragStart($event, col.key)"
-                      @dragover="onDragOver($event, col.key)"
-                      @dragleave="onDragLeave(col.key)"
-                      @drop="onDrop($event, col.key)"
-                      @dragend="onDragEnd"
-                    >
-                      <span class="drag-handle" aria-hidden="true">⠿</span>
-                      <el-button
-                        link
-                        class="pin-btn"
-                        :class="{ active: isPinned(col.key) }"
-                        @click="pinColumn(col.key)"
-                        :title="isPinned(col.key) ? '取消置顶' : '置顶到最前'"
-                      >
-                        <el-icon><Top /></el-icon>
-                      </el-button>
-                      <el-checkbox
-                        :model-value="vis(col.key)"
-                        :disabled="col.required"
-                        @change="toggleColumn(col.key)"
-                      >
-                        {{ col.title }}<span v-if="col.required" class="required-tip">（必选）</span>
-                      </el-checkbox>
-                    </div>
-                  </template>
-                </div>
+    <div class="page-panel">
+      <div class="card-header">
+        <span class="title">
+          <el-icon><FolderOpened /></el-icon>
+          项目管理
+        </span>
+        <div class="header-actions">
+          <!-- 列自定义 -->
+          <el-popover
+            v-model:visible="popoverVisible"
+            placement="bottom-end"
+            :width="260"
+            trigger="click"
+            popper-class="project-contract-column-popover"
+          >
+            <template #reference>
+              <el-button :icon="OperationIcon" :disabled="loading">列设置</el-button>
+            </template>
+            <div class="column-popover-body">
+              <div class="column-popover-header">
+                <span>拖拽调整顺序 · 勾选显示</span>
+                <el-link type="primary" :underline="false" @click="resetColumns">重置默认</el-link>
               </div>
-            </el-popover>
-            <el-button :icon="Download" @click="handleExport" :disabled="loading">导出</el-button>
-            <el-button type="primary" @click="goCreate">+ 新建合同</el-button>
-          </div>
+              <div class="column-list">
+                <template v-for="(col, idx) in orderedColumns" :key="col.key">
+                  <div
+                    v-if="idx > 0 && isPinned(col.key) !== isPinned(orderedColumns[idx - 1]?.key || '')"
+                    class="column-divider"
+                  />
+                  <div
+                    class="column-item"
+                    :class="{
+                      'drag-over': dragOverKey === col.key && dragKey !== col.key,
+                      dragging: dragKey === col.key,
+                    }"
+                    draggable="true"
+                    @dragstart="onDragStart($event, col.key)"
+                    @dragover="onDragOver($event, col.key)"
+                    @dragleave="onDragLeave(col.key)"
+                    @drop="onDrop($event, col.key)"
+                    @dragend="onDragEnd"
+                  >
+                    <span class="drag-handle" aria-hidden="true">⠿</span>
+                    <el-button
+                      link
+                      class="pin-btn"
+                      :class="{ active: isPinned(col.key) }"
+                      @click="pinColumn(col.key)"
+                      :title="isPinned(col.key) ? '取消置顶' : '置顶到最前'"
+                    >
+                      <el-icon><Top /></el-icon>
+                    </el-button>
+                    <el-checkbox
+                      :model-value="vis(col.key)"
+                      :disabled="col.required"
+                      @change="toggleColumn(col.key)"
+                    >
+                      {{ col.title }}<span v-if="col.required" class="required-tip">（必选）</span>
+                    </el-checkbox>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </el-popover>
+          <el-button :icon="Download" @click="handleExport" :disabled="loading">导出</el-button>
+          <el-button type="primary" @click="goCreate">+ 新建合同</el-button>
         </div>
-      </template>
+      </div>
 
       <!-- 公司切换 -->
       <div class="company-switch">
@@ -715,9 +726,6 @@ onMounted(() => {
             {{ opt.label }}
           </el-radio-button>
         </el-radio-group>
-        <span class="company-hint">
-          当前：{{ COMPANY_MAP[currentCompany] || currentCompany }}
-        </span>
       </div>
 
       <!-- 筛选栏 -->
@@ -734,7 +742,8 @@ onMounted(() => {
             <el-icon><Search /></el-icon>
           </template>
         </el-input>
-        <el-button @click="fetchList">刷新</el-button>
+        <el-button :icon="Refresh" :disabled="loading" @click="fetchList">刷新</el-button>
+        <el-button :icon="RefreshLeft" :disabled="!hasFilters" @click="clearFilters">重置</el-button>
       </div>
 
       <!-- 表格 -->
@@ -742,16 +751,21 @@ onMounted(() => {
         v-loading="loading"
         :data="list"
         row-key="id"
-        border
         stripe
         style="width: 100%"
-        empty-text="暂无合同"
       >
+        <template #empty>
+          <div class="table-empty">
+            <el-empty :description="emptyDescription" :image-size="72" />
+          </div>
+        </template>
         <!-- 动态列：按 orderedColumns 顺序渲染，只渲染可见的 -->
         <template v-for="col in orderedColumns" :key="col.key">
           <el-table-column v-if="vis(col.key)" v-bind="getColumnProps(col)">
             <template v-if="col.key === 'name'" #default="{ row }">
-              <span>{{ row.name }}</span>
+              <el-tooltip content="点击查看详情" placement="top" :show-after="300">
+                <span class="col-name-link" @click="goDetail(row)">{{ row.name }}</span>
+              </el-tooltip>
             </template>
             <template v-else-if="col.key === 'contract_type'" #default="{ row }">
               <el-tag
@@ -772,14 +786,14 @@ onMounted(() => {
               {{ row.party_b_name || '-' }}
             </template>
             <template v-else-if="col.key === 'amount'" #default="{ row }">
-              <span v-if="row.amount">¥{{ formatAmount(row.amount) }}</span>
+              <span v-if="row.amount" class="col-amount">¥{{ formatAmount(row.amount) }}</span>
               <span v-else class="muted">自动计算</span>
             </template>
             <template v-else-if="col.key === 'start_date'" #default="{ row }">
-              {{ formatDate(row.start_date) }}
+              <span class="col-time">{{ formatDate(row.start_date) }}</span>
             </template>
             <template v-else-if="col.key === 'end_date'" #default="{ row }">
-              {{ formatDate(row.end_date) }}
+              <span class="col-time">{{ formatDate(row.end_date) }}</span>
             </template>
             <template v-else-if="col.key === 'project_name'" #default="{ row }">
               {{ row.project_name || '-' }}
@@ -792,6 +806,7 @@ onMounted(() => {
             </template>
             <template v-else-if="col.key === 'attachment_status'" #default="{ row }">
               <el-popover
+                v-if="getCategoryGroups(getSummary(row)).length"
                 placement="bottom-start"
                 :width="360"
                 trigger="click"
@@ -830,6 +845,7 @@ onMounted(() => {
                   </div>
                 </div>
               </el-popover>
+              <span v-else class="muted">-</span>
             </template>
             <template v-else-if="col.key === 'payment_progress'" #default="{ row }">
               <el-progress
@@ -845,35 +861,47 @@ onMounted(() => {
               {{ row.remark || '-' }}
             </template>
             <template v-else-if="col.key === 'contract_content'" #default="{ row }">
-              <span v-if="row.contract_content" class="text-ellipsis">{{ row.contract_content }}</span>
+              <el-tooltip
+                v-if="row.contract_content"
+                :content="row.contract_content"
+                placement="top"
+                :show-after="300"
+              >
+                <span class="text-ellipsis">{{ row.contract_content }}</span>
+              </el-tooltip>
               <span v-else class="muted">-</span>
             </template>
             <template v-else-if="col.key === 'delivery_requirements'" #default="{ row }">
-              <span v-if="row.delivery_requirements" class="text-ellipsis">{{ row.delivery_requirements }}</span>
+              <el-tooltip
+                v-if="row.delivery_requirements"
+                :content="row.delivery_requirements"
+                placement="top"
+                :show-after="300"
+              >
+                <span class="text-ellipsis">{{ row.delivery_requirements }}</span>
+              </el-tooltip>
               <span v-else class="muted">-</span>
             </template>
             <template v-else-if="col.key === 'process_records'" #default="{ row }">
-              <span v-if="row.process_records" class="text-ellipsis">{{ row.process_records }}</span>
+              <el-tooltip
+                v-if="row.process_records"
+                :content="row.process_records"
+                placement="top"
+                :show-after="300"
+              >
+                <span class="text-ellipsis">{{ row.process_records }}</span>
+              </el-tooltip>
               <span v-else class="muted">-</span>
             </template>
             <template v-else-if="col.key === 'created_at'" #default="{ row }">
-              {{ formatDate(row.created_at) }}
+              <span class="col-time">{{ formatDate(row.created_at) }}</span>
             </template>
             <template v-else-if="col.key === 'actions'" #default="{ row }">
               <div class="action-buttons">
                 <el-button size="small" link type="primary" @click="goDetail(row)">详情</el-button>
                 <el-button size="small" link type="primary" @click="goEdit(row)">编辑</el-button>
                 <el-button size="small" link type="warning" @click="goPayments(row)">回款</el-button>
-                <el-popconfirm
-                  title="确定删除该合同？"
-                  confirm-button-text="删除"
-                  cancel-button-text="取消"
-                  @confirm="handleDelete(row)"
-                >
-                  <template #reference>
-                    <el-button size="small" link type="danger">删除</el-button>
-                  </template>
-                </el-popconfirm>
+                <el-button size="small" link type="danger" @click="handleDelete(row)">删除</el-button>
                 <el-button size="small" link type="primary" @click="goAttachments(row)">
                   附件
                 </el-button>
@@ -896,24 +924,16 @@ onMounted(() => {
           @size-change="handleSizeChange"
         />
       </div>
-    </el-card>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.card-header .title {
-  font-size: 16px;
-  font-weight: 600;
-}
 .header-actions {
   display: flex;
   gap: 8px;
   align-items: center;
+  flex-wrap: wrap;
 }
 
 .company-switch {
@@ -921,14 +941,7 @@ onMounted(() => {
   align-items: center;
   gap: 12px;
   margin-bottom: 16px;
-  padding: 10px 14px;
-  background: #fafbfc;
-  border: 1px solid #e4e7ed;
-  border-radius: 8px;
-}
-.company-hint {
-  font-size: 13px;
-  color: #909399;
+  flex-wrap: wrap;
 }
 
 .toolbar {
@@ -938,10 +951,40 @@ onMounted(() => {
   margin-bottom: 16px;
   flex-wrap: wrap;
 }
-.pagination {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 16px;
+.col-name-link {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+  color: var(--primary-color);
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.2s;
+}
+.col-name-link:hover {
+  color: var(--primary-hover);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.col-amount {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.col-time {
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.text-ellipsis {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
 }
 .action-buttons {
   display: flex;

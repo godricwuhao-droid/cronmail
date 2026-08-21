@@ -11,7 +11,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
-import { Document, Connection, User, Calendar } from '@element-plus/icons-vue'
+import { Document, Connection, InfoFilled, ArrowLeft } from '@element-plus/icons-vue'
 import {
   createContract,
   getContract,
@@ -28,6 +28,7 @@ import { getCustomers, type Customer } from '@/api/modules/customer'
 import { getContacts, type Contact } from '@/api/modules/contact'
 import { getRentals, type RentalListItem } from '@/api/modules/rental'
 import { CONTRACT_BILLING_MODEL_OPTIONS } from '@/lib/contract'
+import { safeStatusLabel as rentalStatusLabel, safeStatusTagType as rentalStatusTagType } from '@/lib/rental'
 
 const route = useRoute()
 const router = useRouter()
@@ -232,7 +233,7 @@ function buildLinkedDetails() {
           private_ip: r.private_ip || '',
           start_date: '',
           end_date: '',
-          status: '空闲中' as const,
+          status: (r.status as RentalListItem['status']) || '空闲中',
           created_at: '',
         })
         ids.delete(r.id)
@@ -298,23 +299,11 @@ async function handleConfirmLink() {
   }
 }
 
-// 勾选取消关联
-const selectedRentalIds = ref<string[]>([])
-
-function handleRentalSelect(selection: any[]) {
-  selectedRentalIds.value = selection.map((r: any) => r.id)
-}
-
-async function handleUnlinkRental() {
-  if (selectedRentalIds.value.length === 0) {
-    ElMessage.warning('请先勾选要取消关联的设备')
-    return
-  }
-  const ids = selectedRentalIds.value
-  form.rental_ids = form.rental_ids.filter((id) => !ids.includes(id))
-  selectedRentalIds.value = []
+// 表格行内取消关联
+function handleUnlinkRental(row: { id: string }) {
+  form.rental_ids = form.rental_ids.filter((id) => id !== row.id)
   buildLinkedDetails()
-  ElMessage.success(`已取消选择 ${ids.length} 台设备`)
+  ElMessage.success('已取消关联')
 }
 
 // ============================================================
@@ -479,11 +468,15 @@ async function handleSubmit() {
 }
 
 function cancel() {
-  if (isEdit.value && contractId.value) {
-    router.push({ name: 'ContractDetail', params: { id: contractId.value } })
+  if (window.history.state?.back != null) {
+    router.back()
   } else {
     router.push({ name: 'ContractList' })
   }
+}
+
+function goRental(id: string) {
+  router.push({ name: 'RentalDetail', params: { id } })
 }
 
 onMounted(async () => {
@@ -502,148 +495,224 @@ onMounted(async () => {
 
 <template>
   <div class="page-container" v-loading="loadingDetail">
-    <el-card shadow="never">
-      <template #header>
-        <div class="card-header">
-          <span class="title">
-            {{ isRenewal ? '续期合同' : (isEdit ? '编辑合同' : '新建合同') }}
-          </span>
-          <el-button link @click="cancel">返回</el-button>
-        </div>
-      </template>
+    <div class="top-bar">
+      <el-button @click="cancel">
+        <el-icon><ArrowLeft /></el-icon>
+        返回
+      </el-button>
+    </div>
+
+    <div class="page-panel">
+      <div class="card-header">
+        <span class="title">
+          <el-icon><Document /></el-icon>
+          {{ isRenewal ? '续期合同' : (isEdit ? '编辑合同' : '新建合同') }}
+        </span>
+      </div>
+
+      <div class="dialog-tip">
+        <el-icon><InfoFilled /></el-icon>
+        <span>
+          <template v-if="isRenewal">
+            基于原合同续期，已预填客户、设备与联系人，请确认起止日期后创建。
+          </template>
+          <template v-else-if="isEdit">
+            可更新合同信息、关联设备与联系人；客户不可修改。
+          </template>
+          <template v-else>
+            填写合同基础信息与服务周期，并可关联设备与收件人；创建后可在详情页继续管理。
+          </template>
+        </span>
+      </div>
 
       <el-form
         ref="formRef"
         :model="form"
         :rules="rules"
-        label-width="120px"
+        label-position="top"
+        class="contract-form"
         @submit.prevent
       >
         <!-- 基础信息 -->
-        <div class="section-title">
-          <el-icon><Document /></el-icon>
-          基础信息
+        <div class="dialog-section">
+          <div class="dialog-section-title">基础信息</div>
+          <el-row :gutter="16">
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="客户" prop="customer_id">
+                <el-select
+                  v-model="form.customer_id"
+                  placeholder="请选择客户"
+                  filterable
+                  style="width: 100%"
+                  :disabled="isEdit"
+                >
+                  <el-option
+                    v-for="c in customerOptions"
+                    :key="c.id"
+                    :label="c.name"
+                    :value="c.id"
+                  />
+                </el-select>
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="合同名称" prop="name">
+                <el-input
+                  v-model="form.name"
+                  placeholder="如 主合同-2026"
+                  maxlength="255"
+                  show-word-limit
+                />
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="合同编号" prop="contract_no">
+                <el-input
+                  v-model="form.contract_no"
+                  placeholder="可选，如 CT-2026-001"
+                  maxlength="100"
+                  show-word-limit
+                />
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="序号">
+                <el-input-number
+                  v-model="form.sort_order"
+                  :min="0"
+                  :step="1"
+                  placeholder="序号"
+                  style="width: 100%"
+                />
+              </el-form-item>
+            </el-col>
+            <el-col v-if="isEdit" :xs="24" :sm="12">
+              <el-form-item label="合同状态" prop="status">
+                <el-select v-model="form.status" placeholder="请选择状态" style="width: 100%">
+                  <el-option label="生效中" value="active" />
+                  <el-option label="临期" value="expiring" />
+                  <el-option label="已到期" value="expired" />
+                  <el-option label="已回收" value="reclaimed" />
+                </el-select>
+              </el-form-item>
+            </el-col>
+          </el-row>
         </div>
-        <el-form-item label="客户" prop="customer_id">
-          <el-select
-            v-model="form.customer_id"
-            placeholder="请选择客户"
-            filterable
-            style="width: 100%"
-            :disabled="isEdit"
-          >
-            <el-option
-              v-for="c in customerOptions"
-              :key="c.id"
-              :label="c.name"
-              :value="c.id"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="合同名称" prop="name">
-          <el-input v-model="form.name" placeholder="如 主合同-2026" maxlength="255" show-word-limit />
-        </el-form-item>
-        <el-form-item label="合同编号" prop="contract_no">
-          <el-input v-model="form.contract_no" placeholder="可选，如 CT-2026-001" maxlength="100" show-word-limit />
-        </el-form-item>
-        <el-form-item label="序号">
-          <el-input-number v-model="form.sort_order" :min="0" :step="1" placeholder="序号" />
-        </el-form-item>
-
-        <!-- 状态（仅编辑模式） -->
-        <el-form-item v-if="isEdit" label="合同状态" prop="status">
-          <el-select v-model="form.status" placeholder="请选择状态" style="width: 200px">
-            <el-option label="生效中" value="active" />
-            <el-option label="临期" value="expiring" />
-            <el-option label="已到期" value="expired" />
-            <el-option label="已回收" value="reclaimed" />
-          </el-select>
-        </el-form-item>
 
         <!-- 服务周期 -->
-        <div class="section-title">
-          <el-icon><Calendar /></el-icon>
-          服务周期
+        <div class="dialog-section">
+          <div class="dialog-section-title">服务周期</div>
+          <el-row :gutter="16">
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="开始日期" prop="start_date">
+                <el-date-picker
+                  v-model="form.start_date"
+                  type="date"
+                  value-format="YYYY-MM-DD"
+                  placeholder="选择开始日期"
+                  style="width: 100%"
+                />
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="到期日期" prop="end_date">
+                <el-date-picker
+                  v-model="form.end_date"
+                  type="date"
+                  value-format="YYYY-MM-DD"
+                  placeholder="选择到期日期"
+                  style="width: 100%"
+                />
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="计费方式">
+                <el-radio-group v-model="form.billing_model">
+                  <el-radio-button
+                    v-for="opt in CONTRACT_BILLING_MODEL_OPTIONS"
+                    :key="opt.value"
+                    :value="opt.value"
+                  >
+                    {{ opt.label }}
+                  </el-radio-button>
+                </el-radio-group>
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="合同金额">
+                <el-input-number
+                  v-model="form.amount"
+                  :precision="2"
+                  :min="0"
+                  :controls="false"
+                  placeholder="可选，单位元"
+                  style="width: 100%"
+                />
+              </el-form-item>
+            </el-col>
+          </el-row>
         </div>
-        <el-form-item label="开始日期" prop="start_date">
-          <el-date-picker
-            v-model="form.start_date"
-            type="date"
-            value-format="YYYY-MM-DD"
-            placeholder="选择开始日期"
-            style="width: 100%"
-          />
-        </el-form-item>
-        <el-form-item label="到期日期" prop="end_date">
-          <el-date-picker
-            v-model="form.end_date"
-            type="date"
-            value-format="YYYY-MM-DD"
-            placeholder="选择到期日期"
-            style="width: 100%"
-          />
-        </el-form-item>
-        <el-form-item label="计费方式">
-          <el-radio-group v-model="form.billing_model">
-            <el-radio-button
-              v-for="opt in CONTRACT_BILLING_MODEL_OPTIONS"
-              :key="opt.value"
-              :value="opt.value"
-            >
-              {{ opt.label }}
-            </el-radio-button>
-          </el-radio-group>
-        </el-form-item>
-        <el-form-item label="合同金额">
-          <el-input-number
-            v-model="form.amount"
-            :precision="2"
-            :min="0"
-            :controls="false"
-            placeholder="可选，单位元"
-            style="width: 100%"
-          />
-        </el-form-item>
 
         <!-- 关联设备 -->
-        <div class="section-title">
-          <el-icon><Connection /></el-icon>
-          关联设备
-        </div>
-        <div class="rental-section">
-          <div class="rental-toolbar">
-            <span class="rental-count">已选 {{ form.rental_ids.length }} 台</span>
-            <div class="rental-actions">
+        <div class="dialog-section">
+          <div class="section-toolbar">
+            <div class="dialog-section-title">
+              关联设备
+              <span class="muted">（已选 {{ form.rental_ids.length }} 台）</span>
+            </div>
+            <div class="section-actions">
               <el-button
                 type="primary"
                 :icon="Connection"
                 :disabled="!form.customer_id"
                 @click="openLinkDialog"
               >关联设备</el-button>
-              <el-button
-                type="danger"
-                plain
-                :disabled="selectedRentalIds.length === 0"
-                @click="handleUnlinkRental"
-              >
-                取消关联 ({{ selectedRentalIds.length }})
-              </el-button>
             </div>
           </div>
           <el-table
             :data="linkedRentalDetails"
-            size="small"
+            row-key="id"
             stripe
-            border
-            empty-text="尚未关联设备"
             style="width: 100%;"
-            @selection-change="handleRentalSelect"
           >
-            <el-table-column type="selection" width="50" />
-            <el-table-column prop="machine_model" label="机器型号" min-width="180" show-overflow-tooltip />
-            <el-table-column label="机架位置" min-width="140">
+            <template #empty>
+              <div class="table-empty table-empty--compact">
+                <el-empty description="尚未关联设备" :image-size="64" />
+              </div>
+            </template>
+            <el-table-column prop="machine_model" label="机器型号" min-width="200" show-overflow-tooltip>
               <template #default="{ row }">
-                {{ row.rack_location || '-' }}
+                <span
+                  v-if="row.machine_model"
+                  class="col-name-link"
+                  @click="goRental(row.id)"
+                >{{ row.machine_model }}</span>
+                <span v-else class="col-muted">-</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="机架位置" min-width="140" show-overflow-tooltip>
+              <template #default="{ row }">
+                <span v-if="row.rack_location">{{ row.rack_location }}</span>
+                <span v-else class="col-muted">-</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="状态" width="100" align="center">
+              <template #default="{ row }">
+                <el-tag size="small" :type="rentalStatusTagType(row.status)">
+                  {{ rentalStatusLabel(row.status) }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="110" fixed="right" align="center">
+              <template #default="{ row }">
+                <div class="action-buttons">
+                  <el-button
+                    size="small"
+                    link
+                    type="danger"
+                    @click="handleUnlinkRental(row)"
+                  >取消关联</el-button>
+                </div>
               </template>
             </el-table-column>
           </el-table>
@@ -654,167 +723,212 @@ onMounted(async () => {
           v-model="linkDialogVisible"
           title="关联设备到合同"
           width="560px"
+          destroy-on-close
           :close-on-click-modal="false"
+          class="create-dialog"
         >
-          <div v-if="candidateRentals.length === 0" class="hint">
-            暂无可关联的设备（所有设备已关联到此合同或无可用设备）
+          <div class="dialog-tip">
+            <el-icon><InfoFilled /></el-icon>
+            <span>从可用设备中多选关联到本合同；已关联设备不会出现在列表中。</span>
           </div>
-          <el-select
-            v-else
-            v-model="linkForm.selected"
-            multiple
-            filterable
-            collapse-tags
-            collapse-tags-tooltip
-            placeholder="选择要关联的设备"
-            style="width: 100%"
-          >
-            <el-option
-              v-for="r in candidateRentals"
-              :key="r.id"
-              :label="rentalLabel(r)"
-              :value="r.id"
-            />
-          </el-select>
+          <div class="dialog-section">
+            <div class="dialog-section-title">选择设备</div>
+            <div v-if="candidateRentals.length === 0" class="table-empty table-empty--compact">
+              <el-empty description="暂无可关联设备" :image-size="64" />
+            </div>
+            <el-form v-else label-position="top" @submit.prevent>
+              <el-form-item label="可用设备">
+                <el-select
+                  v-model="linkForm.selected"
+                  multiple
+                  filterable
+                  collapse-tags
+                  collapse-tags-tooltip
+                  placeholder="选择要关联的设备"
+                  style="width: 100%"
+                >
+                  <el-option
+                    v-for="r in candidateRentals"
+                    :key="r.id"
+                    :label="rentalLabel(r)"
+                    :value="r.id"
+                  />
+                </el-select>
+              </el-form-item>
+            </el-form>
+          </div>
           <template #footer>
-            <el-button @click="linkDialogVisible = false">取消</el-button>
-            <el-button
-              type="primary"
-              :loading="linkSubmitting"
-              :disabled="linkForm.selected.length === 0"
-              @click="handleConfirmLink"
-            >
-              关联（{{ linkForm.selected.length }}）
-            </el-button>
+            <div class="dialog-footer">
+              <el-button @click="linkDialogVisible = false">取消</el-button>
+              <el-button
+                type="primary"
+                :loading="linkSubmitting"
+                :disabled="linkForm.selected.length === 0"
+                @click="handleConfirmLink"
+              >
+                关联（{{ linkForm.selected.length }}）
+              </el-button>
+            </div>
           </template>
         </el-dialog>
 
         <!-- 关联联系人 -->
-        <div class="section-title">
-          <el-icon><User /></el-icon>
-          关联联系人
+        <div class="dialog-section">
+          <div class="dialog-section-title">关联联系人</div>
+          <el-row :gutter="16">
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="收件人 (TO)">
+                <div v-if="!form.customer_id" class="hint">请先选择客户</div>
+                <div v-else-if="allContactOptions.length === 0" class="hint">
+                  暂无可用联系人，请先到【客户管理 → 联系人】或【系统配置 → 内部同事】添加
+                </div>
+                <el-select
+                  v-else
+                  v-model="toContactIds"
+                  multiple
+                  collapse-tags
+                  collapse-tags-tooltip
+                  filterable
+                  clearable
+                  placeholder="选择收件人（含内部同事）"
+                  style="width: 100%"
+                >
+                  <el-option
+                    v-for="c in allContactOptions"
+                    :key="c.id"
+                    :label="`${c.name} (${c.email})${c.customer_id ? '' : ' · 内部'}`"
+                    :value="c.id"
+                  />
+                </el-select>
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="抄送人 (CC)">
+                <div v-if="!form.customer_id" class="hint">请先选择客户</div>
+                <div v-else-if="allContactOptions.length === 0" class="hint">
+                  暂无可用联系人
+                </div>
+                <el-select
+                  v-else
+                  v-model="ccContactIds"
+                  multiple
+                  collapse-tags
+                  collapse-tags-tooltip
+                  filterable
+                  clearable
+                  placeholder="选择抄送人（含内部同事）"
+                  style="width: 100%"
+                >
+                  <el-option
+                    v-for="c in allContactOptions"
+                    :key="c.id"
+                    :label="`${c.name} (${c.email})${c.customer_id ? '' : ' · 内部'}`"
+                    :value="c.id"
+                  />
+                </el-select>
+              </el-form-item>
+            </el-col>
+          </el-row>
         </div>
-        <el-form-item label="收件人 (TO)">
-          <div v-if="!form.customer_id" class="hint">请先选择客户</div>
-          <div v-else-if="allContactOptions.length === 0" class="hint">
-            暂无可用联系人，请先到【客户管理 → 联系人】或【系统配置 → 内部同事】添加
-          </div>
-          <el-select
-            v-else
-            v-model="toContactIds"
-            multiple
-            collapse-tags
-            collapse-tags-tooltip
-            filterable
-            clearable
-            placeholder="选择收件人（含内部同事）"
-            style="width: 100%"
-          >
-            <el-option
-              v-for="c in allContactOptions"
-              :key="c.id"
-              :label="`${c.name} (${c.email})${c.customer_id ? '' : ' · 内部'}`"
-              :value="c.id"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="抄送人 (CC)">
-          <div v-if="!form.customer_id" class="hint">请先选择客户</div>
-          <div v-else-if="allContactOptions.length === 0" class="hint">
-            暂无可用联系人
-          </div>
-          <el-select
-            v-else
-            v-model="ccContactIds"
-            multiple
-            collapse-tags
-            collapse-tags-tooltip
-            filterable
-            clearable
-            placeholder="选择抄送人（含内部同事）"
-            style="width: 100%"
-          >
-            <el-option
-              v-for="c in allContactOptions"
-              :key="c.id"
-              :label="`${c.name} (${c.email})${c.customer_id ? '' : ' · 内部'}`"
-              :value="c.id"
-            />
-          </el-select>
-        </el-form-item>
 
         <!-- 备注 -->
-        <el-form-item label="备注" style="margin-top: 8px;">
-          <el-input
-            v-model="form.remark"
-            type="textarea"
-            :rows="3"
-            placeholder="可选"
-            maxlength="500"
-            show-word-limit
-          />
-        </el-form-item>
+        <div class="dialog-section">
+          <div class="dialog-section-title">备注</div>
+          <el-form-item>
+            <el-input
+              v-model="form.remark"
+              type="textarea"
+              :rows="3"
+              placeholder="可选"
+              maxlength="500"
+              show-word-limit
+            />
+          </el-form-item>
+        </div>
       </el-form>
 
       <div class="form-actions">
         <el-button @click="cancel">取消</el-button>
-        <div class="spacer" />
         <el-button type="primary" :loading="submitting" @click="handleSubmit">
           {{ isEdit ? '保存' : '创建' }}
         </el-button>
       </div>
-    </el-card>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.section-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text-primary);
-  margin: 18px 0 12px;
-  padding-left: 10px;
-  border-left: 3px solid var(--primary-color);
-  display: flex;
-  align-items: center;
-  gap: 6px;
+.top-bar {
+  margin-bottom: 0;
 }
-.section-title .el-icon {
-  color: var(--primary-color);
-  font-size: 16px;
+.contract-form :deep(.el-form-item__label) {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+.contract-form :deep(.el-form-item) {
+  margin-bottom: 16px;
 }
 .hint {
-  color: #909399;
+  color: var(--text-secondary);
   font-size: 13px;
-  padding: 8px 0;
+  padding: 4px 0;
+  line-height: 1.5;
 }
 .form-actions {
   display: flex;
+  justify-content: flex-end;
   align-items: center;
-  margin-top: 24px;
+  gap: 8px;
+  margin-top: 8px;
   padding-top: 16px;
-  border-top: 1px solid #ebeef5;
+  border-top: 1px solid #e5e7eb;
 }
-.spacer {
-  flex: 1;
-}
-.rental-section {
-  margin-bottom: 12px;
-}
-.rental-toolbar {
+.section-toolbar {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 10px;
+  gap: 12px;
   flex-wrap: wrap;
-  gap: 8px;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #e5e7eb;
 }
-.rental-count {
-  font-size: 13px;
-  color: #909399;
+.section-toolbar .dialog-section-title {
+  margin: 0;
+  padding-top: 0;
+  padding-right: 0;
+  padding-bottom: 0;
+  border-bottom: none;
 }
-.rental-actions {
+.section-actions {
   display: flex;
   gap: 8px;
+  flex-wrap: wrap;
+}
+.muted {
+  color: var(--text-secondary);
+  font-size: 12px;
+  margin-left: 4px;
+  font-weight: 400;
+  opacity: 0.85;
+}
+.col-muted {
+  color: #c0c4cc;
+}
+.col-name-link {
+  color: var(--primary-color);
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.2s;
+}
+.col-name-link:hover {
+  color: var(--primary-hover);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.action-buttons {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
 }
 </style>

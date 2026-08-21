@@ -12,7 +12,8 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Document, Download, Operation as OperationIcon, Search, Top } from '@element-plus/icons-vue'
+import { Document, Download, Operation as OperationIcon, Refresh, RefreshLeft, Search, Top } from '@element-plus/icons-vue'
+import { confirmDelete } from '@/lib/confirm'
 import {
   deleteContract,
   listContracts,
@@ -77,6 +78,22 @@ function handleFilterChange() {
   fetchList()
 }
 
+const hasFilters = computed(
+  () => !!(searchText.value.trim() || statusFilter.value || customerFilter.value),
+)
+
+const emptyDescription = computed(() =>
+  hasFilters.value ? '未找到匹配合同' : '暂无合同',
+)
+
+function clearFilters() {
+  searchText.value = ''
+  statusFilter.value = ''
+  customerFilter.value = ''
+  pagination.page = 1
+  fetchList()
+}
+
 async function fetchList() {
   loading.value = true
   try {
@@ -134,6 +151,11 @@ function goEdit(row: ContractItem) {
 
 function goCreate() {
   router.push({ name: 'ContractCreate' })
+}
+
+async function handleDeleteConfirm(row: ContractItem) {
+  if (!(await confirmDelete('确定删除该合同？关联设备不会被删除。'))) return
+  await handleDelete(row)
 }
 
 async function handleDelete(row: ContractItem) {
@@ -457,7 +479,6 @@ function getColumnProps(col: ColumnDef): ColumnProps {
     base.prop = 'name'
     base.label = '合同名称'
     base['min-width'] = 200
-    base['show-overflow-tooltip'] = true
   } else if (key === 'customer_name') {
     base.prop = 'customer_name'
     base.label = '客户'
@@ -514,7 +535,7 @@ function getColumnProps(col: ColumnDef): ColumnProps {
     base.width = 140
   } else if (key === 'actions') {
     base.label = '操作'
-    base.width = 260
+    base.width = 300
     base.fixed = 'right'
   }
 
@@ -553,76 +574,74 @@ onMounted(() => {
 
 <template>
   <div class="page-container">
-    <el-card shadow="never">
-      <template #header>
-        <div class="card-header">
-          <span class="title">
-            <el-icon><Document /></el-icon>
-            算力租赁合同
-          </span>
-          <div class="header-actions">
-            <!-- 列自定义：支持拖拽排序 + 置顶 + 勾选显示 -->
-            <el-popover
-              v-model:visible="popoverVisible"
-              placement="bottom-end"
-              :width="260"
-              trigger="click"
-              popper-class="contract-column-popover"
-            >
-              <template #reference>
-                <el-button :icon="OperationIcon" :disabled="loading">列设置</el-button>
-              </template>
-              <div class="column-popover-body">
-                <div class="column-popover-header">
-                  <span>拖拽调整顺序 · 勾选显示</span>
-                  <el-link type="primary" :underline="false" @click="resetColumns">重置默认</el-link>
-                </div>
-                <div class="column-list">
-                  <template v-for="(col, idx) in orderedColumns" :key="col.key">
-                    <div
-                      v-if="idx > 0 && isPinned(col.key) !== isPinned(orderedColumns[idx - 1]?.key || '')"
-                      class="column-divider"
-                    />
-                    <div
-                      class="column-item"
-                      :class="{
-                        'drag-over': dragOverKey === col.key && dragKey !== col.key,
-                        dragging: dragKey === col.key,
-                      }"
-                      draggable="true"
-                      @dragstart="onDragStart($event, col.key)"
-                      @dragover="onDragOver($event, col.key)"
-                      @dragleave="onDragLeave(col.key)"
-                      @drop="onDrop($event, col.key)"
-                      @dragend="onDragEnd"
-                    >
-                      <span class="drag-handle" aria-hidden="true">⠿</span>
-                      <el-button
-                        link
-                        class="pin-btn"
-                        :class="{ active: isPinned(col.key) }"
-                        @click="pinColumn(col.key)"
-                        :title="isPinned(col.key) ? '取消置顶' : '置顶到最前'"
-                      >
-                        <el-icon><Top /></el-icon>
-                      </el-button>
-                      <el-checkbox
-                        :model-value="vis(col.key)"
-                        :disabled="col.required"
-                        @change="toggleColumn(col.key)"
-                      >
-                        {{ col.title }}<span v-if="col.required" class="required-tip">（必选）</span>
-                      </el-checkbox>
-                    </div>
-                  </template>
-                </div>
+    <div class="page-panel">
+      <div class="card-header">
+        <span class="title">
+          <el-icon><Document /></el-icon>
+          算力租赁合同
+        </span>
+        <div class="header-actions">
+          <!-- 列自定义：支持拖拽排序 + 置顶 + 勾选显示 -->
+          <el-popover
+            v-model:visible="popoverVisible"
+            placement="bottom-end"
+            :width="260"
+            trigger="click"
+            popper-class="contract-column-popover"
+          >
+            <template #reference>
+              <el-button :icon="OperationIcon" :disabled="loading">列设置</el-button>
+            </template>
+            <div class="column-popover-body">
+              <div class="column-popover-header">
+                <span>拖拽调整顺序 · 勾选显示</span>
+                <el-link type="primary" :underline="false" @click="resetColumns">重置默认</el-link>
               </div>
-            </el-popover>
-            <el-button :icon="Download" @click="handleExport" :disabled="loading">导出</el-button>
-            <el-button type="primary" @click="goCreate">+ 新建合同</el-button>
-          </div>
+              <div class="column-list">
+                <template v-for="(col, idx) in orderedColumns" :key="col.key">
+                  <div
+                    v-if="idx > 0 && isPinned(col.key) !== isPinned(orderedColumns[idx - 1]?.key || '')"
+                    class="column-divider"
+                  />
+                  <div
+                    class="column-item"
+                    :class="{
+                      'drag-over': dragOverKey === col.key && dragKey !== col.key,
+                      dragging: dragKey === col.key,
+                    }"
+                    draggable="true"
+                    @dragstart="onDragStart($event, col.key)"
+                    @dragover="onDragOver($event, col.key)"
+                    @dragleave="onDragLeave(col.key)"
+                    @drop="onDrop($event, col.key)"
+                    @dragend="onDragEnd"
+                  >
+                    <span class="drag-handle" aria-hidden="true">⠿</span>
+                    <el-button
+                      link
+                      class="pin-btn"
+                      :class="{ active: isPinned(col.key) }"
+                      @click="pinColumn(col.key)"
+                      :title="isPinned(col.key) ? '取消置顶' : '置顶到最前'"
+                    >
+                      <el-icon><Top /></el-icon>
+                    </el-button>
+                    <el-checkbox
+                      :model-value="vis(col.key)"
+                      :disabled="col.required"
+                      @change="toggleColumn(col.key)"
+                    >
+                      {{ col.title }}<span v-if="col.required" class="required-tip">（必选）</span>
+                    </el-checkbox>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </el-popover>
+          <el-button :icon="Download" @click="handleExport" :disabled="loading">导出</el-button>
+          <el-button type="primary" @click="goCreate">+ 新建合同</el-button>
         </div>
-      </template>
+      </div>
 
       <!-- 筛选栏 -->
       <div class="toolbar">
@@ -665,7 +684,8 @@ onMounted(() => {
             <el-icon><Search /></el-icon>
           </template>
         </el-input>
-        <el-button @click="fetchList">刷新</el-button>
+        <el-button :icon="Refresh" :disabled="loading" @click="fetchList">刷新</el-button>
+        <el-button :icon="RefreshLeft" :disabled="!hasFilters" @click="clearFilters">重置</el-button>
       </div>
 
       <!-- 表格 -->
@@ -673,16 +693,23 @@ onMounted(() => {
         v-loading="loading"
         :data="list"
         row-key="id"
-        border
         stripe
         style="width: 100%"
-        empty-text="暂无合同"
       >
+        <template #empty>
+          <div class="table-empty">
+            <el-empty :description="emptyDescription" :image-size="72" />
+          </div>
+        </template>
         <!-- 动态列：按 orderedColumns 顺序渲染，只渲染可见的 -->
         <template v-for="col in orderedColumns" :key="col.key">
           <el-table-column v-if="vis(col.key)" v-bind="getColumnProps(col)">
             <template v-if="col.key === 'name'" #default="{ row }">
-              <span>{{ row.name }}{{ row.renewal_seq > 0 ? `(续${row.renewal_seq})` : '' }}</span>
+              <el-tooltip content="点击查看详情" placement="top" :show-after="300">
+                <span class="col-name-link" @click="goDetail(row)">
+                  {{ row.name }}{{ row.renewal_seq > 0 ? `(续${row.renewal_seq})` : '' }}
+                </span>
+              </el-tooltip>
             </template>
             <template v-else-if="col.key === 'sort_order'" #default="{ row }">
               {{ row.sort_order ?? 0 }}
@@ -727,17 +754,11 @@ onMounted(() => {
             <template v-else-if="col.key === 'actions'" #default="{ row }">
               <div class="action-buttons">
                 <el-button size="small" link type="primary" @click="goDetail(row)">详情</el-button>
+                <el-divider direction="vertical" />
                 <el-button size="small" link type="primary" @click="goEdit(row)">编辑</el-button>
-                <el-popconfirm
-                  title="确定删除该合同？关联设备不会被删除"
-                  confirm-button-text="删除"
-                  cancel-button-text="取消"
-                  @confirm="handleDelete(row)"
-                >
-                  <template #reference>
-                    <el-button size="small" link type="danger">删除</el-button>
-                  </template>
-                </el-popconfirm>
+                <el-divider direction="vertical" />
+                <el-button size="small" link type="danger" @click="handleDeleteConfirm(row)">删除</el-button>
+                <el-divider direction="vertical" />
                 <el-button size="small" link type="primary" @click="goAttachments(row)">
                   附件
                 </el-button>
@@ -753,7 +774,7 @@ onMounted(() => {
                   content="续期合同"
                   placement="top"
                 >
-                  <span class="renewal-indicator" style="color: #409eff">🔗</span>
+                  <span class="renewal-indicator renewal-indicator--link">🔗</span>
                 </el-tooltip>
               </div>
             </template>
@@ -774,7 +795,7 @@ onMounted(() => {
           @size-change="handleSizeChange"
         />
       </div>
-    </el-card>
+    </div>
   </div>
 </template>
 
@@ -783,15 +804,25 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
 }
 .card-header .title {
   font-size: 16px;
   font-weight: 600;
+  color: var(--text-primary);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.card-header .title .el-icon {
+  color: var(--primary-color);
+  font-size: 18px;
 }
 .header-actions {
   display: flex;
   gap: 8px;
   align-items: center;
+  flex-wrap: wrap;
 }
 .toolbar {
   display: flex;
@@ -800,10 +831,22 @@ onMounted(() => {
   margin-bottom: 16px;
   flex-wrap: wrap;
 }
-.pagination {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 16px;
+.col-name-link {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+  color: var(--primary-color);
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.2s;
+}
+.col-name-link:hover {
+  color: var(--primary-hover);
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 .status-dot {
   display: inline-block;
@@ -814,15 +857,25 @@ onMounted(() => {
   cursor: default;
 }
 .action-buttons {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 2px;
   white-space: nowrap;
+}
+.action-buttons :deep(.el-button + .el-button) {
+  margin-left: 0;
+}
+.action-buttons :deep(.el-divider--vertical) {
+  margin: 0 8px;
+  height: 12px;
+  border-color: #e5e7eb;
 }
 .renewal-indicator {
   font-size: 14px;
   cursor: default;
-  margin-left: 2px;
+  margin-left: 6px;
+}
+.renewal-indicator--link {
+  color: var(--primary-color);
 }
 </style>
 

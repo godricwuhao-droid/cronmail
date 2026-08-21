@@ -6,8 +6,9 @@
  */
 import { onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { ArrowLeft, Document, Paperclip } from '@element-plus/icons-vue'
+import { confirmDelete } from '@/lib/confirm'
 import {
   deleteSatelliteContract,
   getSatelliteContract,
@@ -65,15 +66,7 @@ function goAttachments() {
 
 async function handleDelete() {
   if (!record.value?.id) return
-  try {
-    await ElMessageBox.confirm('确认删除该合同？', '删除确认', {
-      type: 'warning',
-      confirmButtonText: '删除',
-      cancelButtonText: '取消',
-    })
-  } catch {
-    return
-  }
+  if (!(await confirmDelete('确认删除该合同？'))) return
   try {
     await deleteSatelliteContract(record.value.id)
     ElMessage.success('合同已删除')
@@ -109,10 +102,10 @@ onMounted(() => {
 
 <template>
   <div class="page-container" v-loading="loading">
-    <!-- 顶部返回 -->
-    <div style="margin-bottom: 16px;">
+    <div class="top-bar">
       <el-button @click="goBack">
-        <el-icon><ArrowLeft /></el-icon> 返回列表
+        <el-icon><ArrowLeft /></el-icon>
+        返回
       </el-button>
     </div>
 
@@ -128,21 +121,20 @@ onMounted(() => {
         <el-button :icon="Document" @click="handleEdit">编辑</el-button>
         <el-button type="danger" @click="handleDelete">删除</el-button>
         <el-button type="primary" @click="goAttachments">
-          <el-icon style="margin-right:4px"><Paperclip /></el-icon>附件管理
+          <el-icon class="btn-icon"><Paperclip /></el-icon>附件管理
         </el-button>
       </div>
     </div>
 
     <!-- 基本信息 -->
     <section class="detail-section">
-      <h3 class="section-title">合同信息</h3>
+      <div class="dialog-section-title">合同信息</div>
       <el-descriptions :column="3" border>
         <el-descriptions-item label="合同名称">{{ record?.name || '-' }}</el-descriptions-item>
         <el-descriptions-item label="客户">{{ record?.customer_name || '-' }}</el-descriptions-item>
         <el-descriptions-item label="合同编号">
           {{ record?.contract_no || '-' }}
         </el-descriptions-item>
-        <!-- ADR-013 新增字段 -->
         <el-descriptions-item label="合同类型">
           {{ record?.contract_type || '-' }}
         </el-descriptions-item>
@@ -192,39 +184,43 @@ onMounted(() => {
 
     <!-- 附件状态 -->
     <section class="detail-section">
-      <h3 class="section-title">附件状态</h3>
+      <div class="section-toolbar">
+        <div class="dialog-section-title">附件状态</div>
+        <div class="section-actions">
+          <el-button type="primary" size="small" @click="goAttachments">
+            <el-icon class="btn-icon"><Paperclip /></el-icon>附件管理
+          </el-button>
+        </div>
+      </div>
       <div class="attachment-status-grid">
-        <el-card
+        <div
           v-for="(label, code) in categoryLabels"
           :key="code"
-          shadow="hover"
           class="status-card"
         >
-          <template #header>
-            <div class="status-card-header">
-              <span>{{ label }}</span>
-              <el-tag
-                :type="statusTagType(
-                  summary?.items?.[code]?.confirmed ?? false,
-                  summary?.items?.[code]?.file_count ?? 0
-                )"
-                size="small"
-              >
-                {{ statusText(
-                  summary?.items?.[code]?.confirmed ?? false,
-                  summary?.items?.[code]?.file_count ?? 0
-                ) }}
-              </el-tag>
-            </div>
-          </template>
+          <div class="status-card-header">
+            <span>{{ label }}</span>
+            <el-tag
+              :type="statusTagType(
+                summary?.items?.[code]?.confirmed ?? false,
+                summary?.items?.[code]?.file_count ?? 0
+              )"
+              size="small"
+            >
+              {{ statusText(
+                summary?.items?.[code]?.confirmed ?? false,
+                summary?.items?.[code]?.file_count ?? 0
+              ) }}
+            </el-tag>
+          </div>
           <div class="status-card-body">
             <span class="status-stat">
               <strong>{{ summary?.items?.[code]?.file_count ?? 0 }}</strong> 个文件
             </span>
           </div>
-        </el-card>
+        </div>
       </div>
-      <div style="margin-top: 12px;">
+      <div class="attachment-summary">
         <span class="muted">
           总计：{{ summary?.confirmed_items ?? 0 }} / {{ summary?.total_items ?? 0 }} 项已确认
         </span>
@@ -232,7 +228,6 @@ onMounted(() => {
           v-if="summary?.all_confirmed"
           type="success"
           size="small"
-          style="margin-left: 8px;"
         >
           全部完成
         </el-tag>
@@ -242,28 +237,30 @@ onMounted(() => {
 </template>
 
 <style scoped>
+.top-bar {
+  margin-bottom: 0;
+}
+
 .detail-header {
-  background: #fff;
-  border-radius: 8px;
-  padding: 20px 24px;
-  margin-bottom: 16px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  padding: 20px;
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
   flex-wrap: wrap;
   gap: 12px;
+  border-radius: 8px;
 }
 .header-title {
   margin: 0 0 8px 0;
-  font-size: 22px;
+  font-size: 20px;
   font-weight: 600;
   color: var(--text-primary);
+  line-height: 1.3;
 }
 .header-sub {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   color: var(--text-secondary);
   font-size: 14px;
 }
@@ -271,35 +268,86 @@ onMounted(() => {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.btn-icon {
+  margin-right: 4px;
 }
 
 .detail-section {
-  background: #fff;
+  padding: 20px;
   border-radius: 8px;
-  padding: 20px 24px;
-  margin-bottom: 16px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+.detail-section > .dialog-section-title {
+  margin-bottom: 12px;
+}
+
+.section-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #e5e7eb;
+}
+.section-toolbar .dialog-section-title {
+  margin: 0;
+  padding-top: 0;
+  padding-right: 0;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+.section-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.muted {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 400;
+  opacity: 0.85;
 }
 
 .attachment-status-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 16px;
+  gap: 12px;
 }
 .status-card {
+  background: #f8fafc;
   border-radius: 8px;
+  padding: 14px 16px;
 }
 .status-card-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 8px;
   font-weight: 600;
+  font-size: 13px;
+  color: var(--text-primary);
+  margin-bottom: 8px;
 }
 .status-card-body {
-  padding: 8px 0;
+  padding: 0;
 }
 .status-stat {
-  font-size: 14px;
+  font-size: 13px;
   color: var(--text-secondary);
+}
+.status-stat strong {
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.attachment-summary {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 </style>

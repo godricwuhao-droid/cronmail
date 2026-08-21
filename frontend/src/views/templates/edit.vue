@@ -10,12 +10,14 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, type FormInstance } from 'element-plus'
 import {
-  EditPen,
-  Document,
+  ArrowLeft,
   DataAnalysis,
-  View,
+  Document,
+  EditPen,
+  InfoFilled,
   Postcard,
   Promotion,
+  View,
 } from '@element-plus/icons-vue'
 import * as monaco from 'monaco-editor'
 // 配置 monaco worker（Vite 友好做法）
@@ -615,87 +617,96 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="page-container" v-loading="loadingDetail">
-    <el-card shadow="never">
-      <template #header>
-        <div class="card-header">
-          <span class="title">
-            <el-icon><EditPen /></el-icon>
-            {{ isEdit ? '编辑邮件模板' : '新建邮件模板' }}
-          </span>
-          <el-button link @click="goBack">返回</el-button>
-        </div>
-      </template>
+    <div class="top-bar">
+      <el-button @click="goBack">
+        <el-icon><ArrowLeft /></el-icon>
+        返回
+      </el-button>
+    </div>
+
+    <div class="page-panel">
+      <div class="card-header">
+        <span class="title">
+          <el-icon><EditPen /></el-icon>
+          {{ isEdit ? '编辑邮件模板' : '新建邮件模板' }}
+        </span>
+      </div>
+
+      <div class="dialog-tip">
+        <el-icon><InfoFilled /></el-icon>
+        <span>
+          主题与正文支持 <code v-pre>{{ variable }}</code> 变量；右侧预览会随编辑防抖刷新。同触发类型仅可启用一个模板。
+        </span>
+      </div>
 
       <!-- 顶部元数据 -->
       <el-form
         ref="formRef"
         :model="form"
-        label-width="100px"
+        label-position="top"
         class="meta-form"
         @submit.prevent
       >
-        <el-row :gutter="16">
-          <el-col :span="10">
-            <el-form-item label="模板名称">
-              <el-input v-model="form.name" placeholder="如 资源开通通知" maxlength="100" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="8">
-            <el-form-item label="触发类型">
-              <el-select v-model="form.trigger_type" style="width: 100%">
-                <el-option
-                  v-for="opt in TRIGGER_OPTIONS"
-                  :key="opt.value"
-                  :label="opt.label"
-                  :value="opt.value"
+        <div class="dialog-section">
+          <div class="dialog-section-title">基础信息</div>
+          <el-row :gutter="16">
+            <el-col :xs="24" :sm="10">
+              <el-form-item label="模板名称">
+                <el-input v-model="form.name" placeholder="如 资源开通通知" maxlength="100" />
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="8">
+              <el-form-item label="触发类型">
+                <el-select v-model="form.trigger_type" style="width: 100%">
+                  <el-option
+                    v-for="opt in TRIGGER_OPTIONS"
+                    :key="opt.value"
+                    :label="opt.label"
+                    :value="opt.value"
+                  />
+                </el-select>
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="6">
+              <el-form-item label="启用状态">
+                <el-switch
+                  v-model="form.is_active"
+                  active-text="启用"
+                  inactive-text="停用"
+                  inline-prompt
                 />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :span="6">
-            <el-form-item label="启用状态">
-              <el-switch
-                v-model="form.is_active"
-                active-text="启用"
-                inactive-text="停用"
-                inline-prompt
-              />
-            </el-form-item>
-          </el-col>
-        </el-row>
-        <el-form-item label="主题模板">
-          <el-input
-            v-model="form.subject_tpl"
-            placeholder="支持 {{ variable }} 变量"
-            maxlength="200"
-            show-word-limit
-          />
-        </el-form-item>
+              </el-form-item>
+            </el-col>
+            <el-col :span="24">
+              <el-form-item label="主题模板">
+                <el-input
+                  v-model="form.subject_tpl"
+                  placeholder="支持 {{ variable }} 变量"
+                  maxlength="200"
+                  show-word-limit
+                />
+              </el-form-item>
+            </el-col>
+          </el-row>
+        </div>
       </el-form>
 
       <!-- 左右分栏：编辑器 + 预览 -->
       <div class="editor-layout">
         <!-- 左侧 -->
         <div class="editor-pane">
-          <div class="pane-title">
+          <div class="dialog-section-title">
             <el-icon><Document /></el-icon>
             正文模板 (HTML + Jinja2 变量)
           </div>
           <div ref="editorContainer" class="monaco-container"></div>
 
-          <div class="pane-title" style="margin-top: 16px">
+          <div class="dialog-section-title signature-title">
             <el-icon><Postcard /></el-icon>
-            邮件签名（HTML，渲染时自动拼接在正文末尾）
+            邮件签名
           </div>
-          <el-card shadow="never" class="signature-card">
-            <template #header>
-              <div class="signature-card-header">
-                <span style="font-weight: 600;">邮件签名</span>
-                <span style="font-size: 12px; color: #9ca3af; margin-left: 8px;">
-                  支持从 Outlook / 网页邮箱粘贴签名（含图片和格式）
-                </span>
-              </div>
-            </template>
+          <div class="signature-panel">
+            <div class="signature-hint">支持从 Outlook / 网页邮箱粘贴签名（含图片和格式）；渲染时自动拼接到正文末尾</div>
             <div
               ref="signatureEditorRef"
               contenteditable="true"
@@ -703,9 +714,9 @@ onBeforeUnmount(() => {
               @input="onSignatureInput"
               @paste="onSignaturePaste"
             ></div>
-          </el-card>
+          </div>
 
-          <div class="pane-title" style="margin-top: 16px">
+          <div class="dialog-section-title signature-title">
             <el-icon><DataAnalysis /></el-icon>
             示例数据 (JSON)
           </div>
@@ -728,7 +739,7 @@ onBeforeUnmount(() => {
 
         <!-- 右侧 -->
         <div class="preview-pane">
-          <div class="pane-title">
+          <div class="dialog-section-title">
             <el-icon><View /></el-icon>
             实时预览
             <span v-if="previewLoading" class="preview-loading">渲染中…</span>
@@ -740,14 +751,12 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <!-- 变量参考（编辑器/预览区下方） -->
-      <el-card shadow="never" class="variable-card">
-        <template #header>
-          <div class="variable-card-header">
-            <span style="font-weight: 600;">可用模板变量</span>
-            <el-tag size="small" type="info">自动同步后端字段</el-tag>
-          </div>
-        </template>
+      <!-- 变量参考 -->
+      <div class="dialog-section variable-section">
+        <div class="section-toolbar">
+          <div class="dialog-section-title">可用模板变量</div>
+          <el-tag size="small" type="info">自动同步后端字段 · 点击插入</el-tag>
+        </div>
         <div v-if="availableVariables.length === 0" class="variable-empty">
           暂无可用变量
         </div>
@@ -764,10 +773,10 @@ onBeforeUnmount(() => {
             <span class="var-type">{{ v.type }}</span>
           </div>
         </div>
-      </el-card>
+      </div>
 
       <!-- 底部操作 -->
-      <div class="footer-actions">
+      <div class="form-actions">
         <el-button @click="goBack">取消</el-button>
         <div class="spacer" />
         <el-button
@@ -785,7 +794,7 @@ onBeforeUnmount(() => {
           保存
         </el-button>
       </div>
-    </el-card>
+    </div>
 
     <!-- 测试发送弹窗 -->
     <el-dialog
@@ -795,7 +804,7 @@ onBeforeUnmount(() => {
       :close-on-click-modal="false"
       @close="closeTestSendDialog"
     >
-      <el-form label-width="100px" @submit.prevent>
+      <el-form label-position="top" @submit.prevent>
         <el-form-item label="收件人" required>
           <el-select
             v-model="toContactIds"
@@ -883,7 +892,7 @@ onBeforeUnmount(() => {
       <!-- 发送结果 -->
       <div v-if="testResult" class="test-result" :class="testResult.success ? 'ok' : 'fail'">
         <div class="result-header">
-          <el-tag :type="testResult.success ? 'success' : 'danger'" effect="dark" size="small">
+          <el-tag :type="testResult.success ? 'success' : 'danger'" size="small">
             {{ testResult.success ? '发送成功' : '发送失败' }}
           </el-tag>
           <span class="result-msg">{{ testResult.message }}</span>
@@ -915,28 +924,28 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.page {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
+.top-bar {
+  margin-bottom: 0;
 }
-.card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+.meta-form :deep(.el-form-item__label) {
+  color: var(--text-secondary);
+  font-weight: 500;
 }
-.card-header .title {
-  font-size: 16px;
-  font-weight: 600;
+.meta-form :deep(.el-form-item) {
+  margin-bottom: 16px;
 }
-.meta-form {
-  max-width: 100%;
+.dialog-tip code {
+  font-size: 12px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #f1f5f9;
+  color: var(--text-secondary);
 }
 .editor-layout {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 16px;
-  margin-top: 16px;
+  margin-top: 8px;
   min-height: 600px;
 }
 .editor-pane,
@@ -945,40 +954,36 @@ onBeforeUnmount(() => {
   flex-direction: column;
   min-width: 0;
 }
-.pane-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-primary);
-  margin-bottom: 8px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
+.editor-pane > .dialog-section-title,
+.preview-pane > .dialog-section-title {
+  margin-bottom: 10px;
 }
-.pane-title .el-icon {
-  color: var(--primary-color);
-  font-size: 15px;
+.signature-title {
+  margin-top: 16px !important;
 }
 .preview-loading {
   font-weight: normal;
-  color: #909399;
+  color: var(--text-secondary);
   font-size: 12px;
+  margin-left: 4px;
 }
 .monaco-container {
   width: 100%;
   height: 380px;
-  border: 1px solid #dcdfe6;
-  border-radius: 4px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
   overflow: hidden;
 }
-.signature-card {
-  margin-bottom: 0;
-}
-.signature-card :deep(.el-card__body) {
+.signature-panel {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
   padding: 12px;
+  background: #fff;
 }
-.signature-card-header {
-  display: flex;
-  align-items: center;
+.signature-hint {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
 }
 .rich-signature-editor {
   min-height: 140px;
@@ -994,7 +999,7 @@ onBeforeUnmount(() => {
   background: #fff;
 }
 .rich-signature-editor:focus {
-  border-color: #1e40af;
+  border-color: var(--primary-color);
 }
 .rich-signature-editor img {
   max-width: 100%;
@@ -1014,37 +1019,46 @@ onBeforeUnmount(() => {
   gap: 8px;
 }
 .preview-subject {
-  background: #f5f7fa;
-  border: 1px solid #ebeef5;
-  border-radius: 4px;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
   padding: 8px 12px;
   margin-bottom: 8px;
   font-size: 13px;
 }
 .preview-subject .lbl {
-  color: #909399;
+  color: var(--text-secondary);
   margin-right: 4px;
 }
 .preview-frame {
   flex: 1;
   width: 100%;
   min-height: 380px;
-  border: 1px solid #dcdfe6;
-  border-radius: 4px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
   background: #fff;
 }
-.variable-card {
-  margin-top: 16px;
-  border-radius: 12px;
+.variable-section {
+  margin-top: 20px;
 }
-.variable-card-header {
+.section-toolbar {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #e5e7eb;
+}
+.section-toolbar .dialog-section-title {
+  margin: 0;
+  padding: 0;
+  border-bottom: none;
 }
 .variable-empty {
   font-size: 13px;
-  color: #9ca3af;
+  color: var(--text-secondary);
   padding: 8px 4px;
 }
 .variable-grid {
@@ -1065,7 +1079,7 @@ onBeforeUnmount(() => {
   user-select: none;
 }
 .variable-chip:hover {
-  border-color: #1e40af;
+  border-color: var(--primary-color);
   background: #eff6ff;
 }
 .variable-chip code {
@@ -1096,12 +1110,13 @@ onBeforeUnmount(() => {
     grid-template-columns: 1fr;
   }
 }
-.footer-actions {
+.form-actions {
   display: flex;
   align-items: center;
-  margin-top: 24px;
+  gap: 8px;
+  margin-top: 16px;
   padding-top: 16px;
-  border-top: 1px solid #ebeef5;
+  border-top: 1px solid #e5e7eb;
 }
 .spacer {
   flex: 1;
@@ -1113,16 +1128,16 @@ onBeforeUnmount(() => {
 }
 .form-hint {
   font-size: 12px;
-  color: #909399;
+  color: var(--text-secondary);
   line-height: 1.5;
   margin-top: 4px;
 }
 .test-result {
   margin-top: 8px;
   padding: 12px 14px;
-  border-radius: 4px;
-  background: #f5f7fa;
-  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
 }
 .test-result.ok {
   background: #f0f9eb;
@@ -1149,7 +1164,7 @@ onBeforeUnmount(() => {
   word-break: break-all;
 }
 .test-result .lbl {
-  color: #909399;
+  color: var(--text-secondary);
   margin-right: 4px;
 }
 </style>

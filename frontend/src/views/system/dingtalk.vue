@@ -11,7 +11,7 @@
  */
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
-import { ChatDotRound } from '@element-plus/icons-vue'
+import { ChatDotRound, InfoFilled } from '@element-plus/icons-vue'
 import {
   getDingTalkConfig,
   testDingTalk,
@@ -177,93 +177,112 @@ onMounted(() => {
 
 <template>
   <div class="page-container">
-    <el-card v-loading="loading" shadow="never">
-      <template #header>
-        <div class="card-header">
-          <span class="title">
-            <el-icon><ChatDotRound /></el-icon>
-            钉钉机器人配置
-          </span>
-          <div class="header-actions">
-            <el-button :disabled="!hasConfig" @click="openTestDialog">测试发送</el-button>
-            <el-button type="primary" :loading="saving" @click="handleSave">保存配置</el-button>
-          </div>
+    <div class="page-panel" v-loading="loading">
+      <div class="card-header">
+        <span class="title">
+          <el-icon><ChatDotRound /></el-icon>
+          钉钉机器人配置
+        </span>
+        <div class="header-actions">
+          <el-button :disabled="!hasConfig" @click="openTestDialog">测试发送</el-button>
+          <el-button type="primary" :loading="saving" @click="handleSave">保存配置</el-button>
         </div>
-      </template>
+      </div>
 
-      <el-alert
-        v-if="!hasConfig"
-        title="尚未配置钉钉通知"
-        type="info"
-        :closable="false"
-        show-icon
-        description="请填写钉钉机器人 Webhook 地址后保存。支持加签方式增强安全性。"
-        style="margin-bottom: 16px"
-      />
+      <div v-if="!hasConfig" class="dialog-tip">
+        <el-icon><InfoFilled /></el-icon>
+        <span>尚未配置钉钉通知。请填写机器人 Webhook 地址后保存；支持加签方式增强安全性。</span>
+      </div>
 
       <el-form
         ref="formRef"
         :model="form"
         :rules="rules"
-        label-width="110px"
-        style="max-width: 640px"
+        label-position="top"
+        class="config-form"
         @submit.prevent="handleSave"
       >
-        <el-form-item label="Webhook 地址" prop="webhook_url">
-          <el-input
-            v-model="form.webhook_url"
-            placeholder="https://oapi.dingtalk.com/robot/send?access_token=xxx"
-            maxlength="512"
-          />
-        </el-form-item>
-        <el-form-item label="加签密钥" prop="secret">
-          <el-input
-            v-model="form.secret"
-            type="password"
-            show-password
-            :placeholder="hasConfig ? (secretModified ? '请输入新密钥' : '已配置（留空不修改）') : '选填，用于安全校验'"
-            maxlength="256"
-            @input="onSecretInput"
-          />
-        </el-form-item>
-        <el-form-item label="启用状态">
-          <el-switch v-model="form.is_active" />
-          <span style="margin-left: 10px; color: var(--text-secondary); font-size: 13px;">
-            {{ form.is_active ? '已启用' : '已停用' }}
-          </span>
-        </el-form-item>
+        <div class="dialog-section">
+          <div class="dialog-section-title">机器人连接</div>
+          <el-row :gutter="16">
+            <el-col :span="24">
+              <el-form-item label="Webhook 地址" prop="webhook_url">
+                <el-input
+                  v-model="form.webhook_url"
+                  placeholder="https://oapi.dingtalk.com/robot/send?access_token=xxx"
+                  maxlength="512"
+                />
+              </el-form-item>
+            </el-col>
+            <el-col :span="24">
+              <el-form-item label="启用状态">
+                <div class="switch-row">
+                  <el-switch v-model="form.is_active" />
+                  <span class="switch-text">{{ form.is_active ? '已启用' : '已停用' }}</span>
+                </div>
+              </el-form-item>
+            </el-col>
+          </el-row>
+        </div>
+
+        <div class="dialog-section">
+          <div class="dialog-section-title">安全设置</div>
+          <el-row :gutter="16">
+            <el-col :span="24">
+              <el-form-item label="加签密钥" prop="secret">
+                <el-input
+                  v-model="form.secret"
+                  type="password"
+                  show-password
+                  :placeholder="hasConfig ? (secretModified ? '请输入新密钥' : '已配置（留空不修改）') : '选填，用于安全校验'"
+                  maxlength="256"
+                  @input="onSecretInput"
+                />
+              </el-form-item>
+            </el-col>
+          </el-row>
+        </div>
       </el-form>
-    </el-card>
+    </div>
 
     <!-- 测试发送弹窗 -->
     <el-dialog
       v-model="testDialogVisible"
-      title="测试发送"
-      width="520px"
+      title="测试钉钉通知"
+      width="560px"
+      destroy-on-close
       :close-on-click-modal="false"
+      class="create-dialog"
       @closed="testResult = null"
     >
-      <el-form ref="testFormRef" :model="testForm" :rules="testRules" label-width="110px">
-        <el-form-item label="Webhook 地址" prop="webhook_url">
-          <el-input
-            v-model="testForm.webhook_url"
-            placeholder="https://oapi.dingtalk.com/robot/send?access_token=xxx"
-            maxlength="512"
-          />
-        </el-form-item>
-        <el-form-item label="加签密钥">
-          <el-input
-            v-model="testForm.secret"
-            type="password"
-            show-password
-            placeholder="选填，默认使用已保存的密钥"
-            maxlength="256"
-          />
-        </el-form-item>
+      <div class="dialog-tip">
+        <el-icon><InfoFilled /></el-icon>
+        <span>可使用当前表单中的地址进行测试；加签密钥留空时将使用已保存的密钥。</span>
+      </div>
+
+      <el-form ref="testFormRef" :model="testForm" :rules="testRules" label-position="top">
+        <div class="dialog-section">
+          <div class="dialog-section-title">连接信息</div>
+          <el-form-item label="Webhook 地址" prop="webhook_url">
+            <el-input
+              v-model="testForm.webhook_url"
+              placeholder="https://oapi.dingtalk.com/robot/send?access_token=xxx"
+              maxlength="512"
+            />
+          </el-form-item>
+          <el-form-item label="加签密钥">
+            <el-input
+              v-model="testForm.secret"
+              type="password"
+              show-password
+              placeholder="选填，默认使用已保存的密钥"
+              maxlength="256"
+            />
+          </el-form-item>
+        </div>
       </el-form>
 
-      <!-- 测试结果 -->
-      <div v-if="testResult" style="margin-top: 12px;">
+      <div v-if="testResult" class="test-result">
         <el-alert
           :title="testResult.success ? '发送成功' : '发送失败'"
           :type="testResult.success ? 'success' : 'error'"
@@ -274,25 +293,42 @@ onMounted(() => {
       </div>
 
       <template #footer>
-        <el-button @click="testDialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="testSubmitting" @click="handleTest">发送测试消息</el-button>
+        <div class="dialog-footer">
+          <el-button @click="testDialogVisible = false">关闭</el-button>
+          <el-button type="primary" :loading="testSubmitting" @click="handleTest">发送测试消息</el-button>
+        </div>
       </template>
     </el-dialog>
   </div>
 </template>
 
 <style scoped>
-.card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.title {
-  font-size: 16px;
-  font-weight: 600;
-}
 .header-actions {
   display: flex;
   gap: 8px;
+  flex-wrap: wrap;
+}
+.config-form {
+  max-width: 720px;
+}
+.config-form :deep(.el-form-item__label) {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+.config-form :deep(.el-form-item) {
+  margin-bottom: 16px;
+}
+.switch-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 32px;
+}
+.switch-text {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+.test-result {
+  margin-top: 4px;
 }
 </style>

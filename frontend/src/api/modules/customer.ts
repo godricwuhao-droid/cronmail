@@ -51,6 +51,8 @@ export interface CustomerListParams {
   search?: string
   /** 业务类型过滤: 算力租赁 / 卫星数据 / 算力服务 */
   business_type?: string
+  /** 状态过滤: active / inactive */
+  status?: 'active' | 'inactive'
   page?: number
   page_size?: number
 }
