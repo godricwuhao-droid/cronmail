@@ -1,5 +1,24 @@
 # CronMail 后端变更日志
 
+## 2026-10-07 (重构) — 资产运营管理平台后端裁剪 + 独立库 asset_ops + 迁移脚本
+
+| 日期 | 类型 | 变更内容 | 影响文件/范围 | 关联任务 | 备注 |
+|------|------|---------|-------------|---------|------|
+| 2026-10-07 | 重构 | 资产运营管理平台后端裁剪+独立库 asset_ops+迁移脚本（未执行真实迁移）| backend/ | ADR-019 平台拆分 | platform-asset-ops 分支 |
+
+### 变更明细（仅 `platform-asset-ops` 分支）
+- **删除模块**：`backend/src/project/`、`backend/src/compute_service/`、`backend/src/satellite/`、`backend/src/contract_parser/`
+- **`main.py`**：移除上述 4 个模块的模型 import 与路由注册（satellite_router / compute_service_router / parse_router / project_router / project_type_router）
+- **`system` 模块**：删除 `GET/PUT /api/system/llm-config` 端点及 `_build_llm_config_response` 等 LLM 配置辅助函数（已确认无保留模块引用）
+- **`attachment` 模块**：收敛为仅 `compute_leasing`（算力租赁合同）类型附件
+  - 移除 `satellite_data` / `compute_service` / `project` 的 import 与分支逻辑（`_get_contract_name`、`DEFAULT_CATEGORIES`）
+  - 移除 `AttachmentCategory.project_type` 列及 API/Service/Schema 中全部 `project_type` 参数
+- **残留清理**：删除 5 个绑定 project 模块的一次性脚本（fix_project_attachments.py 等）；清理 `alembic/env.py` 残留 import
+- **独立库**：`core/config.py` 的 `DATABASE_URL` 默认值改为 `asset_ops` 库；建表仍走 `create_all`；K8s 侧 ConfigMap/secret 注入留到部署阶段
+- **迁移脚本**：新增 `backend/scripts/migrate_to_asset_ops.py`（幂等 DELETE+INSERT、`--dry-run`、逐表行数核对报告）
+  - 复制 17 张资产侧表；attachment 三表仅 `compute_leasing` 行；system_config 排除 `llm_*` 键；排除全部 project_*/satellite/compute_service 表
+  - 已执行 `--dry-run` 验证（源库只读），**未执行真实迁移**，`asset_ops` 库尚未创建
+
 ## 2026-08-31 (部署) — LLM 配置动态化功能上线
 
 | 日期 | 类型 | 变更内容 | 影响文件/范围 | 关联任务 | 备注 |

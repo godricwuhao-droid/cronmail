@@ -27,13 +27,12 @@ attachment_router = APIRouter(prefix="/api/attachments", tags=["Attachment"])
 
 @attachment_router.get("", response_model=schemas.AttachmentListByContractResponse)
 def list_attachments(
-    contract_type: str = Query(..., description="合同类型: compute_leasing/satellite_data/compute_service/project"),
+    contract_type: str = Query(..., description="合同类型: compute_leasing"),
     contract_id: str = Query(..., description="合同ID"),
-    project_type: Optional[str] = Query(None, description="项目类型（仅 contract_type=project 时使用）"),
     db: Session = Depends(get_db),
 ):
     """按合同获取附件列表（分类+子项结构）"""
-    categories = services.get_attachment_list(db, contract_type, contract_id, project_type=project_type)
+    categories = services.get_attachment_list(db, contract_type, contract_id)
     return schemas.AttachmentListByContractResponse(categories=categories)
 
 
@@ -68,7 +67,7 @@ def upload_attachments(
 # /export 必须在 /{attachment_id}/download 之前注册，否则 export 会被当作 attachment_id
 @attachment_router.get("/export")
 def export_attachments_zip(
-    contract_type: str = Query(..., description="合同类型: compute_leasing/satellite_data/compute_service"),
+    contract_type: str = Query(..., description="合同类型: compute_leasing"),
     contract_id: str = Query(..., description="合同ID"),
     db: Session = Depends(get_db),
 ):
@@ -213,11 +212,10 @@ def delete_attachment(
 def get_status_summary(
     contract_type: str = Query(..., description="合同类型"),
     contract_id: str = Query(..., description="合同ID"),
-    project_type: Optional[str] = Query(None, description="项目类型（仅 contract_type=project 时使用）"),
     db: Session = Depends(get_db),
 ):
     """获取合同附件完成状态汇总"""
-    summary = services.get_summary(db, contract_type, contract_id, project_type=project_type)
+    summary = services.get_summary(db, contract_type, contract_id)
     return schemas.AttachmentSummaryResponse(**summary)
 
 
@@ -266,11 +264,10 @@ system_attachment_category_router = APIRouter(
 @system_attachment_category_router.get("", response_model=schemas.AttachmentCategoryListWrap)
 def list_categories(
     contract_type: Optional[str] = Query(None, description="合同类型筛选"),
-    project_type: Optional[str] = Query(None, description="项目类型筛选（仅 contract_type=project 时使用）"),
     db: Session = Depends(get_db),
 ):
     """获取附件分类列表（含子项）"""
-    categories = services.list_categories(db, contract_type=contract_type, project_type=project_type)
+    categories = services.list_categories(db, contract_type=contract_type)
     return schemas.AttachmentCategoryListWrap(items=categories)
 
 
@@ -384,22 +381,10 @@ def reorder_item(
 # ============================================================
 
 def _get_contract_name(db: Session, contract_type: str, contract_id: str) -> Optional[str]:
-    """根据合同类型查询合同名称"""
+    """根据合同类型查询合同名称（仅支持算力租赁合同）"""
     if contract_type == "compute_leasing":
         from src.contract.models import Contract
         c = db.query(Contract).filter(Contract.id == contract_id).first()
-        return c.name if c else None
-    elif contract_type == "satellite_data":
-        from src.satellite.models import SatelliteDataContract
-        c = db.query(SatelliteDataContract).filter(SatelliteDataContract.id == contract_id).first()
-        return c.name if c else None
-    elif contract_type == "compute_service":
-        from src.compute_service.models import ComputeServiceContract
-        c = db.query(ComputeServiceContract).filter(ComputeServiceContract.id == contract_id).first()
-        return c.name if c else None
-    elif contract_type == "project":
-        from src.project.models import ProjectContract
-        c = db.query(ProjectContract).filter(ProjectContract.id == contract_id).first()
         return c.name if c else None
     return None
 

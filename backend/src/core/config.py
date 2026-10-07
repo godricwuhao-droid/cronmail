@@ -9,8 +9,9 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     """应用配置"""
 
-    # 数据库
-    DATABASE_URL: str = "mysql+pymysql://root:root@127.0.0.1:3306/cronmail"
+    # 数据库（资产运营管理平台独立库 asset_ops，见 ADR-019；
+    # 生产环境通过环境变量/K8s ConfigMap 注入，K8s 侧注入留到部署阶段）
+    DATABASE_URL: str = "mysql+pymysql://root:root@127.0.0.1:3306/asset_ops"
 
     # 加密密钥（Fernet key）
     MAIL_ENCRYPTION_KEY: str = ""

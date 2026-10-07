@@ -11,8 +11,7 @@ from pydantic import BaseModel, Field
 # ============================================================
 
 class AttachmentCategoryCreate(BaseModel):
-    contract_type: str = Field(..., description="合同类型: compute_leasing/satellite_data/compute_service/project")
-    project_type: Optional[str] = Field(None, max_length=100, description="项目类型（仅 contract_type=project 时使用）")
+    contract_type: str = Field(..., description="合同类型: compute_leasing")
     name: str = Field(..., min_length=1, max_length=100, description="分类名称")
     code: str = Field(..., min_length=1, max_length=50, description="分类编码")
     sort_order: int = Field(0, description="排序")
@@ -23,7 +22,6 @@ class AttachmentCategoryUpdate(BaseModel):
     code: Optional[str] = Field(None, min_length=1, max_length=50)
     sort_order: Optional[int] = None
     is_active: Optional[bool] = None
-    project_type: Optional[str] = Field(None, max_length=100, description="项目类型")
 
 
 class AttachmentCategoryReorder(BaseModel):
@@ -44,7 +42,6 @@ class AttachmentItemBrief(BaseModel):
 class AttachmentCategoryResponse(BaseModel):
     id: str
     contract_type: str
-    project_type: Optional[str] = None
     name: str
     code: str
     sort_order: int

@@ -3,7 +3,7 @@
 
 AttachmentCategory  - 附件分类（按合同类型 + 分类 code）
 AttachmentItem     - 分类下的子项清单
-Attachment         - 实际文件（多态关联三张合同表）
+Attachment         - 实际文件（关联算力租赁合同表）
 AttachmentStatus   - 子项完成确认状态
 """
 import uuid
@@ -28,11 +28,7 @@ class AttachmentCategory(Base):
     id = Column(UUIDColumn(), primary_key=True, default=generate_uuid)
     contract_type = Column(
         String(30), nullable=False,
-        comment="合同类型: compute_leasing / satellite_data / compute_service / project",
-    )
-    project_type = Column(
-        String(100), nullable=True,
-        comment="项目类型（仅 contract_type=project 时使用），NULL 表示兜底",
+        comment="合同类型: compute_leasing",
     )
     name = Column(String(100), nullable=False, comment="分类名称")
     code = Column(String(50), nullable=False, comment="分类编码")
@@ -93,13 +89,13 @@ class AttachmentItem(Base):
 
 
 class Attachment(Base):
-    """实际文件（多态关联三张合同表）"""
+    """实际文件（关联算力租赁合同表）"""
     __tablename__ = "attachment"
 
     id = Column(UUIDColumn(), primary_key=True, default=generate_uuid)
     contract_type = Column(
         String(30), nullable=False,
-        comment="关联哪种合同表: compute_leasing / satellite_data / compute_service",
+        comment="关联合同表: compute_leasing",
     )
     contract_id = Column(
         String(36), nullable=False, index=True,
