@@ -35,7 +35,7 @@ import argparse
 import os
 import sys
 
-from sqlalchemy import MetaData, create_engine, func, select
+from sqlalchemy import MetaData, create_engine, func, select, text
 
 # 确保 backend 目录在 sys.path 中（直接运行本脚本时）
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -78,7 +78,11 @@ EXCLUDED_TABLES = [
     "alembic_version",
 ]
 
-BATCH_SIZE = 500
+# 注意：必须为 1（逐行插入）。
+# 原因：contract.renewed_from_id 为自引用外键，pymysql executemany 会把
+# 多行合并为单条 INSERT ... VALUES (...),(...)，MySQL 不保证行级提交顺序，
+# 会触发 1452 外键错误。逐行插入保证按源库读取顺序（父行先于子行）落库。
+BATCH_SIZE = 1
 
 
 def count_rows(conn, table, where=None) -> int:
@@ -88,13 +92,20 @@ def count_rows(conn, table, where=None) -> int:
     return int(conn.execute(stmt).scalar_one())
 
 
-def fetch_rows(conn, table, where=None):
-    """从源库读取行（只读 SELECT），返回 dict 列表"""
-    stmt = table.select()
+def fetch_rows(conn, table_name: str, cols: list[str], where=None):
+    """原生 SELECT 读取行（只读），返回 dict 列表。
+    使用原生 SQL 而非 ORM 表对象，目的是完整保留 JSON 列的原始存储形式
+    （JSON 字面量 null 与 SQL NULL 均原样保留），配合 insert_rows 的原生
+    INSERT 实现字节级保真迁移。列集合按目标库表结构选取。"""
+    col_sql = ", ".join(f"`{c}`" for c in cols)
     if where is not None:
-        stmt = stmt.where(where)
-    rows = conn.execute(stmt).mappings().all()
-    return [dict(r) for r in rows]
+        compiled = where.compile(compile_kwargs={"literal_binds": False})
+        stmt = text(f"SELECT {col_sql} FROM `{table_name}` WHERE {compiled}")
+        params = dict(compiled.params)
+    else:
+        stmt = text(f"SELECT {col_sql} FROM `{table_name}`")
+        params = {}
+    return [dict(r) for r in conn.execute(stmt, params).mappings().all()]
 
 
 def delete_target_rows(conn, table, where=None) -> int:
@@ -105,13 +116,20 @@ def delete_target_rows(conn, table, where=None) -> int:
     return result.rowcount
 
 
-def insert_rows(conn, table, rows: list[dict]) -> int:
+def insert_rows(conn, table_name: str, rows: list[dict]) -> int:
+    """原生参数化 INSERT。与 fetch_rows 的原生 SELECT 配对：
+    JSON 列保持原始文本、SQL NULL 保持 NULL，实现字节级保真，
+    避免 ORM JSON 绑定层把 None 序列化成 JSON 字面量 'null'。"""
     if not rows:
         return 0
+    cols = list(rows[0].keys())
+    col_sql = ", ".join(f"`{c}`" for c in cols)
+    ph_sql = ", ".join(f":{c}" for c in cols)
+    sql = text(f"INSERT INTO `{table_name}` ({col_sql}) VALUES ({ph_sql})")
     total = 0
     for i in range(0, len(rows), BATCH_SIZE):
         batch = rows[i:i + BATCH_SIZE]
-        total += conn.execute(table.insert(), batch).rowcount
+        total += conn.execute(sql, batch).rowcount
     return total
 
 
@@ -158,20 +176,18 @@ def main() -> int:
         print(f"错误: 源库缺少表: {missing}")
         return 2
 
-    # attachment_item 的过滤条件需要引用 attachment_category 表
-    cat_table = meta.tables["attachment_category"]
-    item_where = meta.tables["attachment_item"].c.category_id.in_(
-        select(cat_table.c.id).where(cat_table.c.contract_type == "compute_leasing")
-    )
-
-    def get_where(table_name: str):
+    def get_where(table_name: str, md: MetaData):
+        """按指定库的元数据构造过滤条件（源/目标库列结构可能不同）"""
         if table_name == "system_config":
-            t = meta.tables[table_name]
+            t = md.tables[table_name]
             return ~t.c.key.like("llm%") & ~t.c.key.like("%project%")
         if table_name in ("attachment", "attachment_status", "attachment_category"):
-            return meta.tables[table_name].c.contract_type == "compute_leasing"
+            return md.tables[table_name].c.contract_type == "compute_leasing"
         if table_name == "attachment_item":
-            return item_where
+            cat = md.tables["attachment_category"]
+            return md.tables["attachment_item"].c.category_id.in_(
+                select(cat.c.id).where(cat.c.contract_type == "compute_leasing")
+            )
         return None
 
     # ---- 目标库引擎（dry-run 下仅尝试只读计数，失败不致命）----
@@ -189,14 +205,37 @@ def main() -> int:
             print("提示: 真实迁移前须先创建 asset_ops 库并启动一次应用完成 create_all 建表")
             return 2
 
+    # ---- 目标库元数据：写入（DELETE/INSERT）必须用目标库表结构，
+    #      因为源库可能残留目标库已裁剪掉的列（如 attachment_category.project_type）----
+    tgt_meta = MetaData()
+    if tgt_available:
+        with tgt_engine.connect() as conn:
+            tgt_meta.reflect(bind=conn, only=[t for t, _ in MIGRATE_TABLES])
+        tgt_missing = [t for t, _ in MIGRATE_TABLES if t not in tgt_meta.tables]
+        if tgt_missing:
+            print(f"错误: 目标库缺少表: {tgt_missing}")
+            return 2
+
     report = []  # (table, filter_desc, src_count, tgt_count, action)
 
     tgt_conn = tgt_engine.connect() if tgt_available else None
     try:
+        if tgt_conn is not None and not args.dry_run:
+            # 迁移期间临时关闭目标库外键检查：contract.renewed_from_id 为自引用外键，
+            # 且 SELECT 无排序保证父行先于子行读取，逐行插入仍可能违反 1452。
+            # 仅影响目标库（asset_ops），提交后恢复。
+            from sqlalchemy import text
+            tgt_conn.execute(text("SET FOREIGN_KEY_CHECKS=0"))
         with src_engine.connect() as src_conn:
             for table_name, filter_desc in MIGRATE_TABLES:
-                table = meta.tables[table_name]
-                where = get_where(table_name)
+                # 真实模式统一使用目标库表对象（列集合/列类型与写入端一致）；
+                # dry-run 且目标库不可用时退回源库表对象
+                if tgt_conn is not None:
+                    table = tgt_meta.tables[table_name]
+                    where = get_where(table_name, tgt_meta)
+                else:
+                    table = meta.tables[table_name]
+                    where = get_where(table_name, meta)
 
                 src_count = count_rows(src_conn, table, where)
 
@@ -211,8 +250,9 @@ def main() -> int:
                     action = f"计划: DELETE（过滤范围内）后 INSERT {src_count} 行"
                 else:
                     deleted = delete_target_rows(tgt_conn, table, where)
-                    rows = fetch_rows(src_conn, table, where)
-                    inserted = insert_rows(tgt_conn, table, rows)
+                    tgt_cols = [c.name for c in table.columns]
+                    rows = fetch_rows(src_conn, table.name, tgt_cols, where)
+                    inserted = insert_rows(tgt_conn, table.name, rows)
                     tgt_count = count_rows(tgt_conn, table, where)
                     action = f"DELETE {deleted} 行, INSERT {inserted} 行"
 
@@ -221,7 +261,10 @@ def main() -> int:
             # 真实模式：全部表处理完后统一提交
             if not args.dry_run:
                 tgt_conn.commit()
-                print("\n[OK] 所有表迁移完成，已提交事务")
+                from sqlalchemy import text
+                tgt_conn.execute(text("SET FOREIGN_KEY_CHECKS=1"))
+                tgt_conn.commit()
+                print("\n[OK] 所有表迁移完成，已提交事务（外键检查已恢复）")
     finally:
         if tgt_conn is not None:
             tgt_conn.close()

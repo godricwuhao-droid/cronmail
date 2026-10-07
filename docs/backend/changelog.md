@@ -5,6 +5,8 @@
 | 日期 | 类型 | 变更内容 | 影响文件/范围 | 关联任务 | 备注 |
 |------|------|---------|-------------|---------|------|
 | 2026-10-07 | 重构 | 资产运营管理平台后端裁剪+独立库 asset_ops+迁移脚本（未执行真实迁移）| backend/ | ADR-019 平台拆分 | platform-asset-ops 分支 |
+| 2026-10-07 | 新增 | asset_ops 库创建与数据迁移（17表）| asset_ops 库 | ADR-019 平台拆分 | 迁移核对通过 |
+| 2026-10-07 | 修复 | 迁移脚本修复：自引用外键 1452（迁移期临时关闭目标库外键检查）、源库独有列（attachment_category.project_type）、JSON 列存储形式漂移（改原生 SELECT/INSERT 保真）| backend/scripts/migrate_to_asset_ops.py | ADR-019 平台拆分 | 幂等可重跑 |
 
 ### 变更明细（仅 `platform-asset-ops` 分支）
 - **删除模块**：`backend/src/project/`、`backend/src/compute_service/`、`backend/src/satellite/`、`backend/src/contract_parser/`
@@ -17,7 +19,12 @@
 - **独立库**：`core/config.py` 的 `DATABASE_URL` 默认值改为 `asset_ops` 库；建表仍走 `create_all`；K8s 侧 ConfigMap/secret 注入留到部署阶段
 - **迁移脚本**：新增 `backend/scripts/migrate_to_asset_ops.py`（幂等 DELETE+INSERT、`--dry-run`、逐表行数核对报告）
   - 复制 17 张资产侧表；attachment 三表仅 `compute_leasing` 行；system_config 排除 `llm_*` 键；排除全部 project_*/satellite/compute_service 表
-  - 已执行 `--dry-run` 验证（源库只读），**未执行真实迁移**，`asset_ops` 库尚未创建
+  - 已执行 `--dry-run` 验证（源库只读）
+- **真实迁移已执行（2026-10-07）**：新建 `asset_ops` 库（utf8mb4），用应用模型 `Base.metadata.create_all` 建 17 表，执行 `migrate_to_asset_ops.py` 完成数据迁移
+  - 逐表行数与 dry-run 计划一致（17 表全部差异 0）；逐行 MD5 哈希全量比对 17 表全部 MATCH
+  - 抽样核对：合同金额（241440.00 / 79920.00 / 51370.97）、邮件日志、客户信息均与源库一致
+  - `asset_ops` 中无任何 project_*/satellite/compute_service 数据；attachment 三表仅 compute_leasing
+  - 源库 cronmail 全程只读，迁移前后行数一致，未受影响
 
 ## 2026-08-31 (部署) — LLM 配置动态化功能上线
 
