@@ -158,8 +158,14 @@ body {
 }
 
 .el-table td.el-table__cell {
+  background-color: #ffffff;
   border-bottom: 1px solid #f1f5f9 !important;
   font-size: 13px;
+}
+
+/* hover 行：固定列也使用不透明背景，避免看到下方数据 */
+.el-table__body tr:hover > td.el-table__cell {
+  background-color: #f0f5ff !important;
 }
 
 .el-table .el-table__inner-wrapper::before,

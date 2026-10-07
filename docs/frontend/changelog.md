@@ -3810,3 +3810,13 @@ Copilot 对接 SSE 流式 + 显示图片 + 中文字段标签
 | 2026-12-19 | 修改 | 回款页面回执单和发票均设为必选，去掉"* 必选"标签 | payments.vue | - | 去掉回执单拖拽区和弹窗中的「* 必选」标签；两个拖拽区文案统一不标注必选/可选；「开始 AI 识别」按钮改为回执单+发票都选好后启用（`!pendingReceipt \|\| !pendingInvoice`）；processPayment 守卫改为双文件检查；全局拖拽不再自动触发识别，改为提示继续上传发票 |
 | 2026-08-09 | 修复 | 回款页面预览改用 blob.type 判断 + 全局拖拽改为智能分发气泡 | src/views/projects/payments.vue | TASK-017-12 | |
 | 2026-12-19 | 修改 | 回款页面预览改用 mime_type 综合判断文件类型 | payments.vue, project.ts | - | 新增 `getPreviewType()` 函数，优先用扩展名和 mime_type 判断，blob.type 作为 fallback；`PaymentRecord` 新增 `receipt_filename`/`receipt_mime_type`/`invoice_filename`/`invoice_mime_type` 可选字段；`openPreview` 签名改为 `(fileId, filename, mimeType?)`；模板调用传入真实文件名和 mime_type |
+| 2026-12-19 | 修复 | 全站表格固定列背景透明导致能看到下方数据 | global.css | - | 给 `.el-table td.el-table__cell` 添加 `background-color: #ffffff`；hover 行固定列使用不透明背景 `#f0f5ff`，解决 `--el-table-row-hover-bg-color` 半透明问题 |
+| 2026-12-19 | 新增 | 系统配置页新增「智能解析模型配置」分区 | config.vue, system.ts | - | 新增 OCR 视觉模型（阶段1）和 Extract 文本模型（阶段2）共 6 个字段；API Key 使用 show-password 脱敏显示；保存时通过 `handleSave` 统一提交；加载时调用 `GET /api/system/llm-config` 回显 |
+| 2026-08-31 | 部署 | 表格透明度修复 + LLM 配置 UI 上线 | Dockerfile.frontend, K8s deployment | - | 前端镜像构建并部署到 K8s；镜像: harbor.xhwltech.com/xhcloud/cronmail-frontend:latest (sha256:09d456a0)；rollout 完成，Pod Running 1/1 |
+| 2026-09-16 | 修改 | 项目合同列表 UI 优化（操作列收敛/附件列等高/列宽策略/加载占位/表头对齐）| frontend/src/views/projects/index.vue | 列表UI优化 | 列设置功能已回归 |
+| 2026-09-16 | 修改 | 合同详情页布局优化 + 删除附件状态区块 | frontend/src/views/projects/detail.vue | 详情页布局优化 | 附件入口保留于页头按钮 |
+| 2026-09-16 | 修改 | 前端镜像构建推送并滚动部署（列表页/详情页 UI 优化）| harbor.xhwltech.com/xhcloud/cronmail-frontend:latest | 列表UI优化+详情页布局优化 | 部署验证通过 |
+| 2026-09-16 | 修复 | 附件状态列明细内联渲染 bug（tooltip 内容误入触发区）| frontend/src/views/projects/index.vue | 列表UI优化 | |
+| 2026-09-16 | 修改 | 前端镜像构建推送并滚动部署（附件状态列 tooltip 修复）| harbor.xhwltech.com/xhcloud/cronmail-frontend:latest | 列表UI优化 | 部署验证通过 |
+| 2026-09-16 | 回退 | 附件状态列还原为改动前原始实现（用户反馈展示问题）| frontend/src/views/projects/index.vue | 列表UI优化 | 其余列表优化保留 |
+| 2026-09-16 | 修改 | 前端镜像构建推送并滚动部署（附件状态列还原为原始实现）| harbor.xhwltech.com/xhcloud/cronmail-frontend:latest | 列表UI优化 | 部署验证通过 |

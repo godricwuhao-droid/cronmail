@@ -7,13 +7,13 @@
  *  - 分页 + 搜索
  *  - 附件状态汇总展示
  *  - 合同类型、金额、日期、服务行数展示
- *  - 行内操作：详情、编辑、删除、附件
+ *  - 行内操作：详情、编辑 + "更多"下拉（回款、附件、删除，删除保留确认）
  *  - 列自定义：齿轮按钮弹出列设置面板，支持拖拽排序 + 置顶 + 勾选显示（持久化到 localStorage）
  */
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Download, FolderOpened, Operation as OperationIcon, Refresh, RefreshLeft, Search, Top } from '@element-plus/icons-vue'
+import { ArrowDown, Download, FolderOpened, Operation as OperationIcon, Refresh, RefreshLeft, Search, Top } from '@element-plus/icons-vue'
 import { confirmDelete } from '@/lib/confirm'
 import {
   deleteProjectContract,
@@ -198,6 +198,14 @@ function goAttachments(row: ProjectContractItem) {
 
 function goPayments(row: ProjectContractItem) {
   router.push({ name: 'ProjectPayments', params: { company: currentCompany.value, id: row.id } })
+}
+
+/** 操作列"更多"下拉命令分发（删除沿用 handleDelete 内的确认逻辑） */
+function handleRowCommand(command: string | number | object, row: ProjectContractItem) {
+  const cmd = String(command)
+  if (cmd === 'payments') goPayments(row)
+  else if (cmd === 'attachments') goAttachments(row)
+  else if (cmd === 'delete') handleDelete(row)
 }
 
 async function handleDelete(row: ProjectContractItem) {
@@ -513,93 +521,133 @@ function getColumnProps(col: ColumnDef): ColumnProps {
   const key = col.key
   const base: ColumnProps = {}
 
+  // 列宽策略：
+  //  - 短数据列（类型/金额/日期/编号/附件状态/回款进度/序号）→ 固定 width，内容与表头居中
+  //  - 长文本列（名称/甲乙方/备注等）→ min-width 自适应 + show-overflow-tooltip，左对齐
   if (key === 'name') {
     base.prop = 'name'
     base.label = '合同名称'
-    base['min-width'] = 200
+    base['min-width'] = 160
+    base.align = 'left'
+    base['header-align'] = 'left'
   } else if (key === 'contract_no') {
     base.prop = 'contract_no'
     base.label = '合同编号'
-    base['min-width'] = 140
+    base['min-width'] = 130
+    base.align = 'center'
+    base['header-align'] = 'center'
     base['show-overflow-tooltip'] = true
   } else if (key === 'contract_type') {
     base.label = '合同类型'
     base.width = 90
+    base.align = 'center'
+    base['header-align'] = 'center'
   } else if (key === 'party_a_name') {
     base.prop = 'party_a_name'
     base.label = '甲方'
-    base['min-width'] = 140
+    base['min-width'] = 110
+    base.align = 'left'
+    base['header-align'] = 'left'
     base['show-overflow-tooltip'] = true
   } else if (key === 'party_b_name') {
     base.prop = 'party_b_name'
     base.label = '乙方'
-    base['min-width'] = 140
+    base['min-width'] = 110
+    base.align = 'left'
+    base['header-align'] = 'left'
     base['show-overflow-tooltip'] = true
   } else if (key === 'amount') {
     base.label = '合同金额'
-    base.width = 140
-    base.align = 'right'
+    base.width = 120
+    base.align = 'center'
+    base['header-align'] = 'center'
+    // 数字溢出保护：不折行，超长显示 tooltip
+    base['show-overflow-tooltip'] = true
   } else if (key === 'start_date') {
     base.prop = 'start_date'
     base.label = '开始日期'
-    base.width = 120
+    base.width = 100
+    base.align = 'center'
+    base['header-align'] = 'center'
   } else if (key === 'end_date') {
     base.prop = 'end_date'
     base.label = '结束日期'
-    base.width = 120
+    base.width = 100
+    base.align = 'center'
+    base['header-align'] = 'center'
   } else if (key === 'project_name') {
     base.prop = 'project_name'
     base.label = '项目名称'
-    base['min-width'] = 140
+    base['min-width'] = 130
+    base.align = 'left'
+    base['header-align'] = 'left'
     base['show-overflow-tooltip'] = true
   } else if (key === 'project_type') {
     base.prop = 'project_type'
     base.label = '项目类型'
-    base['min-width'] = 140
+    base['min-width'] = 100
+    base.align = 'left'
+    base['header-align'] = 'left'
     base['show-overflow-tooltip'] = true
   } else if (key === 'service_lines_count') {
     base.label = '服务行数'
-    base.width = 90
+    base.width = 80
+    base.align = 'center'
+    base['header-align'] = 'center'
   } else if (key === 'attachment_status') {
     base.label = '附件状态'
     base.width = 140
   } else if (key === 'payment_progress') {
     base.label = '回款进度'
-    base['min-width'] = 140
+    base.width = 120
     base.align = 'center'
+    base['header-align'] = 'center'
   } else if (key === 'sort_order') {
     base.prop = 'sort_order'
     base.label = '序号'
     base.width = 70
     base.align = 'center'
+    base['header-align'] = 'center'
   } else if (key === 'remark') {
     base.prop = 'remark'
     base.label = '备注'
-    base['min-width'] = 140
+    base['min-width'] = 130
+    base.align = 'left'
+    base['header-align'] = 'left'
     base['show-overflow-tooltip'] = true
   } else if (key === 'contract_content') {
     base.prop = 'contract_content'
     base.label = '合同内容'
-    base['min-width'] = 160
+    base['min-width'] = 150
+    base.align = 'left'
+    base['header-align'] = 'left'
     base['show-overflow-tooltip'] = true
   } else if (key === 'delivery_requirements') {
     base.prop = 'delivery_requirements'
     base.label = '交付要求'
-    base['min-width'] = 160
+    base['min-width'] = 150
+    base.align = 'left'
+    base['header-align'] = 'left'
     base['show-overflow-tooltip'] = true
   } else if (key === 'process_records') {
     base.prop = 'process_records'
     base.label = '过程记录'
-    base['min-width'] = 160
+    base['min-width'] = 150
+    base.align = 'left'
+    base['header-align'] = 'left'
     base['show-overflow-tooltip'] = true
   } else if (key === 'created_at') {
     base.prop = 'created_at'
     base.label = '创建时间'
-    base.width = 120
+    base.width = 100
+    base.align = 'center'
+    base['header-align'] = 'center'
   } else if (key === 'actions') {
     base.label = '操作'
-    base.width = 350
+    base.width = 130
     base.fixed = 'right'
+    base.align = 'center'
+    base['header-align'] = 'center'
   }
 
   return base
@@ -900,11 +948,23 @@ onMounted(() => {
               <div class="action-buttons">
                 <el-button size="small" link type="primary" @click="goDetail(row)">详情</el-button>
                 <el-button size="small" link type="primary" @click="goEdit(row)">编辑</el-button>
-                <el-button size="small" link type="warning" @click="goPayments(row)">回款</el-button>
-                <el-button size="small" link type="danger" @click="handleDelete(row)">删除</el-button>
-                <el-button size="small" link type="primary" @click="goAttachments(row)">
-                  附件
-                </el-button>
+                <el-dropdown
+                  trigger="click"
+                  popper-class="project-actions-dropdown"
+                  @command="(cmd: string | number | object) => handleRowCommand(cmd, row)"
+                >
+                  <el-button size="small" link type="primary" class="more-btn">
+                    更多
+                    <el-icon class="more-btn-icon"><ArrowDown /></el-icon>
+                  </el-button>
+                  <template #dropdown>
+                    <el-dropdown-menu>
+                      <el-dropdown-item command="payments">回款</el-dropdown-item>
+                      <el-dropdown-item command="attachments">附件</el-dropdown-item>
+                      <el-dropdown-item command="delete" divided class="danger-item">删除</el-dropdown-item>
+                    </el-dropdown-menu>
+                  </template>
+                </el-dropdown>
               </div>
             </template>
           </el-table-column>
@@ -972,6 +1032,7 @@ onMounted(() => {
   font-variant-numeric: tabular-nums;
   font-weight: 600;
   color: var(--text-primary);
+  white-space: nowrap;
 }
 .col-time {
   color: var(--text-secondary);
@@ -989,8 +1050,20 @@ onMounted(() => {
 .action-buttons {
   display: flex;
   align-items: center;
-  gap: 2px;
+  justify-content: center;
+  gap: 4px;
   white-space: nowrap;
+}
+/* 覆盖全局 .el-button + .el-button 的 margin-left，间距统一由 gap 控制 */
+.action-buttons .el-button + .el-button {
+  margin-left: 0;
+}
+.more-btn {
+  padding-right: 0;
+}
+.more-btn-icon {
+  margin-left: 2px;
+  font-size: 12px;
 }
 .muted {
   color: #c0c4cc;
@@ -1147,5 +1220,15 @@ onMounted(() => {
   height: 1px;
   background: #e5e7eb;
   margin: 4px 6px;
+}
+
+/* 行操作"更多"下拉（teleport 到 body，需非 scoped）：删除项红色 */
+.project-actions-dropdown .el-dropdown-menu__item.danger-item {
+  color: var(--el-color-danger, #ef4444);
+}
+.project-actions-dropdown .el-dropdown-menu__item.danger-item:hover,
+.project-actions-dropdown .el-dropdown-menu__item.danger-item:focus {
+  color: var(--el-color-danger, #ef4444);
+  background-color: #fef2f2;
 }
 </style>

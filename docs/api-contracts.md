@@ -390,6 +390,51 @@ encryption 枚举: `tls` | `starttls` | `none`
 {"success": true, "message": "测试邮件已发送"}
 ```
 
+### GET /api/system/llm-config
+
+获取 LLM 模型配置（api_key 脱敏）。DB 无值时 fallback 到环境变量。
+
+**响应**:
+```json
+{
+  "llm_base_url": "http://192.168.180.67:8080/v1",
+  "llm_api_key": "***",
+  "llm_model": "Qwen3.6-27B",
+  "llm_base_url_extract": "http://api.opearlai.com:30096/v1",
+  "llm_api_key_extract": "***",
+  "llm_model_extract": "DeepSeek-V4-Flash"
+}
+```
+
+关键字段说明：
+- `llm_api_key` / `llm_api_key_extract`：DB 有值时返回 `"***"`（脱敏），DB 无值时返回 `""`
+- 其他字段：DB 有值返回 DB 值，无值返回环境变量默认值
+
+### PUT /api/system/llm-config
+
+更新 LLM 模型配置（upsert 到 SystemConfig 表）。
+
+**请求**:
+```json
+{
+  "llm_base_url": "http://192.168.180.67:8080/v1",
+  "llm_api_key": "***",
+  "llm_model": "Qwen3.6-27B",
+  "llm_base_url_extract": "http://api.opearlai.com:30096/v1",
+  "llm_api_key_extract": "***",
+  "llm_model_extract": "DeepSeek-V4-Flash"
+}
+```
+
+规则：
+- `llm_api_key` / `llm_api_key_extract` 传 `"***"` 表示保留原值（不更新）
+- 传 `""` 表示清空（下次使用环境变量 fallback）
+- 传其他值表示更新
+- 其他字段直接 upsert
+- 所有字段均可选，只更新请求中提供的字段
+
+**响应**：同 GET 格式（api_key 脱敏）
+
 ---
 
 ## 8. 卫星数据合同 (SatelliteDataContract)

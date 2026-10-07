@@ -2,9 +2,9 @@
 /**
  * 项目管理合同 - 详情页
  *
- * 展示合同基本信息 + 服务行表格 + 汇总统计 + 关联合同 + 附件状态
+ * 展示合同基本信息 + 服务行表格 + 汇总统计 + 关联合同
  */
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { ArrowLeft, Document, Paperclip } from '@element-plus/icons-vue'
@@ -18,11 +18,6 @@ import {
   COMPANY_MAP,
   type ContractType,
 } from '@/api/modules/project'
-import {
-  getAttachmentSummary,
-  listAttachmentCategories,
-  type AttachmentSummary,
-} from '@/api/modules/attachment'
 
 const route = useRoute()
 const router = useRouter()
@@ -31,7 +26,6 @@ const companyCode = computed(() => (route.params.company as string) || 'fengyun'
 
 const record = ref<ProjectContractDetail | null>(null)
 const loading = ref(false)
-const summary = ref<AttachmentSummary | null>(null)
 
 // ============================================================
 // 资源统计标签映射
@@ -59,15 +53,69 @@ const statsDisplay = computed(() => {
 })
 
 function formatDate(s?: string | null) {
-  if (!s) return '-'
+  if (!s) return '—'
   return s.length >= 10 ? s.slice(0, 10) : s
 }
 
 function formatAmount(val?: string | number | null) {
-  if (val === null || val === undefined || val === '') return '-'
+  if (val === null || val === undefined || val === '') return '—'
   const n = typeof val === 'string' ? parseFloat(val) : val
-  if (isNaN(n)) return '-'
+  if (isNaN(n)) return '—'
   return '¥' + n.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+// ============================================================
+// 合同信息 - 日期区间
+// ============================================================
+const dateRange = computed(() => {
+  const s = record.value?.start_date
+  const e = record.value?.end_date
+  if (!s && !e) return ''
+  return `${formatDate(s)} ~ ${formatDate(e)}`
+})
+
+// ============================================================
+// 合同信息 - 响应式列数（宽屏 3 列 / 中屏 2 列 / 窄屏 1 列）
+// ============================================================
+const descriptionsColumn = ref(3)
+
+function updateDescriptionsColumn() {
+  const w = window.innerWidth
+  descriptionsColumn.value = w >= 1200 ? 3 : w >= 768 ? 2 : 1
+}
+
+// ============================================================
+// 长文本折叠（合同内容 / 交付要求 / 过程记录）
+// ============================================================
+interface LongTextItem {
+  key: string
+  label: string
+  text: string
+}
+
+const LONG_TEXT_COLLAPSE_LIMIT = 300
+const longTextExpanded = ref<Record<string, boolean>>({})
+
+const longTextItems = computed<LongTextItem[]>(() => {
+  const items: LongTextItem[] = []
+  if (record.value?.contract_content) {
+    items.push({ key: 'contract_content', label: '合同内容', text: record.value.contract_content })
+  }
+  if (record.value?.delivery_requirements) {
+    items.push({ key: 'delivery_requirements', label: '交付要求', text: record.value.delivery_requirements })
+  }
+  if (record.value?.process_records) {
+    items.push({ key: 'process_records', label: '过程记录', text: record.value.process_records })
+  }
+  return items
+})
+
+function isLongText(text: string): boolean {
+  return text.length > LONG_TEXT_COLLAPSE_LIMIT
+}
+
+function toggleLongText(key: string) {
+  longTextExpanded.value[key] = !longTextExpanded.value[key]
 }
 
 async function fetchRecord() {
@@ -89,20 +137,6 @@ async function fetchRecord() {
           }
         }
       } catch { rawTables.value = [] }
-    }
-    try {
-      summary.value = await getAttachmentSummary('project', res.id, detailAny.project_type)
-      // 从分类列表获取 item_id -> 分类名称的映射
-      if (summary.value) {
-        const catRes = await listAttachmentCategories('project', detailAny.project_type || undefined)
-        for (const cat of catRes.items) {
-          for (const item of cat.items || []) {
-            categoryLabels[item.id] = cat.name
-          }
-        }
-      }
-    } catch {
-      summary.value = null
     }
   } catch {
     // 错误已统一处理
@@ -142,24 +176,14 @@ async function handleDelete() {
   }
 }
 
-// ============================================================
-// 附件状态辅助
-// ============================================================
-function statusTagType(confirmed: boolean, fileCount: number): 'success' | 'danger' | 'info' {
-  if (fileCount === 0) return 'info'
-  return confirmed ? 'success' : 'danger'
-}
-
-function statusText(confirmed: boolean, fileCount: number): string {
-  if (fileCount === 0) return '未上传'
-  return confirmed ? '已确认' : '未确认'
-}
-
-const categoryLabels: Record<string, string> = {}
-
-
 onMounted(() => {
+  updateDescriptionsColumn()
+  window.addEventListener('resize', updateDescriptionsColumn)
   fetchRecord()
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', updateDescriptionsColumn)
 })
 </script>
 
@@ -177,7 +201,7 @@ onMounted(() => {
       <div class="header-left">
         <h1 class="header-title">{{ record?.name || '...' }}</h1>
         <div class="header-sub">
-          <span class="header-company">{{ COMPANY_MAP[record?.company_code || ''] || record?.company_code || '-' }}</span>
+          <span class="header-company">{{ COMPANY_MAP[record?.company_code || ''] || record?.company_code || '—' }}</span>
           <el-tag
             v-if="record"
             :type="CONTRACT_TYPE_TAG[record.contract_type as ContractType] || 'info'"
@@ -199,48 +223,55 @@ onMounted(() => {
     <!-- 合同基本信息 -->
     <section class="detail-section">
       <div class="dialog-section-title">合同信息</div>
-      <el-descriptions :column="3" border>
-        <el-descriptions-item label="合同名称">{{ record?.name || '-' }}</el-descriptions-item>
+      <el-descriptions :column="descriptionsColumn" border>
         <el-descriptions-item label="所属公司">
-          {{ COMPANY_MAP[record?.company_code || ''] || record?.company_code || '-' }}
+          {{ COMPANY_MAP[record?.company_code || ''] || record?.company_code || '—' }}
         </el-descriptions-item>
         <el-descriptions-item label="合同编号">
-          {{ record?.contract_no || '-' }}
-        </el-descriptions-item>
-        <el-descriptions-item label="甲方">
-          {{ record?.party_a_name || '-' }}
-        </el-descriptions-item>
-        <el-descriptions-item label="乙方">
-          {{ record?.party_b_name || '-' }}
+          <span v-if="record?.contract_no">{{ record.contract_no }}</span>
+          <span v-else class="muted">—</span>
         </el-descriptions-item>
         <el-descriptions-item label="合同日期">
-          {{ formatDate(record?.start_date) }} ~ {{ formatDate(record?.end_date) }}
+          <span v-if="dateRange">{{ dateRange }}</span>
+          <span v-else class="muted">—</span>
+        </el-descriptions-item>
+        <el-descriptions-item label="甲方">
+          <span v-if="record?.party_a_name">{{ record.party_a_name }}</span>
+          <span v-else class="muted">—</span>
+        </el-descriptions-item>
+        <el-descriptions-item label="乙方">
+          <span v-if="record?.party_b_name">{{ record.party_b_name }}</span>
+          <span v-else class="muted">—</span>
         </el-descriptions-item>
         <el-descriptions-item label="合同金额">
           <span v-if="record?.amount" class="col-amount">{{ formatAmount(record.amount) }}</span>
           <span v-else class="muted">自动计算</span>
         </el-descriptions-item>
         <el-descriptions-item label="负责人">
-          {{ record?.responsible_person || '-' }}
-        </el-descriptions-item>
-        <el-descriptions-item label="商务">
-          {{ record?.business_person || '-' }}
-        </el-descriptions-item>
-        <el-descriptions-item label="甲方委派人">
-          {{ record?.party_a_contact || '-' }}
-        </el-descriptions-item>
-        <el-descriptions-item label="乙方委派人">
-          {{ record?.party_b_contact || '-' }}
-        </el-descriptions-item>
-        <el-descriptions-item label="所属项目" :span="3">
-          <span v-if="record?.project_name">{{ record.project_name }}</span>
+          <span v-if="record?.responsible_person">{{ record.responsible_person }}</span>
           <span v-else class="muted">—</span>
         </el-descriptions-item>
-        <el-descriptions-item label="项目类型" :span="3">
+        <el-descriptions-item label="商务">
+          <span v-if="record?.business_person">{{ record.business_person }}</span>
+          <span v-else class="muted">—</span>
+        </el-descriptions-item>
+        <el-descriptions-item label="甲方委派人">
+          <span v-if="record?.party_a_contact">{{ record.party_a_contact }}</span>
+          <span v-else class="muted">—</span>
+        </el-descriptions-item>
+        <el-descriptions-item label="乙方委派人">
+          <span v-if="record?.party_b_contact">{{ record.party_b_contact }}</span>
+          <span v-else class="muted">—</span>
+        </el-descriptions-item>
+        <el-descriptions-item label="项目类型">
           <span v-if="record?.project_type">{{ record.project_type }}</span>
           <span v-else class="muted">—</span>
         </el-descriptions-item>
-        <el-descriptions-item label="备注" :span="3">
+        <el-descriptions-item label="所属项目">
+          <span v-if="record?.project_name">{{ record.project_name }}</span>
+          <span v-else class="muted">—</span>
+        </el-descriptions-item>
+        <el-descriptions-item label="备注" :span="descriptionsColumn">
           <span v-if="record?.remark">{{ record.remark }}</span>
           <span v-else class="muted">—</span>
         </el-descriptions-item>
@@ -248,20 +279,26 @@ onMounted(() => {
     </section>
 
     <!-- 合同详细内容 -->
-    <section
-      v-if="record?.contract_content || record?.delivery_requirements || record?.process_records"
-      class="detail-section"
-    >
+    <section v-if="longTextItems.length > 0" class="detail-section">
       <div class="dialog-section-title">合同详细内容</div>
       <el-descriptions :column="1" border>
-        <el-descriptions-item v-if="record?.contract_content" label="合同内容">
-          <div class="long-text">{{ record.contract_content }}</div>
-        </el-descriptions-item>
-        <el-descriptions-item v-if="record?.delivery_requirements" label="交付要求">
-          <div class="long-text">{{ record.delivery_requirements }}</div>
-        </el-descriptions-item>
-        <el-descriptions-item v-if="record?.process_records" label="过程记录">
-          <div class="long-text">{{ record.process_records }}</div>
+        <el-descriptions-item v-for="item in longTextItems" :key="item.key" :label="item.label">
+          <div class="long-text-wrap">
+            <div
+              class="long-text"
+              :class="{ collapsed: isLongText(item.text) && !longTextExpanded[item.key] }"
+            >{{ item.text }}</div>
+            <el-button
+              v-if="isLongText(item.text)"
+              link
+              type="primary"
+              size="small"
+              class="long-text-toggle"
+              @click="toggleLongText(item.key)"
+            >
+              {{ longTextExpanded[item.key] ? '收起' : '展开全文' }}
+            </el-button>
+          </div>
         </el-descriptions-item>
       </el-descriptions>
     </section>
@@ -291,7 +328,7 @@ onMounted(() => {
           <el-table-column v-for="(h, hi) in table.headers" :key="hi" :label="h" :prop="String(hi)" min-width="120">
             <template #default="{ row }">
               <span v-if="row[hi]" class="raw-cell-text">{{ row[hi] }}</span>
-              <span v-else class="muted">-</span>
+              <span v-else class="muted">—</span>
             </template>
           </el-table-column>
         </el-table>
@@ -299,18 +336,19 @@ onMounted(() => {
 
       <!-- 服务备注 -->
       <div v-if="record?.service_lines && record.service_lines.length > 0" class="service-notes">
-        <div class="service-notes-header">
-          <div class="service-notes-title">服务备注</div>
-        </div>
+        <div class="service-notes-title">服务备注</div>
         <div
           v-for="(line, idx) in record.service_lines"
           :key="line.id || idx"
           class="service-note-card"
         >
-          <div class="service-note-name">{{ line.item_name || '-' }}</div>
+          <div class="service-note-name">
+            <span v-if="line.item_name">{{ line.item_name }}</span>
+            <span v-else class="muted">—</span>
+          </div>
           <div class="service-note-desc">
             <span v-if="line.service_description">{{ line.service_description }}</span>
-            <span v-else class="muted">暂无描述</span>
+            <span v-else class="muted">—</span>
           </div>
         </div>
       </div>
@@ -337,58 +375,6 @@ onMounted(() => {
         <div class="related-contract-arrow">
           查看详情 →
         </div>
-      </div>
-    </section>
-
-    <!-- 附件状态 -->
-    <section class="detail-section">
-      <div class="section-toolbar">
-        <div class="dialog-section-title">附件状态</div>
-        <div class="section-actions">
-          <el-button type="primary" size="small" @click="goAttachments">
-            <el-icon class="btn-icon"><Paperclip /></el-icon>附件管理
-          </el-button>
-        </div>
-      </div>
-      <div class="attachment-status-grid">
-        <div
-          v-for="(label, code) in categoryLabels"
-          :key="code"
-          class="status-card"
-        >
-          <div class="status-card-header">
-            <span>{{ label }}</span>
-            <el-tag
-              :type="statusTagType(
-                summary?.items?.[code]?.confirmed ?? false,
-                summary?.items?.[code]?.file_count ?? 0
-              )"
-              size="small"
-            >
-              {{ statusText(
-                summary?.items?.[code]?.confirmed ?? false,
-                summary?.items?.[code]?.file_count ?? 0
-              ) }}
-            </el-tag>
-          </div>
-          <div class="status-card-body">
-            <span class="status-stat">
-              <strong>{{ summary?.items?.[code]?.file_count ?? 0 }}</strong> 个文件
-            </span>
-          </div>
-        </div>
-      </div>
-      <div class="attachment-summary">
-        <span class="muted">
-          总计：{{ summary?.confirmed_items ?? 0 }} / {{ summary?.total_items ?? 0 }} 项已确认
-        </span>
-        <el-tag
-          v-if="summary?.all_confirmed"
-          type="success"
-          size="small"
-        >
-          全部完成
-        </el-tag>
       </div>
     </section>
   </div>
@@ -445,29 +431,6 @@ onMounted(() => {
   margin-bottom: 12px;
 }
 
-.section-toolbar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-  margin-bottom: 12px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid #e5e7eb;
-}
-.section-toolbar .dialog-section-title {
-  margin: 0;
-  padding-top: 0;
-  padding-right: 0;
-  padding-bottom: 0;
-  border-bottom: none;
-}
-.section-actions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
 .muted {
   color: var(--text-secondary);
   font-size: 12px;
@@ -479,11 +442,27 @@ onMounted(() => {
   font-weight: 600;
   color: var(--text-primary);
 }
+
+.long-text-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
 .long-text {
+  width: 100%;
   white-space: pre-wrap;
   line-height: 1.6;
   word-break: break-word;
   color: var(--text-primary);
+  text-align: left;
+}
+.long-text.collapsed {
+  max-height: 300px;
+  overflow: hidden;
+}
+.long-text-toggle {
+  padding: 0;
 }
 
 .stats-panel {
@@ -544,14 +523,12 @@ onMounted(() => {
 .service-notes {
   margin-top: 4px;
 }
-.service-notes-header {
-  margin-bottom: 10px;
-}
 .service-notes-title {
   font-size: 13px;
   font-weight: 600;
   color: var(--text-primary);
   line-height: 1.3;
+  margin-bottom: 10px;
 }
 .service-note-card {
   display: flex;
@@ -564,7 +541,7 @@ onMounted(() => {
   border-radius: 8px;
 }
 .service-note-name {
-  width: 200px;
+  width: clamp(120px, 20%, 240px);
   flex-shrink: 0;
   font-size: 13px;
   font-weight: 600;
@@ -574,6 +551,7 @@ onMounted(() => {
 }
 .service-note-desc {
   flex: 1;
+  min-width: 0;
   font-size: 13px;
   color: var(--text-primary);
   line-height: 1.5;
@@ -582,7 +560,10 @@ onMounted(() => {
 }
 
 .related-contract-card {
-  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
   cursor: pointer;
   border-radius: 8px;
   padding: 16px 20px;
@@ -596,7 +577,8 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding-right: 100px;
+  flex: 1;
+  min-width: 0;
 }
 .related-contract-name {
   font-size: 16px;
@@ -614,51 +596,10 @@ onMounted(() => {
   color: var(--text-secondary);
 }
 .related-contract-arrow {
-  position: absolute;
-  top: 50%;
-  right: 20px;
-  transform: translateY(-50%);
+  flex-shrink: 0;
+  white-space: nowrap;
   color: var(--primary-color);
   font-size: 14px;
   font-weight: 500;
-}
-
-.attachment-status-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 12px;
-}
-.status-card {
-  background: #f8fafc;
-  border-radius: 8px;
-  padding: 14px 16px;
-}
-.status-card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 8px;
-  font-weight: 600;
-  font-size: 13px;
-  color: var(--text-primary);
-  margin-bottom: 8px;
-}
-.status-card-body {
-  padding: 0;
-}
-.status-stat {
-  font-size: 13px;
-  color: var(--text-secondary);
-}
-.status-stat strong {
-  color: var(--text-primary);
-  font-size: 18px;
-  margin-right: 2px;
-}
-.attachment-summary {
-  margin-top: 12px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
 }
 </style>

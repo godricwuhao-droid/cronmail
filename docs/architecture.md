@@ -411,3 +411,27 @@ backend-beat Deployment (replicas: 1)    → 连接 Redis (调度器)
 - MySQL/Redis 不在 K8s 内管理，通过 Secret 配置外部连接地址
 - 前端 Nginx 需要配置 SPA 路由（`try_files $uri /index.html`）
 
+---
+
+## 双平台拆分（2026-10-07 起，见 ADR-019）
+
+自 ADR-019 起，系统拆分为两个独立平台，**分支隔离 + namespace 隔离**：
+
+| | 资产运营管理平台 | 项目管理平台（规划中） |
+|---|---|---|
+| 代码分支 | `platform-asset-ops` | 当前主线（后续单独任务裁剪） |
+| K8s namespace | `asset-ops` | `cronmail`（现有，不动） |
+| NodePort | 前端 30083 / 后端 30084 | 30081 / 30082（现有） |
+| 镜像 | `asset-ops-backend` / `asset-ops-frontend` | `cronmail-backend` / `cronmail-frontend` |
+| 模块 | 客户/设备(租赁)/算力租赁合同/邮件模板/发送日志/定时任务(Celery)/系统配置(SMTP 等) | 项目三公司台账/项目附件/LLM 解析/回款/项目配置 |
+
+### 共享设施
+
+- **MySQL**：独立库——项目管理平台用现有 `cronmail` 库，资产运营管理平台用新建 `asset_ops` 库（一次性从 `cronmail` 复制资产侧表数据，不含 `project_*` 表）
+- **文件存储**：同一 PV，各自 namespace 建 PVC
+- **document-converter**：项目侧通过环境变量指向 `cronmail` namespace 的现有 ClusterIP
+
+### 关键约定
+
+- 两分支禁止互相 merge；attachment 等共享模块的同步升级用 diff 手工移植，changelog 标注"双平台同步"
+- SystemConfig 键名空间：资产侧 smtp/dingtalk/调度类，项目侧 llm_* 类

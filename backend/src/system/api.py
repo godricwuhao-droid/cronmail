@@ -111,6 +111,75 @@ def test_dingtalk_config(
 
 
 # ============================================================
+# LLM 配置（动态读取，优先级高于环境变量）
+# ============================================================
+
+_LLM_CONFIG_KEYS = {
+    "llm_base_url": "OCR 视觉模型 API 地址",
+    "llm_api_key": "OCR 视觉模型 API Key",
+    "llm_model": "OCR 视觉模型名",
+    "llm_base_url_extract": "Extract 文本模型 API 地址",
+    "llm_api_key_extract": "Extract 文本模型 API Key",
+    "llm_model_extract": "Extract 文本模型名",
+}
+
+_LLM_API_KEY_FIELDS = ("llm_api_key", "llm_api_key_extract")
+
+
+def _build_llm_config_response(db: Session) -> dict:
+    """构建 LLM 配置响应（api_key 脱敏）"""
+    from src.core.config import settings
+
+    defaults = {
+        "llm_base_url": settings.LLM_BASE_URL,
+        "llm_api_key": settings.LLM_API_KEY,
+        "llm_model": settings.LLM_MODEL,
+        "llm_base_url_extract": settings.LLM_BASE_URL_EXTRACT,
+        "llm_api_key_extract": settings.LLM_API_KEY_EXTRACT,
+        "llm_model_extract": settings.LLM_MODEL_EXTRACT,
+    }
+
+    result = {}
+    for key in _LLM_CONFIG_KEYS:
+        config = db.query(SystemConfig).filter(SystemConfig.key == key).first()
+        db_value = config.value if config and config.value else ""
+        if key in _LLM_API_KEY_FIELDS:
+            # api_key 脱敏：DB 有值返回 ***，无值返回 ""
+            result[key] = "***" if db_value else ""
+        else:
+            # 非 key 字段：DB 有值用 DB，否则用环境变量
+            result[key] = db_value if db_value else defaults[key]
+    return result
+
+
+@system_router.get("/llm-config")
+def get_llm_config(db: Session = Depends(get_db)):
+    """获取 LLM 配置（api_key 脱敏为 ***）"""
+    return _build_llm_config_response(db)
+
+
+@system_router.put("/llm-config")
+def update_llm_config(data: dict, db: Session = Depends(get_db)):
+    """更新 LLM 配置
+    - api_key 传 "***" 表示不更新（保留原值）
+    - api_key 传 "" 表示清空（使用环境变量 fallback）
+    - 其他字段直接 upsert
+    """
+    for key, description in _LLM_CONFIG_KEYS.items():
+        if key not in data:
+            continue
+        value = str(data[key]).strip() if data[key] is not None else ""
+
+        if key in _LLM_API_KEY_FIELDS and value == "***":
+            # api_key 传 *** 表示保留原值，跳过
+            continue
+
+        services.upsert_system_config(db, key, value, description)
+
+    return _build_llm_config_response(db)
+
+
+# ============================================================
 # SystemConfig CRUD
 # ============================================================
 

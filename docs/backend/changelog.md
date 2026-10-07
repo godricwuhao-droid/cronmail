@@ -1,5 +1,48 @@
 # CronMail 后端变更日志
 
+## 2026-08-31 (部署) — LLM 配置动态化功能上线
+
+| 日期 | 类型 | 变更内容 | 影响文件/范围 | 关联任务 | 备注 |
+|------|------|---------|-------------|---------|------|
+| 2026-08-31 | 部署 | LLM 配置动态化功能上线 | Dockerfile.backend, K8s cronmail 命名空间 | TASK-LLM-CONFIG | 镜像构建+推送+三个 Deployment 滚动更新 |
+
+### 部署
+- **后端镜像构建 + K8s 滚动更新（全量）**
+  - 影响文件：`Dockerfile.backend`
+  - 变更内容：
+    1. Docker 构建 `harbor.xhwltech.com/xhcloud/cronmail-backend:latest`（镜像 ID: `86e3adb65dfc`）
+    2. 推送镜像到 Harbor（digest: `sha256:7b0f23570e1ccf62fe5fc7f702f14f3689452f8b9f0857e0a816df3fd1546fe6`）
+    3. 滚动重启三个 Deployment：
+       - `cronmail-backend-api` — successfully rolled out
+       - `cronmail-backend-worker` — successfully rolled out
+       - `cronmail-backend-beat` — successfully rolled out
+    4. 所有 Pod 状态 Running（1/1 Ready），无 CrashLoopBackOff / ImagePullBackOff
+  - 构建代理：`http://192.168.180.251:7890`
+  - 关联任务：TASK-LLM-CONFIG（LLM 配置动态化）
+
+---
+
+## 2026-08-10 (新增) — LLM 配置动态化（API + 解析服务动态读取）
+
+| 日期 | 类型 | 变更内容 | 影响文件/范围 | 关联任务 | 备注 |
+|------|------|---------|-------------|---------|------|
+| 2026-08-10 | 新增 | 新增 `GET/PUT /api/system/llm-config` 端点，管理 6 个 LLM 模型配置（OCR + Extract），api_key 脱敏 | backend/src/system/api.py | TASK-LLM-CONFIG | 路由定义在 `config/{key}` 之前避免冲突 |
+| 2026-08-10 | 修改 | `contract_parser/services.py` 新增 `_get_llm_config()` 辅助函数，每次创建 OpenAI client 前从 DB 读取最新配置，fallback 到环境变量 | backend/src/contract_parser/services.py | TASK-LLM-CONFIG | 5 处 OpenAI client 创建点全部改为动态读取，无需重启 |
+
+### 新增
+- **`GET /api/system/llm-config`**：返回 6 个 LLM 配置字段，api_key 脱敏为 `***`（DB 有值）或 `""`（DB 无值）
+- **`PUT /api/system/llm-config`**：批量 upsert 6 个配置到 SystemConfig 表
+  - api_key 传 `***` 表示保留原值
+  - api_key 传 `""` 表示清空（使用环境变量 fallback）
+- **`_get_llm_config(db_session=None)`**：contract_parser 专用辅助函数，从 DB 读取 LLM 配置，DB 无值时 fallback 到 `settings` 环境变量
+
+### 修改
+- `parse_contract_vision()`：OCR client + extract client 改为动态读取
+- `parse_contract_stream()`：OCR client + extract client 改为动态读取
+- `parse_payment_receipt()`：client 改为动态读取
+
+---
+
 ## 2026-08-10 (修改) — 合同解析阶段2换用 DeepSeek-V4-Flash 并开启 thinking
 
 | 日期 | 类型 | 变更内容 | 影响文件/范围 | 关联任务 | 备注 |

@@ -91,6 +91,56 @@ def extract_text_from_doc(file_bytes: bytes) -> str:
         except FileNotFoundError:
             raise ValueError("antiword 未安装，请联系管理员")
 
+def _get_llm_config(db_session=None) -> dict:
+    """从 DB 读取 LLM 配置，fallback 到环境变量
+
+    Returns:
+        {
+            "base_url": str,
+            "api_key": str,
+            "model": str,
+            "base_url_extract": str,
+            "api_key_extract": str,
+            "model_extract": str,
+        }
+    """
+    from src.core.database import SessionLocal
+    from src.system.models import SystemConfig
+
+    defaults = {
+        "base_url": settings.LLM_BASE_URL,
+        "api_key": settings.LLM_API_KEY,
+        "model": settings.LLM_MODEL,
+        "base_url_extract": settings.LLM_BASE_URL_EXTRACT,
+        "api_key_extract": settings.LLM_API_KEY_EXTRACT,
+        "model_extract": settings.LLM_MODEL_EXTRACT,
+    }
+
+    created_session = False
+    if db_session is None:
+        db_session = SessionLocal()
+        created_session = True
+
+    try:
+        key_map = {
+            "llm_base_url": "base_url",
+            "llm_api_key": "api_key",
+            "llm_model": "model",
+            "llm_base_url_extract": "base_url_extract",
+            "llm_api_key_extract": "api_key_extract",
+            "llm_model_extract": "model_extract",
+        }
+        for db_key, field in key_map.items():
+            config = db_session.query(SystemConfig).filter(SystemConfig.key == db_key).first()
+            if config and config.value:
+                defaults[field] = config.value
+    finally:
+        if created_session:
+            db_session.close()
+
+    return defaults
+
+
 def parse_contract(file_bytes: bytes, filename: str, contract_type: str) -> dict:
     """解析合同文件 — 所有格式统一走 Vision 多模态图片识别
 
@@ -162,9 +212,10 @@ def parse_contract_vision(file_bytes: bytes, filename: str, contract_type: str, 
     # ============================================================
     from src.contract_parser.prompts import OCR_SYSTEM_PROMPT, get_ocr_batch_prompt
 
+    llm_cfg = _get_llm_config()
     client = OpenAI(
-        base_url=settings.LLM_BASE_URL,
-        api_key=settings.LLM_API_KEY,
+        base_url=llm_cfg["base_url"],
+        api_key=llm_cfg["api_key"],
         timeout=300,
     )
 
@@ -188,7 +239,7 @@ def parse_contract_vision(file_bytes: bytes, filename: str, contract_type: str, 
 
         try:
             response = client.chat.completions.create(
-                model=settings.LLM_MODEL,
+                model=llm_cfg["model"],
                 messages=[
                     {"role": "system", "content": OCR_SYSTEM_PROMPT},
                     {"role": "user", "content": content},
@@ -220,14 +271,14 @@ def parse_contract_vision(file_bytes: bytes, filename: str, contract_type: str, 
     extract_prompt = get_extract_prompt(contract_type, full_text)
 
     extract_client = OpenAI(
-        base_url=settings.LLM_BASE_URL_EXTRACT,
-        api_key=settings.LLM_API_KEY_EXTRACT,
+        base_url=llm_cfg["base_url_extract"],
+        api_key=llm_cfg["api_key_extract"],
         timeout=300,
     )
 
     try:
         response = extract_client.chat.completions.create(
-            model=settings.LLM_MODEL_EXTRACT,
+            model=llm_cfg["model_extract"],
             messages=[
                 {"role": "system", "content": EXTRACT_SYSTEM_PROMPT},
                 {"role": "user", "content": extract_prompt},
@@ -307,7 +358,8 @@ def parse_payment_receipt(file_bytes: bytes, filename: str) -> dict:
     batches = list(_chunk_list(images_b64, batch_size))
     total_batches = len(batches)
 
-    client = OpenAI(api_key=settings.LLM_API_KEY, base_url=settings.LLM_BASE_URL)
+    llm_cfg = _get_llm_config()
+    client = OpenAI(api_key=llm_cfg["api_key"], base_url=llm_cfg["base_url"])
 
     for batch_num, batch in enumerate(batches, 1):
         start_page = (batch_num - 1) * batch_size + 1
@@ -317,7 +369,7 @@ def parse_payment_receipt(file_bytes: bytes, filename: str) -> dict:
             content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}})
 
         response = client.chat.completions.create(
-            model=settings.LLM_MODEL,
+            model=llm_cfg["model"],
             messages=[{"role": "user", "content": content}],
             temperature=0.1,
             max_tokens=8192,
@@ -332,7 +384,7 @@ def parse_payment_receipt(file_bytes: bytes, filename: str) -> dict:
     # 阶段 2：提取
     extract_prompt = PAYMENT_RECEIPT_EXTRACT_PROMPT.format(full_text=full_text)
     response = client.chat.completions.create(
-        model=settings.LLM_MODEL,
+        model=llm_cfg["model"],
         messages=[
             {"role": "system", "content": PAYMENT_RECEIPT_SYSTEM_PROMPT},
             {"role": "user", "content": extract_prompt},
@@ -524,9 +576,10 @@ async def parse_contract_stream(file_bytes: bytes, filename: str, contract_type:
     # ============================================================
     from src.contract_parser.prompts import OCR_SYSTEM_PROMPT, get_ocr_batch_prompt
 
+    llm_cfg = _get_llm_config()
     client = OpenAI(
-        base_url=settings.LLM_BASE_URL,
-        api_key=settings.LLM_API_KEY,
+        base_url=llm_cfg["base_url"],
+        api_key=llm_cfg["api_key"],
         timeout=300,
     )
 
@@ -549,7 +602,7 @@ async def parse_contract_stream(file_bytes: bytes, filename: str, contract_type:
         try:
             response = await loop.run_in_executor(
                 None,
-                lambda content=content, sp=OCR_SYSTEM_PROMPT, m=settings.LLM_MODEL: client.chat.completions.create(
+                lambda content=content, sp=OCR_SYSTEM_PROMPT, m=llm_cfg["model"]: client.chat.completions.create(
                     model=m,
                     messages=[{"role": "system", "content": sp}, {"role": "user", "content": content}],
                     temperature=0.1, max_tokens=16384,
@@ -588,15 +641,15 @@ async def parse_contract_stream(file_bytes: bytes, filename: str, contract_type:
     extract_prompt = get_extract_prompt(contract_type, full_text)
 
     extract_client = OpenAI(
-        base_url=settings.LLM_BASE_URL_EXTRACT,
-        api_key=settings.LLM_API_KEY_EXTRACT,
+        base_url=llm_cfg["base_url_extract"],
+        api_key=llm_cfg["api_key_extract"],
         timeout=300,
     )
 
     try:
         response = await loop.run_in_executor(
             None,
-            lambda ep=extract_prompt, sp=EXTRACT_SYSTEM_PROMPT, m=settings.LLM_MODEL_EXTRACT, c=extract_client: c.chat.completions.create(
+            lambda ep=extract_prompt, sp=EXTRACT_SYSTEM_PROMPT, m=llm_cfg["model_extract"], c=extract_client: c.chat.completions.create(
                 model=m,
                 messages=[{"role": "system", "content": sp}, {"role": "user", "content": ep}],
                 temperature=0.3, max_tokens=32768,
