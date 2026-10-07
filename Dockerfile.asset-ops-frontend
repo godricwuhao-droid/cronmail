@@ -1,0 +1,27 @@
+# 资产运营管理平台前端镜像（多阶段构建，ADR-019）
+# 与 Dockerfile.frontend 的唯一差异：使用 nginx.asset-ops.conf（/api 反代指向 asset-ops namespace 的 backend）
+# 阶段 1: Node.js 构建 Vue 3 SPA
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+# 安装依赖（利用 Docker 层缓存）
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+
+# 复制源码并构建
+COPY frontend/ .
+RUN npm run build
+
+# 阶段 2: Nginx 托管静态文件
+FROM nginx:alpine
+
+# 复制构建产物
+COPY --from=builder /app/dist /usr/share/nginx/html
+
+# 复制 Nginx 配置（asset-ops 专用，/api 反代指向 asset-ops-backend）
+COPY frontend/nginx.asset-ops.conf /etc/nginx/nginx.conf
+
+EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]

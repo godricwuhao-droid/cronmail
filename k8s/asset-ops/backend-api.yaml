@@ -1,0 +1,104 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: asset-ops-backend-api
+  namespace: asset-ops
+  labels:
+    app: asset-ops-backend
+    component: api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: asset-ops-backend
+      component: api
+  template:
+    metadata:
+      labels:
+        app: asset-ops-backend
+        component: api
+    spec:
+      # Pod 级别安全上下文（确保挂载卷的组归属正确）
+      securityContext:
+        fsGroup: 1000
+        runAsGroup: 1000
+        runAsUser: 1000
+        runAsNonRoot: true
+      containers:
+        - name: backend
+          image: harbor.xhwltech.com/xhcloud/asset-ops-backend:latest
+          imagePullPolicy: Always
+          command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+          ports:
+            - containerPort: 8000
+              name: http
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: asset-ops-config
+            - secretRef:
+                name: asset-ops-secret
+          env:
+            - name: TZ
+              value: "Asia/Shanghai"
+            - name: CORS_ORIGINS
+              value: '["*"]'
+          # 健康检查
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 30
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 15
+            timeoutSeconds: 10
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: attachments
+              mountPath: /app/uploads
+              readOnly: false
+      volumes:
+        - name: attachments
+          persistentVolumeClaim:
+            claimName: asset-ops-attachments-pvc
+      restartPolicy: Always
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: asset-ops-backend
+  namespace: asset-ops
+  labels:
+    app: asset-ops-backend
+spec:
+  type: NodePort
+  selector:
+    app: asset-ops-backend
+    component: api
+  ports:
+    - port: 8000
+      targetPort: 8000
+      protocol: TCP
+      name: http
+      nodePort: 30084

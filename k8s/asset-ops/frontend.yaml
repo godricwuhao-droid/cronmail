@@ -1,0 +1,68 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: asset-ops-frontend
+  namespace: asset-ops
+  labels:
+    app: asset-ops-frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: asset-ops-frontend
+  template:
+    metadata:
+      labels:
+        app: asset-ops-frontend
+    spec:
+      containers:
+        - name: nginx
+          image: harbor.xhwltech.com/xhcloud/asset-ops-frontend:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 80
+              name: http
+              protocol: TCP
+          # Nginx 存活检查
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 3
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      restartPolicy: Always
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: asset-ops-frontend
+  namespace: asset-ops
+  labels:
+    app: asset-ops-frontend
+spec:
+  type: NodePort
+  selector:
+    app: asset-ops-frontend
+  ports:
+    - port: 80
+      targetPort: 80
+      nodePort: 30083
+      protocol: TCP
+      name: http

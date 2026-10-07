@@ -1,0 +1,26 @@
+# 资产运营管理平台附件存储 PersistentVolume (NFS)
+# 说明（ADR-019）：原计划让 asset-ops 的 PVC 直接绑定 cronmail-attachments-pv，
+# 但该 PV 已被 cronmail/cronmail-attachments-pvc 的 claimRef 独占绑定
+# （一个 PV 同一时刻只能绑定一个 PVC），且不允许改动现有 PV。
+# 方案：新建一个指向**同一 NFS 路径**（192.168.180.50:/cronmail）的 PV，
+# NFS 支持多客户端同时挂载同一目录，两平台共享同一份附件数据，零文件迁移。
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: asset-ops-attachments-pv
+  labels:
+    app: asset-ops
+    purpose: attachments
+spec:
+  capacity:
+    storage: 100Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  mountOptions:
+    - lookupcache=none
+  nfs:
+    server: 192.168.180.50
+    path: /cronmail

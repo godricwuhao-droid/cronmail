@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: asset-ops-backend-worker
+  namespace: asset-ops
+  labels:
+    app: asset-ops-backend
+    component: worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: asset-ops-backend
+      component: worker
+  template:
+    metadata:
+      labels:
+        app: asset-ops-backend
+        component: worker
+    spec:
+      containers:
+        - name: worker
+          image: harbor.xhwltech.com/xhcloud/asset-ops-backend:latest
+          imagePullPolicy: Always
+          command: ["celery", "-A", "src.scheduler.celery_app", "worker", "--loglevel=info"]
+          envFrom:
+            - configMapRef:
+                name: asset-ops-config
+            - secretRef:
+                name: asset-ops-secret
+          env:
+            - name: TZ
+              value: "Asia/Shanghai"
+            - name: CELERY_WORKER_CONCURRENCY
+              value: "2"
+          # Worker 进程存活检查（轻量级，避免误杀）
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - "pgrep -f 'celery.*worker' > /dev/null"
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 5
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+      restartPolicy: Always
