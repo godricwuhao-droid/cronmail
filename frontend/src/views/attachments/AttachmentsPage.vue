@@ -1,13 +1,9 @@
 <script setup lang="ts">
 /**
- * 附件管理页（可复用）— 双栏文件管理器布局
+ * 附件管理页 — 双栏文件管理器布局
  *
- * 根据 URL 参数 contract_type 和 contract_id 显示对应合同的附件管理界面。
- *
- * contract_type 从路由推断：
- *   - /contracts/compute-leasing/:id/attachments  → compute_leasing
- *   - /contracts/satellite-data/:id/attachments    → satellite_data
- *   - /contracts/compute-service/:id/attachments   → compute_service
+ * 路由：/contracts/compute-leasing/:id/attachments
+ * contract_type 固定为 compute_leasing（资产平台仅保留算力租赁合同附件）。
  */
 import { computed, onMounted, ref, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -53,14 +49,9 @@ const route = useRoute()
 const router = useRouter()
 
 // ============================================================
-// 从路由推断 contract_type
+// 合同类型与 ID
 // ============================================================
-const contractType = computed<ContractType>(() => {
-  if (route.path.includes('/compute-leasing/')) return 'compute_leasing'
-  if (route.path.includes('/satellite-data/')) return 'satellite_data'
-  if (route.path.includes('/compute-service/')) return 'compute_service'
-  return 'compute_leasing'
-})
+const contractType: ContractType = 'compute_leasing'
 
 const contractId = computed(() => route.params.id as string)
 
@@ -92,7 +83,7 @@ async function fetchAttachments() {
   loading.value = true
   const previousSelectedId = selectedItemId.value
   try {
-    const res = await getAttachments(contractType.value, contractId.value)
+    const res = await getAttachments(contractType, contractId.value)
     categories.value = res.categories
     // 默认展开所有分类
     expandedCategories.value = res.categories.map((c) => c.category_id)
@@ -121,12 +112,7 @@ function goBack() {
 }
 
 function getListRoute() {
-  switch (contractType.value) {
-    case 'compute_leasing': return { name: 'ContractList' }
-    case 'satellite_data': return { name: 'SatelliteContractList' }
-    case 'compute_service': return { name: 'ServiceContractList' }
-    default: return { name: 'ContractList' }
-  }
+  return { name: 'ContractList' }
 }
 
 // ============================================================
@@ -150,7 +136,7 @@ function isExpanded(categoryId: string): boolean {
 // ============================================================
 async function handleConfirm(item: AttachmentItem) {
   try {
-    await confirmAttachmentItem(contractType.value, contractId.value, item.item_id)
+    await confirmAttachmentItem(contractType, contractId.value, item.item_id)
     ElMessage.success('已确认')
     fetchAttachments()
   } catch {
@@ -160,7 +146,7 @@ async function handleConfirm(item: AttachmentItem) {
 
 async function handleUnconfirm(item: AttachmentItem) {
   try {
-    await unconfirmAttachmentItem(contractType.value, contractId.value, item.item_id)
+    await unconfirmAttachmentItem(contractType, contractId.value, item.item_id)
     ElMessage.success('已取消确认')
     fetchAttachments()
   } catch {
@@ -189,7 +175,7 @@ async function handleUpload(file: File, itemId: string) {
   try {
     const formData = new FormData()
     formData.append('files', file)
-    const url = `/attachments/upload?contract_type=${contractType.value}&contract_id=${contractId.value}&item_id=${itemId}`
+    const url = `/attachments/upload?contract_type=${contractType}&contract_id=${contractId.value}&item_id=${itemId}`
     const { default: request } = await import('@/api')
     await request.post(url, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
@@ -230,7 +216,7 @@ function handleDownload(file: AttachmentFile) {
 // ============================================================
 function handleExportAllAttachments() {
   window.open(
-    `/api/attachments/export?contract_type=${contractType.value}&contract_id=${contractId.value}`,
+    `/api/attachments/export?contract_type=${contractType}&contract_id=${contractId.value}`,
     '_blank',
   )
 }

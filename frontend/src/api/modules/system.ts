@@ -151,27 +151,3 @@ export function updateDingTalkConfig(data: DingTalkConfigUpdate): Promise<DingTa
 export function testDingTalk(data: DingTalkTestRequest): Promise<DingTalkTestResponse> {
   return request.post('/system/dingtalk/test', data)
 }
-
-// ============================================================
-// 智能解析模型配置（LLM）
-// ============================================================
-
-/** LLM 配置响应 */
-export interface LlmConfig {
-  llm_base_url: string
-  llm_api_key: string  // 脱敏值 "***" 或 ""
-  llm_model: string
-  llm_base_url_extract: string
-  llm_api_key_extract: string  // 脱敏值 "***" 或 ""
-  llm_model_extract: string
-}
-
-/** 获取 LLM 配置 */
-export function getLlmConfig(): Promise<LlmConfig> {
-  return request.get('/system/llm-config', { __silent: true })
-}
-
-/** 更新 LLM 配置 */
-export function updateLlmConfig(data: Partial<LlmConfig>): Promise<LlmConfig> {
-  return request.put('/system/llm-config', data)
-}

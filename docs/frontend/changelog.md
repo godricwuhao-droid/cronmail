@@ -3820,3 +3820,4 @@ Copilot 对接 SSE 流式 + 显示图片 + 中文字段标签
 | 2026-09-16 | 修改 | 前端镜像构建推送并滚动部署（附件状态列 tooltip 修复）| harbor.xhwltech.com/xhcloud/cronmail-frontend:latest | 列表UI优化 | 部署验证通过 |
 | 2026-09-16 | 回退 | 附件状态列还原为改动前原始实现（用户反馈展示问题）| frontend/src/views/projects/index.vue | 列表UI优化 | 其余列表优化保留 |
 | 2026-09-16 | 修改 | 前端镜像构建推送并滚动部署（附件状态列还原为原始实现）| harbor.xhwltech.com/xhcloud/cronmail-frontend:latest | 列表UI优化 | 部署验证通过 |
+| 2026-10-07 | 重构 | 资产运营管理平台前端裁剪（删 projects/卫星/算力服务/项目报表/LLM 配置段，品牌更名）| frontend/src/ | ADR-019 平台拆分 | platform-asset-ops 分支 |

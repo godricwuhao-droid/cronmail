@@ -34,7 +34,6 @@
             </template>
             <el-menu-item index="/data-report/overview">运营概览</el-menu-item>
             <el-menu-item index="/data-report/rental-overview">租赁概览</el-menu-item>
-            <el-menu-item index="/data-report/project-overview">项目概览</el-menu-item>
           </el-sub-menu>
           <el-menu-item index="/customers">
             <el-icon><UserFilled /></el-icon>
@@ -46,17 +45,6 @@
               <span>合同管理</span>
             </template>
             <el-menu-item index="/contracts/compute-leasing">算力租赁</el-menu-item>
-            <el-menu-item index="/contracts/satellite-data">卫星数据</el-menu-item>
-            <el-menu-item index="/contracts/compute-service">算力服务</el-menu-item>
-          </el-sub-menu>
-          <el-sub-menu index="projects">
-            <template #title>
-              <el-icon><FolderOpened /></el-icon>
-              <span>项目管理</span>
-            </template>
-            <el-menu-item index="/projects/fengyun">蜂云时代</el-menu-item>
-            <el-menu-item index="/projects/tianshu">安徽天枢</el-menu-item>
-            <el-menu-item index="/projects/qianxing">千星控股</el-menu-item>
           </el-sub-menu>
           <el-menu-item index="/rentals">
             <el-icon><Document /></el-icon>
@@ -80,7 +68,6 @@
             <el-menu-item index="/system/colleagues">内部同事</el-menu-item>
             <el-menu-item index="/system/config">系统配置</el-menu-item>
             <el-menu-item index="/system/attachment-categories">附件分类管理</el-menu-item>
-            <el-menu-item index="/system/project-config">项目配置</el-menu-item>
           </el-sub-menu>
         </el-menu>
       </aside>
@@ -106,7 +93,6 @@ import {
   Promotion,
   CircleCheckFilled,
   DataAnalysis,
-  FolderOpened,
 } from '@element-plus/icons-vue'
 
 const route = useRoute()
@@ -115,14 +101,8 @@ const route = useRoute()
 const menuIndexes = [
   '/data-report/overview',
   '/data-report/rental-overview',
-  '/data-report/project-overview',
   '/customers',
   '/contracts/compute-leasing',
-  '/contracts/satellite-data',
-  '/contracts/compute-service',
-  '/projects/fengyun',
-  '/projects/tianshu',
-  '/projects/qianxing',
   '/rentals',
   '/templates',
   '/logs',
@@ -131,7 +111,6 @@ const menuIndexes = [
   '/system/colleagues',
   '/system/config',
   '/system/attachment-categories',
-  '/system/project-config',
 ]
 
 const activeMenu = computed(() => {
@@ -149,7 +128,6 @@ const defaultOpeneds = computed(() => {
   const openeds: string[] = []
   if (path.startsWith('/data-report')) openeds.push('data-report')
   if (path.startsWith('/contracts')) openeds.push('contracts')
-  if (path.startsWith('/projects')) openeds.push('projects')
   if (path.startsWith('/system')) openeds.push('system')
   return openeds
 })

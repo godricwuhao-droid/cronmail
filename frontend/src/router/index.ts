@@ -29,12 +29,6 @@ const routes: RouteRecordRaw[] = [
             component: () => import('@/views/data-report/rental-overview.vue'),
             meta: { title: '租赁概览', icon: 'TrendCharts', parent: 'data-report' },
           },
-          {
-            path: 'project-overview',
-            name: 'ProjectOverview',
-            component: () => import('@/views/reports/project-overview.vue'),
-            meta: { title: '项目概览', icon: 'DataAnalysis', parent: 'data-report' },
-          },
         ],
       },
 
@@ -97,114 +91,6 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '附件管理', icon: 'Monitor', hidden: true, parent: 'contracts' },
       },
 
-      // ---------- 卫星数据合同 ----------
-      {
-        path: 'contracts/satellite-data',
-        name: 'SatelliteContractList',
-        component: () => import('@/views/satellite-contracts/index.vue'),
-        meta: { title: '卫星数据', icon: 'DataAnalysis', parent: 'contracts' },
-      },
-      {
-        path: 'contracts/satellite-data/create',
-        name: 'SatelliteContractCreate',
-        component: () => import('@/views/satellite-contracts/form.vue'),
-        meta: { title: '新建卫星数据合同', icon: 'DataAnalysis', hidden: true, parent: 'contracts' },
-      },
-      {
-        path: 'contracts/satellite-data/:id',
-        name: 'SatelliteContractDetail',
-        component: () => import('@/views/satellite-contracts/detail.vue'),
-        meta: { title: '卫星数据合同详情', icon: 'DataAnalysis', hidden: true, parent: 'contracts' },
-      },
-      {
-        path: 'contracts/satellite-data/:id/edit',
-        name: 'SatelliteContractEdit',
-        component: () => import('@/views/satellite-contracts/form.vue'),
-        meta: { title: '编辑卫星数据合同', icon: 'DataAnalysis', hidden: true, parent: 'contracts' },
-      },
-      {
-        path: 'contracts/satellite-data/:id/attachments',
-        name: 'SatelliteDataAttachments',
-        component: () => import('@/views/attachments/AttachmentsPage.vue'),
-        meta: { title: '附件管理', icon: 'DataAnalysis', hidden: true, parent: 'contracts' },
-      },
-
-      // ---------- 算力服务合同 ----------
-      {
-        path: 'contracts/compute-service',
-        name: 'ServiceContractList',
-        component: () => import('@/views/service-contracts/index.vue'),
-        meta: { title: '算力服务', icon: 'Cpu', parent: 'contracts' },
-      },
-      {
-        path: 'contracts/compute-service/create',
-        name: 'ServiceContractCreate',
-        component: () => import('@/views/service-contracts/form.vue'),
-        meta: { title: '新建算力服务合同', icon: 'Cpu', hidden: true, parent: 'contracts' },
-      },
-      {
-        path: 'contracts/compute-service/:id',
-        name: 'ServiceContractDetail',
-        component: () => import('@/views/service-contracts/detail.vue'),
-        meta: { title: '算力服务合同详情', icon: 'Cpu', hidden: true, parent: 'contracts' },
-      },
-      {
-        path: 'contracts/compute-service/:id/edit',
-        name: 'ServiceContractEdit',
-        component: () => import('@/views/service-contracts/form.vue'),
-        meta: { title: '编辑算力服务合同', icon: 'Cpu', hidden: true, parent: 'contracts' },
-      },
-      {
-        path: 'contracts/compute-service/:id/attachments',
-        name: 'ComputeServiceAttachments',
-        component: () => import('@/views/attachments/AttachmentsPage.vue'),
-        meta: { title: '附件管理', icon: 'Cpu', hidden: true, parent: 'contracts' },
-      },
-
-      // ---------- 项目管理 ----------
-      {
-        path: 'projects',
-        redirect: '/projects/fengyun',
-        children: [
-          {
-            path: ':company',
-            name: 'ProjectList',
-            component: () => import('@/views/projects/index.vue'),
-            meta: { title: '项目管理', icon: 'FolderOpened', parent: 'projects' },
-          },
-          {
-            path: ':company/create',
-            name: 'ProjectCreate',
-            component: () => import('@/views/projects/form.vue'),
-            meta: { title: '新建合同', icon: 'FolderOpened', hidden: true, parent: 'projects' },
-          },
-          {
-            path: ':company/:id',
-            name: 'ProjectDetail',
-            component: () => import('@/views/projects/detail.vue'),
-            meta: { title: '合同详情', icon: 'FolderOpened', hidden: true, parent: 'projects' },
-          },
-          {
-            path: ':company/:id/edit',
-            name: 'ProjectEdit',
-            component: () => import('@/views/projects/form.vue'),
-            meta: { title: '编辑合同', icon: 'FolderOpened', hidden: true, parent: 'projects' },
-          },
-          {
-            path: ':company/:id/attachments',
-            name: 'ProjectAttachments',
-            component: () => import('@/views/projects/AttachmentsPage.vue'),
-            meta: { title: '附件管理', icon: 'FolderOpened', hidden: true, parent: 'projects' },
-          },
-          {
-            path: ':company/:id/payments',
-            name: 'ProjectPayments',
-            component: () => import('@/views/projects/payments.vue'),
-            meta: { title: '回款管理', hidden: true, parent: 'projects' },
-          },
-        ],
-      },
-
       // ---------- 设备管理 ----------
       {
         path: 'rentals',
@@ -251,13 +137,13 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '编辑模板', icon: 'Message', hidden: true },
       },
 
-      // ---------- 发送日志（临时禁用：views/logs/index.vue 缺失） ----------
-      // {
-      //   path: 'logs',
-      //   name: 'EmailLogList',
-      //   component: () => import('@/views/logs/index.vue'),
-      //   meta: { title: '发送日志', icon: 'Tickets' },
-      // },
+      // ---------- 发送日志 ----------
+      {
+        path: 'logs',
+        name: 'EmailLogList',
+        component: () => import('@/views/logs/index.vue'),
+        meta: { title: '发送日志', icon: 'Tickets' },
+      },
 
       // ---------- 系统配置（菜单含子菜单） ----------
       {
@@ -296,12 +182,6 @@ const routes: RouteRecordRaw[] = [
             name: 'AttachmentCategories',
             component: () => import('@/views/system/attachment-categories.vue'),
             meta: { title: '附件分类管理', icon: 'FolderOpened' },
-          },
-          {
-            path: 'project-config',
-            name: 'ProjectConfig',
-            component: () => import('@/views/system/project-attachment-categories.vue'),
-            meta: { title: '项目配置', icon: 'FolderOpened' },
           },
         ],
       },

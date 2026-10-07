@@ -3,14 +3,13 @@
  * 附件分类管理页（系统配置）
  *
  * 功能：
- *  - 三个 tab 切换合同类型
+ *  - 维护算力租赁合同（compute_leasing）的附件分类
  *  - 展示分类列表 + 子项
  *  - 增删改分类和子项
  *  - 上移/下移排序
  *  - 软删除
  */
 import { onMounted, ref } from 'vue'
-import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { confirmDelete } from '@/lib/confirm'
 import {
@@ -41,63 +40,29 @@ import {
   type CreateCategoryItemPayload,
   type UpdateCategoryItemPayload,
 } from '@/api/modules/attachment'
-import { CONTRACT_TYPE_OPTIONS } from '@/lib/contract'
 
 // ============================================================
 // 状态
 // ============================================================
-const route = useRoute()
-
-function getInitialTab(): ContractType {
-  const qt = route.query.contract_type as string
-  if (qt === 'compute_leasing' || qt === 'satellite_data' || qt === 'compute_service' || qt === 'project') {
-    return qt
-  }
-  // 如果从 /system/attachment-categories-project 进入，默认显示 project tab
-  if (route.path.endsWith('attachment-categories-project')) {
-    return 'project'
-  }
-  return 'compute_leasing'
-}
-
-const activeTab = ref<ContractType>(getInitialTab())
+/** 合同类型：资产平台仅保留算力租赁合同 */
+const contractType: ContractType = 'compute_leasing'
 const loading = ref(false)
 const categories = ref<AttachmentCategoryConfig[]>([])
 const expandedCategories = ref<Set<string>>(new Set())
-
-// 项目管理下选择 project_type
-const selectedProjectType = ref<string>('')
 
 // ============================================================
 // 数据加载
 // ============================================================
 async function fetchCategories() {
-  if (activeTab.value === 'project' && !selectedProjectType.value.trim()) {
-    categories.value = []
-    return
-  }
   loading.value = true
   try {
-    const pt = activeTab.value === 'project' ? selectedProjectType.value || undefined : undefined
-    const res = await listAttachmentCategories(activeTab.value, pt)
+    const res = await listAttachmentCategories(contractType)
     categories.value = res.items
   } catch {
     // 错误已统一处理
   } finally {
     loading.value = false
   }
-}
-
-function handleTabChange(tab: ContractType) {
-  activeTab.value = tab
-  selectedProjectType.value = ''
-  expandedCategories.value.clear()
-  fetchCategories()
-}
-
-function handleProjectTypeChange() {
-  expandedCategories.value.clear()
-  fetchCategories()
 }
 
 function toggleExpand(catId: string) {
@@ -120,7 +85,6 @@ const categoryDialogTitle = ref('')
 const categoryForm = ref({
   name: '',
   code: '',
-  project_type: '',
   sort_order: 1,
 })
 const editingCategoryId = ref<string | null>(null)
@@ -131,7 +95,6 @@ function openCreateCategory() {
   categoryForm.value = {
     name: '',
     code: '',
-    project_type: activeTab.value === 'project' ? selectedProjectType.value : '',
     sort_order: categories.value.length + 1,
   }
   categoryDialogVisible.value = true
@@ -143,7 +106,6 @@ function openEditCategory(cat: AttachmentCategoryConfig) {
   categoryForm.value = {
     name: cat.name,
     code: cat.code,
-    project_type: cat.project_type || '',
     sort_order: cat.sort_order,
   }
   categoryDialogVisible.value = true
@@ -154,27 +116,21 @@ async function handleSaveCategory() {
     ElMessage.warning('名称和编码不能为空')
     return
   }
-  if (activeTab.value === 'project' && !categoryForm.value.project_type.trim()) {
-    ElMessage.warning('项目类型不能为空')
-    return
-  }
   try {
     if (editingCategoryId.value) {
       const payload: UpdateCategoryPayload = {
         name: categoryForm.value.name.trim(),
         code: categoryForm.value.code.trim(),
         sort_order: categoryForm.value.sort_order,
-        project_type: activeTab.value === 'project' ? (categoryForm.value.project_type || undefined) : undefined,
       }
       await updateAttachmentCategory(editingCategoryId.value, payload)
       ElMessage.success('分类已更新')
     } else {
       const payload: CreateCategoryPayload = {
-        contract_type: activeTab.value,
+        contract_type: contractType,
         name: categoryForm.value.name.trim(),
         code: categoryForm.value.code.trim(),
         sort_order: categoryForm.value.sort_order,
-        project_type: activeTab.value === 'project' ? (categoryForm.value.project_type || undefined) : undefined,
       }
       await createAttachmentCategory(payload)
       ElMessage.success('分类已创建')
@@ -346,29 +302,7 @@ onMounted(() => {
 
       <div class="dialog-tip">
         <el-icon><InfoFilled /></el-icon>
-        <span>按合同类型维护附件分类与子项；分类下可展开管理期望上传的文件类型。</span>
-      </div>
-
-      <!-- Tab 切换合同类型 -->
-      <el-tabs v-model="activeTab" class="type-tabs" @tab-change="handleTabChange">
-        <el-tab-pane
-          v-for="opt in CONTRACT_TYPE_OPTIONS"
-          :key="opt.value"
-          :label="opt.label"
-          :name="opt.value"
-        />
-      </el-tabs>
-
-      <!-- 项目管理：project_type 选择器 -->
-      <div v-if="activeTab === 'project'" class="toolbar">
-        <span class="toolbar-label">项目类型</span>
-        <el-input
-          v-model="selectedProjectType"
-          placeholder="输入项目类型（如 算力服务合同）"
-          style="width: 360px;"
-          clearable
-          @change="handleProjectTypeChange"
-        />
+        <span>维护算力租赁合同的附件分类与子项；分类下可展开管理期望上传的文件类型。</span>
       </div>
 
       <!-- 分类列表 -->
@@ -393,7 +327,6 @@ onMounted(() => {
               </el-icon>
               <span class="cat-name">{{ cat.name }}</span>
               <el-tag size="small" type="info">{{ cat.code }}</el-tag>
-              <el-tag v-if="cat.project_type" size="small" type="warning">{{ cat.project_type }}</el-tag>
               <span class="cat-meta">排序 {{ cat.sort_order }}</span>
             </div>
             <div class="cat-header-right">
@@ -468,11 +401,6 @@ onMounted(() => {
             <el-col :xs="24" :sm="12">
               <el-form-item label="编码" required>
                 <el-input v-model="categoryForm.code" placeholder="如 contract_agreement" maxlength="50" />
-              </el-form-item>
-            </el-col>
-            <el-col v-if="activeTab === 'project'" :span="24">
-              <el-form-item label="项目类型" required>
-                <el-input v-model="categoryForm.project_type" placeholder="输入项目类型（如 算力服务合同）" maxlength="100" />
               </el-form-item>
             </el-col>
             <el-col :xs="24" :sm="12">
@@ -558,21 +486,6 @@ onMounted(() => {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
-}
-.type-tabs {
-  margin-bottom: 4px;
-}
-.toolbar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 16px;
-  flex-wrap: wrap;
-}
-.toolbar-label {
-  font-size: 13px;
-  color: var(--text-secondary);
-  flex-shrink: 0;
 }
 .category-list {
   min-height: 120px;

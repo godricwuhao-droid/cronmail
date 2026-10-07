@@ -6,7 +6,7 @@
  *  - 页面顶部展示客户名称
  *  - 表格列出该客户下的联系人（is_active=true）
  *  - 支持新增 / 编辑 / 软删除
- *  - 展示该客户下的三类合同列表
+ *  - 展示该客户下的算力租赁合同列表
  */
 import { onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -24,8 +24,6 @@ import {
 } from '@/api/modules/contact'
 import { getCustomer, type Customer } from '@/api/modules/customer'
 import { listContracts, type ContractItem } from '@/api/modules/contract'
-import { listSatelliteContracts, type SatelliteContractItem } from '@/api/modules/satellite-contract'
-import { listServiceContracts, type ServiceContractItem } from '@/api/modules/service-contract'
 
 const route = useRoute()
 const router = useRouter()
@@ -68,7 +66,7 @@ watch(
 interface UnifiedContract {
   id: string
   name: string
-  contract_type: '算力租赁' | '卫星数据' | '算力服务'
+  contract_type: '算力租赁'
   contract_no: string | null
   status: string
   start_date: string | null
@@ -94,32 +92,6 @@ async function fetchContracts() {
       start_date: c.start_date,
       end_date: c.end_date,
       route_name: 'ContractDetail',
-    })))
-  } catch { /* 静默处理 */ }
-  try {
-    const satellite = await listSatelliteContracts({ customer_id: customerId.value, page_size: 100 })
-    result.push(...satellite.items.map((c: SatelliteContractItem) => ({
-      id: c.id,
-      name: c.name,
-      contract_type: '卫星数据' as const,
-      contract_no: c.contract_no ?? null,
-      status: '-',
-      start_date: null,
-      end_date: null,
-      route_name: 'SatelliteContractDetail',
-    })))
-  } catch { /* 静默处理 */ }
-  try {
-    const service = await listServiceContracts({ customer_id: customerId.value, page_size: 100 })
-    result.push(...service.items.map((c: ServiceContractItem) => ({
-      id: c.id,
-      name: c.name,
-      contract_type: '算力服务' as const,
-      contract_no: c.contract_no ?? null,
-      status: '-',
-      start_date: c.start_date,
-      end_date: c.end_date,
-      route_name: 'ServiceContractDetail',
     })))
   } catch { /* 静默处理 */ }
   customerContracts.value = result

@@ -18,8 +18,6 @@ import {
   updateConfig,
   getSchedules,
   updateSchedules,
-  getLlmConfig,
-  updateLlmConfig,
   type ScheduleConfig,
 } from '@/api/modules/system'
 
@@ -138,69 +136,16 @@ async function handleSaveSchedules() {
 }
 
 // ============================================================
-// 智能解析模型配置（LLM）
-// ============================================================
-const llmLoading = ref(false)
-const llmSaving = ref(false)
-
-const llmForm = reactive({
-  llm_base_url: '',
-  llm_api_key: '',
-  llm_model: '',
-  llm_base_url_extract: '',
-  llm_api_key_extract: '',
-  llm_model_extract: '',
-})
-
-async function fetchLlmConfig() {
-  llmLoading.value = true
-  try {
-    const data = await getLlmConfig()
-    llmForm.llm_base_url = data.llm_base_url || ''
-    llmForm.llm_api_key = data.llm_api_key || ''
-    llmForm.llm_model = data.llm_model || ''
-    llmForm.llm_base_url_extract = data.llm_base_url_extract || ''
-    llmForm.llm_api_key_extract = data.llm_api_key_extract || ''
-    llmForm.llm_model_extract = data.llm_model_extract || ''
-  } catch {
-    // 404 或其他错误，保持空值
-  } finally {
-    llmLoading.value = false
-  }
-}
-
-async function handleSaveLlm() {
-  llmSaving.value = true
-  try {
-    await updateLlmConfig({
-      llm_base_url: llmForm.llm_base_url,
-      llm_api_key: llmForm.llm_api_key,
-      llm_model: llmForm.llm_model,
-      llm_base_url_extract: llmForm.llm_base_url_extract,
-      llm_api_key_extract: llmForm.llm_api_key_extract,
-      llm_model_extract: llmForm.llm_model_extract,
-    })
-    ElMessage.success('智能解析模型配置已保存')
-  } catch {
-    // 错误已统一处理
-  } finally {
-    llmSaving.value = false
-  }
-}
-
-// ============================================================
 // 统一保存入口
 // ============================================================
 async function handleSave() {
   await handleSaveExpiry()
   await handleSaveSchedules()
-  await handleSaveLlm()
 }
 
 onMounted(() => {
   fetchConfig()
   fetchSchedules()
-  fetchLlmConfig()
 })
 </script>
 
@@ -279,64 +224,6 @@ onMounted(() => {
           </div>
         </div>
 
-        <div v-loading="llmLoading" class="dialog-section">
-          <div class="dialog-section-title">智能解析模型配置</div>
-          <div class="schedule-hint">
-            配置邮件智能解析使用的 LLM 模型，分为 OCR 视觉模型（阶段1）和 Extract 文本模型（阶段2）
-          </div>
-
-          <div class="llm-group">
-            <div class="llm-group-title">OCR 视觉模型（阶段1）</div>
-            <el-form-item label="API 地址">
-              <el-input
-                v-model="llmForm.llm_base_url"
-                placeholder="如 http://192.168.180.67:8080/v1"
-                clearable
-              />
-            </el-form-item>
-            <el-form-item label="API Key">
-              <el-input
-                v-model="llmForm.llm_api_key"
-                placeholder="输入 API Key，*** 表示不更新"
-                show-password
-                clearable
-              />
-            </el-form-item>
-            <el-form-item label="模型名">
-              <el-input
-                v-model="llmForm.llm_model"
-                placeholder="如 Qwen3.6-27B"
-                clearable
-              />
-            </el-form-item>
-          </div>
-
-          <div class="llm-group">
-            <div class="llm-group-title">Extract 文本模型（阶段2）</div>
-            <el-form-item label="API 地址">
-              <el-input
-                v-model="llmForm.llm_base_url_extract"
-                placeholder="如 http://192.168.180.67:8080/v1"
-                clearable
-              />
-            </el-form-item>
-            <el-form-item label="API Key">
-              <el-input
-                v-model="llmForm.llm_api_key_extract"
-                placeholder="输入 API Key，*** 表示不更新"
-                show-password
-                clearable
-              />
-            </el-form-item>
-            <el-form-item label="模型名">
-              <el-input
-                v-model="llmForm.llm_model_extract"
-                placeholder="如 DeepSeek-V4-Flash"
-                clearable
-              />
-            </el-form-item>
-          </div>
-        </div>
       </el-form>
     </div>
   </div>
@@ -383,19 +270,5 @@ onMounted(() => {
   font-size: 14px;
   color: var(--text-secondary);
   flex-shrink: 0;
-}
-.llm-group {
-  margin-bottom: 16px;
-}
-.llm-group:last-child {
-  margin-bottom: 0;
-}
-.llm-group-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-primary);
-  margin-bottom: 12px;
-  padding-left: 10px;
-  border-left: 3px solid var(--primary-color);
 }
 </style>

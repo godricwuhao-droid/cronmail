@@ -9,8 +9,8 @@ import request from '@/api'
 // 类型定义
 // ============================================================
 
-/** 合同类型 */
-export type ContractType = 'compute_leasing' | 'satellite_data' | 'compute_service' | 'project'
+/** 合同类型（资产平台仅保留算力租赁合同） */
+export type ContractType = 'compute_leasing'
 
 /** 附件文件 */
 export interface AttachmentFile {
@@ -78,7 +78,6 @@ export interface AttachmentCategoryItem {
 export interface AttachmentCategoryConfig {
   id: string
   contract_type: ContractType
-  project_type?: string | null
   name: string
   code: string
   sort_order: number
@@ -94,7 +93,6 @@ export interface AttachmentCategoryListWrap {
 /** 创建分类载荷 */
 export interface CreateCategoryPayload {
   contract_type: ContractType
-  project_type?: string | null
   name: string
   code: string
   sort_order?: number
@@ -105,7 +103,6 @@ export interface UpdateCategoryPayload {
   name?: string
   code?: string
   sort_order?: number
-  project_type?: string | null
 }
 
 /** 创建子项载荷 */
@@ -134,9 +131,8 @@ export interface ConfirmResponse {
 // ============================================================
 
 /** 获取合同附件列表 */
-export function getAttachments(contractType: ContractType, contractId: string, projectType?: string): Promise<AttachmentListWrap> {
+export function getAttachments(contractType: ContractType, contractId: string): Promise<AttachmentListWrap> {
   const params: Record<string, string> = { contract_type: contractType, contract_id: contractId }
-  if (projectType) params.project_type = projectType
   return request.get('/attachments', { params })
 }
 
@@ -167,11 +163,8 @@ export function deleteAttachment(id: string): Promise<{ detail: string }> {
 // ============================================================
 
 /** 获取附件状态汇总 */
-export function getAttachmentSummary(contractType: ContractType, contractId: string, projectType?: string): Promise<AttachmentSummary> {
+export function getAttachmentSummary(contractType: ContractType, contractId: string): Promise<AttachmentSummary> {
   const params: Record<string, string> = { contract_type: contractType, contract_id: contractId }
-  if (projectType) {
-    params.project_type = projectType
-  }
   return request.get('/attachments/status/summary', { params })
 }
 
@@ -204,9 +197,8 @@ export function unconfirmAttachmentItem(
 // ============================================================
 
 /** 获取附件分类列表 */
-export function listAttachmentCategories(contractType: ContractType, projectType?: string): Promise<AttachmentCategoryListWrap> {
+export function listAttachmentCategories(contractType: ContractType): Promise<AttachmentCategoryListWrap> {
   const params: Record<string, string> = { contract_type: contractType }
-  if (projectType) params.project_type = projectType
   return request.get('/system/attachment-categories', { params })
 }
 
