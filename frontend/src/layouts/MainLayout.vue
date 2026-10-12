@@ -50,6 +50,10 @@
             <el-icon><Document /></el-icon>
             <template #title><span>设备管理</span></template>
           </el-menu-item>
+          <el-menu-item index="/machine-rooms">
+            <el-icon><OfficeBuilding /></el-icon>
+            <template #title><span>机房管理</span></template>
+          </el-menu-item>
           <el-menu-item index="/templates">
             <el-icon><Message /></el-icon>
             <template #title><span>邮件模板</span></template>
@@ -93,6 +97,7 @@ import {
   Promotion,
   CircleCheckFilled,
   DataAnalysis,
+  OfficeBuilding,
 } from '@element-plus/icons-vue'
 
 const route = useRoute()
@@ -104,6 +109,7 @@ const menuIndexes = [
   '/customers',
   '/contracts/compute-leasing',
   '/rentals',
+  '/machine-rooms',
   '/templates',
   '/logs',
   '/system/smtp',

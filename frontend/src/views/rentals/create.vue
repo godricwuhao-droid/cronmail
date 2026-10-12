@@ -16,7 +16,7 @@
  *  - 数据盘：列表式展示，字符串输入
  *  - 底部按钮：右对齐，顶部分割线
  */
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { ArrowLeft, Document, InfoFilled } from '@element-plus/icons-vue'
@@ -28,6 +28,12 @@ import {
   type RentalDetail,
   type RentalUpdatePayload,
 } from '@/api/modules/rental'
+import {
+  getMachineRooms,
+  getMachineRoomPoints,
+  type MachineRoom,
+  type RackPoint,
+} from '@/api/modules/machine-room'
 
 const route = useRoute()
 const router = useRouter()
@@ -48,6 +54,12 @@ interface RentalForm {
   os_version: string
   bandwidth_mbps: number
   rack_location: string
+  /** 所属机房 ID（ADR-021），null 表示未上架/在库 */
+  machine_room_id: number | null
+  /** 机架 ID（ADR-022），null 表示未上架到具体机架 */
+  rack_id: number | null
+  /** U 位（ADR-022，1~机架 capacity_u），null 表示不指定 U 位 */
+  u_position: number | null
   private_ip: string
   public_ips_text: string
   ssh_port: number
@@ -67,6 +79,9 @@ const form = reactive<RentalForm>({
   os_version: '',
   bandwidth_mbps: 1000,
   rack_location: '',
+  machine_room_id: null,
+  rack_id: null,
+  u_position: null,
   private_ip: '',
   public_ips_text: '',
   ssh_port: 22,
@@ -75,6 +90,88 @@ const form = reactive<RentalForm>({
   remark: '',
   status: '空闲中',
 })
+
+// ============================================================
+// 所属机房下拉（ADR-021，可空 = 未上架/在库）
+// ============================================================
+const roomOptions = ref<MachineRoom[]>([])
+async function loadRoomOptions() {
+  try {
+    const res = await getMachineRooms()
+    roomOptions.value = res.items
+  } catch (e) {
+    // 错误已统一处理
+  }
+}
+
+// ============================================================
+// 机架 / U 位联动（ADR-022：机房 → 机架 → U 位）
+// ============================================================
+const rackOptions = ref<RackPoint[]>([])
+/** 机架列表按机房缓存，避免机房来回切换重复请求 */
+const rackCache = new Map<number, RackPoint[]>()
+
+async function loadRackOptions(roomId: number) {
+  const cached = rackCache.get(roomId)
+  if (cached) {
+    rackOptions.value = cached
+    return
+  }
+  try {
+    const res = await getMachineRoomPoints(roomId)
+    rackCache.set(roomId, res.racks)
+    rackOptions.value = res.racks
+  } catch (e) {
+    // 错误已统一处理
+  }
+}
+
+/** 当前选中机架（取 capacity_u 约束 U 位范围） */
+const selectedRack = computed(
+  () => rackOptions.value.find((r) => r.id === form.rack_id) ?? null,
+)
+
+/** 回填标记：编辑/复制回填期间不让联动 watch 清空机架/U 位 */
+let restoring = false
+
+/** 机房变更：清空机架与 U 位，加载新机房机架列表 */
+watch(
+  () => form.machine_room_id,
+  (roomId, oldRoomId) => {
+    if (roomId === oldRoomId) return
+    if (!restoring) {
+      form.rack_id = null
+      form.u_position = null
+      rackOptions.value = []
+    }
+    if (roomId != null) {
+      loadRackOptions(roomId)
+    }
+  },
+)
+
+/** 机架变更：清空 U 位（容量不同） */
+watch(
+  () => form.rack_id,
+  (rackId, oldRackId) => {
+    if (rackId === oldRackId) return
+    if (!restoring) {
+      form.u_position = null
+    }
+  },
+)
+
+/** U 位超出所选机架容量时截断并提示 */
+watch(
+  () => form.u_position,
+  (u) => {
+    const rack = selectedRack.value
+    if (rack && u != null && u > rack.capacity_u) {
+      ElMessage.warning(`U 位超出机架 ${rack.name} 容量（1~${rack.capacity_u}）`)
+      form.u_position = rack.capacity_u
+    }
+  },
+)
 
 // ============================================================
 // 数据盘动态行
@@ -107,6 +204,7 @@ async function loadDetail() {
   try {
     const data = await getRental(rentalId.value)
     detail.value = data
+    restoring = true
     form.machine_model = data.machine_model ?? ''
     form.cpu_model = data.cpu_model ?? ''
     form.memory_gb = data.memory_gb ?? 0
@@ -116,6 +214,9 @@ async function loadDetail() {
     form.os_version = data.os_version ?? ''
     form.bandwidth_mbps = data.bandwidth_mbps ?? 1000
     form.rack_location = data.rack_location ?? ''
+    form.machine_room_id = data.machine_room_id ?? null
+    form.rack_id = data.rack_id ?? null
+    form.u_position = data.u_position ?? null
     form.private_ip = data.private_ip ?? ''
     form.public_ips_text = (data.public_ips ?? []).join(',')
     form.ssh_port = data.ssh_port
@@ -123,8 +224,16 @@ async function loadDetail() {
     form.root_password = data.root_password ?? ''
     form.remark = data.remark ?? ''
     form.status = data.status ?? '空闲中'
+    // 回填机架下拉选项（watch 因值未变化不会触发，这里手动加载）
+    if (form.machine_room_id != null) {
+      loadRackOptions(form.machine_room_id)
+    }
+    // 等联动 watch 回调执行完再放开回填标记
+    await nextTick()
+    restoring = false
   } catch (e) {
     // 错误已统一处理
+    restoring = false
   } finally {
     loadingDetail.value = false
   }
@@ -166,6 +275,10 @@ function buildPayload(): RentalCreatePayload | RentalUpdatePayload {
     os_version: form.os_version,
     bandwidth_mbps: form.bandwidth_mbps,
     rack_location: form.rack_location,
+    machine_room_id: form.machine_room_id || null,
+    // 显式传 null 表示解绑机架 / 清除 U 位（编辑模式清空选择时生效）
+    rack_id: form.rack_id,
+    u_position: form.u_position,
     private_ip: form.private_ip,
     public_ips,
     ssh_port: form.ssh_port,
@@ -197,7 +310,13 @@ async function handleSubmit() {
       router.replace({ name: 'RentalDetail', params: { id: created.id } })
     }
   } catch (e) {
-    // 错误已统一处理
+    // 409 U 位冲突 / 400 机架校验：统一拦截器不展示 409 的 detail，这里手动提示
+    const status = (e as { response?: { status?: number } })?.response?.status
+    if (status === 409 || status === 400) {
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      if (detail) ElMessage.error(detail)
+    }
+    // 其余错误已统一处理
   } finally {
     submitting.value = false
   }
@@ -217,6 +336,7 @@ function cancel() {
 async function loadCopyFrom(copyId: string) {
   try {
     const d = await getRental(copyId)
+    restoring = true
     form.machine_model = d.machine_model ?? ''
     form.cpu_model = d.cpu_model ?? ''
     form.memory_gb = d.memory_gb ?? 0
@@ -226,6 +346,10 @@ async function loadCopyFrom(copyId: string) {
     form.os_version = d.os_version ?? ''
     form.bandwidth_mbps = d.bandwidth_mbps ?? 1000
     form.rack_location = d.rack_location ?? ''
+    form.machine_room_id = d.machine_room_id ?? null
+    // 机架/U 位不复制：同机架同 U 位唯一占用，直接复制会 409，由用户重新指定
+    form.rack_id = null
+    form.u_position = null
     form.private_ip = d.private_ip ?? ''
     form.public_ips_text = (d.public_ips ?? []).join(',')
     form.ssh_port = d.ssh_port ?? 22
@@ -234,8 +358,14 @@ async function loadCopyFrom(copyId: string) {
     form.root_password = ''
     form.remark = d.remark ?? ''
     form.status = d.status ?? '空闲中'
+    if (form.machine_room_id != null) {
+      loadRackOptions(form.machine_room_id)
+    }
+    await nextTick()
+    restoring = false
     ElMessage.success('已复制设备信息，请修改后保存')
   } catch {
+    restoring = false
     ElMessage.error('加载复制数据失败')
   }
 }
@@ -252,6 +382,7 @@ function billingLabel(model?: string) {
 }
 
 onMounted(async () => {
+  loadRoomOptions()
   if (isEdit.value) {
     await loadDetail()
   } else {
@@ -458,8 +589,60 @@ onMounted(async () => {
               </el-form-item>
             </el-col>
             <el-col :xs="24" :sm="12">
-              <el-form-item label="机架位置">
-                <el-input v-model="form.rack_location" placeholder="如 E09-18U" />
+              <el-form-item label="所属机房">
+                <el-select
+                  v-model="form.machine_room_id"
+                  placeholder="未上架（在库）"
+                  clearable
+                  filterable
+                  style="width: 100%"
+                >
+                  <el-option
+                    v-for="r in roomOptions"
+                    :key="r.id"
+                    :label="r.name"
+                    :value="r.id"
+                  />
+                </el-select>
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="机架">
+                <el-select
+                  v-model="form.rack_id"
+                  :placeholder="form.machine_room_id == null ? '请先选择所属机房' : '选择机架（可空）'"
+                  :disabled="form.machine_room_id == null"
+                  clearable
+                  filterable
+                  style="width: 100%"
+                >
+                  <el-option
+                    v-for="r in rackOptions"
+                    :key="r.id"
+                    :label="`${r.name}（${r.capacity_u} U）`"
+                    :value="r.id"
+                  />
+                </el-select>
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="U 位">
+                <el-input-number
+                  v-model="form.u_position"
+                  :min="1"
+                  :max="selectedRack ? selectedRack.capacity_u : undefined"
+                  :disabled="form.rack_id == null"
+                  :placeholder="form.rack_id == null ? '请先选择机架' : '可空 = 不指定 U 位'"
+                  style="width: 100%"
+                />
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="机架位置（兼容旧数据）">
+                <el-input
+                  v-model="form.rack_location"
+                  placeholder="旧版自由文本位置，新设备建议用上方机架 + U 位"
+                />
               </el-form-item>
             </el-col>
           </el-row>

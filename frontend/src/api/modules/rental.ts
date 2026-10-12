@@ -52,6 +52,16 @@ export interface RentalListItem {
   end_date: string
   status: RentalStatus
   created_at: string
+  /** 所属机房 ID（ADR-021），null 表示未上架/在库 */
+  machine_room_id?: number | null
+  /** 所属机房名称（ADR-021），未上架为 null */
+  machine_room_name?: string | null
+  /** 机架 ID（ADR-022），null 表示未上架到具体机架 */
+  rack_id?: number | null
+  /** U 位（ADR-022，1~机架 capacity_u），null 表示在架但未定位 U */
+  u_position?: number | null
+  /** 机架名称（ADR-022），未上架到机架为 null */
+  rack_name?: string | null
 }
 
 /** 租赁记录详情（后端响应：含 customer 简要信息 + contacts 详情 + email_logs） */
@@ -84,6 +94,16 @@ export interface RentalDetail {
   os_version: string | null
   bandwidth_mbps: number | null
   rack_location: string | null
+  /** 所属机房 ID（ADR-021），null 表示未上架/在库 */
+  machine_room_id?: number | null
+  /** 所属机房名称（ADR-021），未上架为 null */
+  machine_room_name?: string | null
+  /** 机架 ID（ADR-022），null 表示未上架到具体机架 */
+  rack_id?: number | null
+  /** U 位（ADR-022，1~机架 capacity_u），null 表示在架但未定位 U */
+  u_position?: number | null
+  /** 机架名称（ADR-022），未上架到机架为 null */
+  rack_name?: string | null
   private_ip: string | null
   public_ips: string[] | null
   ssh_port: number
@@ -121,6 +141,12 @@ export interface RentalCreatePayload {
   os_version?: string
   bandwidth_mbps?: number
   rack_location?: string
+  /** 所属机房 ID（ADR-021），null 表示未上架/在库 */
+  machine_room_id?: number | null
+  /** 机架 ID（ADR-022），须与 machine_room_id 同机房；只给 rack_id 不给 u_position 合法 */
+  rack_id?: number | null
+  /** U 位（ADR-022，≥1 且 ≤ 机架 capacity_u）；提供时必须同时提供 rack_id */
+  u_position?: number | null
   private_ip?: string
   public_ips?: string[]
   ssh_port?: number
@@ -141,6 +167,12 @@ export interface RentalUpdatePayload {
   os_version?: string
   bandwidth_mbps?: number
   rack_location?: string
+  /** 所属机房 ID（ADR-021），传 null 表示解绑（变为未上架） */
+  machine_room_id?: number | null
+  /** 机架 ID（ADR-022），传 null 表示解绑机架（u_position 同步置 null）；不传则沿用当前机架 */
+  rack_id?: number | null
+  /** U 位（ADR-022），传 null 清除 U 位；不传则沿用当前 U 位（换机架时旧 U 位随迁并重新校验占用） */
+  u_position?: number | null
   private_ip?: string
   public_ips?: string[]
   ssh_port?: number
@@ -169,6 +201,12 @@ export interface RentalListParams {
   rack_location?: string
   /** 仅返回未关联合同的设备 */
   unlinked_only?: boolean
+  /** 按所属机房 ID 筛选（ADR-021） */
+  machine_room_id?: number
+  /** 按机架 ID 精确筛选（ADR-022） */
+  rack_id?: number
+  /** 仅返回未上架（machine_room_id IS NULL）设备（ADR-021），优先级高于 machine_room_id */
+  warehoused?: boolean
   /** 排序字段 */
   sort_field?: string
   /** 排序方向 */

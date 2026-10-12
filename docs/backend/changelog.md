@@ -1,5 +1,60 @@
 # CronMail 后端变更日志
 
+## 2026-10-07 (修改) — 附件存储隔离（ADR-020）
+
+| 日期 | 类型 | 变更内容 | 影响文件/范围 | 关联任务 | 备注 |
+|------|------|---------|-------------|---------|------|
+| 2026-10-07 | 修改 | 附件存储隔离：UPLOAD_BASE_DIR 环境化 + asset-ops PV 指向 /cronmail/asset-ops + 存量迁移脚本（未执行）| backend/src/attachment/services.py, k8s/asset-ops/, backend/scripts/ | 附件隔离 | platform-asset-ops |
+
+### 修改
+- **`UPLOAD_BASE_DIR` 环境化**
+  - 影响文件：`backend/src/attachment/services.py`
+  - 变更内容：`UPLOAD_BASE_DIR = os.environ.get("UPLOAD_BASE_DIR", "/app/uploads")`，默认值不变，cronmail 平台行为零变化
+  - `k8s/asset-ops/configmap.yaml` 显式声明 `UPLOAD_BASE_DIR=/app/uploads`（防将来误改默认值）
+- **asset-ops PV 指向独立 NFS 子目录**
+  - 影响文件：`k8s/asset-ops/pv-attachments.yaml`
+  - 变更内容：NFS path 由 `/cronmail` 改为 `/cronmail/asset-ops`（server 不变），asset-ops 附件与 cronmail 物理隔离
+  - 已绑定 PV（claimRef 已被 asset-ops-attachments-pvc 占用）修改 `nfs.path` 字段是允许的，`kubectl apply` 直接生效；Pod 内挂载点需滚动重启后指向新路径
+- **存量迁移脚本（仅编写，未对生产执行）**
+  - 影响文件：`backend/scripts/migrate_asset_ops_uploads.py`（新增）
+  - 按 **asset_ops 库** attachment 表 `file_path` 白名单精确复制（两平台 compute_leasing 附件混在同一源目录，不能整目录复制）
+  - 幂等（目标存在且大小一致则跳过）、`--dry-run` 预演、结尾输出 复制/跳过/缺失 统计；只复制不删源
+  - 本地 sqlite 自测通过：空白名单安全退出、dry-run 不写文件、精确挑选、幂等重跑、缺失告警（exit=1）
+  - 验证：`python -m compileall` 通过、attachment 模块 import 通过、`kubectl apply --dry-run=client -f k8s/asset-ops/` 通过
+  - ⚠️ 上线步骤（运维执行）：① 挂载 NFS 环境执行迁移脚本（先 `--dry-run`）→ ② `kubectl apply -f k8s/asset-ops/pv-attachments.yaml` → ③ 滚动重启 asset-ops backend 三个 Deployment
+
+## 2026-10-07 (修改) — /api/rentals 排序白名单增加 end_date
+
+| 日期 | 类型 | 变更内容 | 影响文件/范围 | 关联任务 | 备注 |
+|------|------|---------|-------------|---------|------|
+| 2026-10-07 | 修改 | /api/rentals 排序白名单增加 end_date | backend/src/rental/services.py | 到期排序 | platform-asset-ops |
+
+### 修改
+- **`SORT_WHITELIST` 新增 `end_date`**
+  - 影响文件：`backend/src/rental/services.py`
+  - 变更内容：`list_rentals` 的 `SORT_WHITELIST` 增加 `'end_date': RentalRecord.end_date`，复用现有 `order_by(col.asc()/col.desc())` 逻辑
+  - NULL 处理：`end_date` 为 `Optional[date]`，未加额外 NULL 处理，遵循 MySQL 默认行为（NULL 视为最小，`asc` 时排最前、`desc` 时排最后）；与现有可排序列（如 `memory_gb` 同为 Optional）保持一致
+  - 关联任务：到期排序
+
+## 2026-10-07 (部署) — asset-ops 平台部署上线
+
+| 日期 | 类型 | 变更内容 | 影响文件/范围 | 关联任务 | 备注 |
+|------|------|---------|-------------|---------|------|
+| 2026-10-07 | 新增 | asset-ops 平台部署上线（backend/worker/beat/frontend，30083/30084，asset_ops 库）| k8s/asset-ops/ + 双镜像 | ADR-019 平台拆分 | 部署验证通过 |
+
+### 部署
+- **`kubectl apply -f k8s/asset-ops/` 真实应用清单**
+  - 资源：namespace `asset-ops`、PV/PVC（NFS 192.168.180.50:/cronmail，100Gi RWX，Bound）、secret、configmap、4 个 Deployment、2 个 NodePort Service（frontend 80:30083 / backend 8000:30084）
+  - 4 个 Deployment rollout 全部成功：`asset-ops-backend-api` / `asset-ops-backend-worker` / `asset-ops-backend-beat` / `asset-ops-frontend`，Pod 均 1/1 Running、0 重启
+- **验证结果**
+  - `curl http://192.168.180.171:30083/` → 200（前端存活）
+  - `curl http://192.168.180.171:30084/openapi.json` → 正常返回（FastAPI 存活）
+  - `curl http://192.168.180.171:30084/api/customers` → 200 返回真实数据（asset_ops 库连通）
+  - backend 日志：无 DB 连接错误，`create_all` 建表/检查完成，默认调度配置与附件分类初始化完成
+  - worker 日志：已连接 `redis://...:6379/1`（Redis db1），4 个任务注册完成
+  - beat 日志：`beat: Starting...` 调度器已启动
+  - `cronmail` namespace 全部 Pod Running、0 重启，现网无感知
+
 ## 2026-10-07 (部署) — asset-ops namespace 部署清单
 
 | 日期 | 类型 | 变更内容 | 影响文件/范围 | 关联任务 | 备注 |
@@ -2007,3 +2062,47 @@ INSERT IGNORE INTO system_config (id, `key`, value, description) VALUES (UUID(),
 | 日期 | 类型 | 变更内容 | 影响文件/范围 | 关联任务 | 备注 |
 |------|------|---------|-------------|---------|------|
 | 2026-08-10 | 修改 | 回滚 _parse_llm_json 增强，恢复原始实现以隔离回款路径；项目合同专用 _parse_llm_json_lenient 保留 | backend/src/contract_parser/services.py | TASK-OPT-LLM | 确保回款不受影响 |
+
+---
+
+## 2026-10-07 (新增) — 机房管理模块 + 设备所属机房字段 + 设备变更自动记录
+
+| 日期 | 类型 | 变更内容 | 影响文件/范围 | 关联任务 | 备注 |
+|------|------|---------|-------------|---------|------|
+| 2026-10-07 | 新增 | 机房管理模块+设备所属机房字段+设备变更自动记录 | backend/src/machine_room/, backend/src/rental/ | ADR-021 | platform-asset-ops |
+| 2026-10-07 | 修改 | asset-ops 上线：DDL(machine_room_id)+新镜像滚动+存量附件文件迁移到 /cronmail/asset-ops（未删源）| asset_ops 库, asset-ops ns | ADR-020/021 | 核对通过 |
+
+变更明细：
+- 新增 `backend/src/machine_room/` 模块（models/schemas/services/api）：机房 CRUD（name/code 全局唯一）、机架 CRUD（机房内唯一，capacity_u 默认 42）、点位图 `GET /api/machine-rooms/{id}/points`、未上架设备 `GET /api/machine-rooms/warehoused`；删除机房/机架前校验关联设备数，>0 则 409
+- `RentalRecord` 新增可空列 `machine_room_id`（无硬 FK，指向 machine_room.id，NULL=未上架/在库）；Create/Update schema 同步新增，写入前校验机房存在（404）
+- `GET /api/rentals` 新增 `machine_room_id` / `warehoused` 筛选参数；列表/详情响应新增 `machine_room_id` / `machine_room_name`（批量 in 查询填充，避免 N+1）
+- `update_rental` 更新前逐字段 diff，实际变化自动写 `change_log`（`target_type=rental`，content 为结构化 JSON `[{"field":"内存(GB)","old":64,"new":128}]`，中文 label 映射，root_password 脱敏为 `***`），与主更新同事务；无变化不写日志
+- `main.py` 注册 `machine_room_router` 并导入新模型（create_all 自动建表 machine_room / rack）
+- 验证：`import main` 通过、`python -m compileall` 通过、lint 无错误；`test_adr021_smoke.py`（临时 SQLite）34 项断言全部 PASS
+
+---
+
+## 2026-10-07 (修改) — asset-ops 上线收尾：PV 切换 /cronmail/asset-ops
+
+| 日期 | 类型 | 变更内容 | 影响文件/范围 | 关联任务 | 备注 |
+|------|------|---------|-------------|---------|------|
+| 2026-10-07 | 修改 | asset-ops 上线收尾：PV 切换 /cronmail/asset-ops + 前后端滚动 + 附件下载链路验证 | k8s/asset-ops/, asset-ops ns | ADR-020 | 验证通过 |
+
+变更明细：
+- PV `asset-ops-attachments-pv` 的 `spec.persistentvolumesource` 不可变（K8s 禁止已绑定 PV 直接改 nfs.path），采用「删 PVC → 删 PV（Retain，NFS 数据不受影响）→ 重建 PV（path=/cronmail/asset-ops）→ 重建 PVC」流程完成切换
+- 后端 3 个 Deployment（api/worker/beat）与前端 1 个 Deployment 全部滚动成功；新挂载点 `/app/uploads/` 下仅见 `compute_leasing`（13 个存量文件），无 `asset-ops` 双重嵌套
+- 验证：30083 → 200；`/api/machine-rooms` → 200；`/api/rentals?limit=1` → 200 且含 `machine_room_name` 字段；`GET /api/attachments/{id}/download` → 200（新挂载下存量附件可读）；beat 正常启动、worker 连接 redis db1；cronmail namespace 全部 pod 零重启，asset-ops 全部 Running
+- 红线确认：源文件 `/cronmail/compute_leasing` 13 个文件保留未删（回滚兜底，待人工确认清理）
+## 2026-10-07 (修改) — 设备 U 位结构化 + 点位图网格数据
+
+| 日期 | 类型 | 变更内容 | 影响文件/范围 | 关联任务 | 备注 |
+|------|------|---------|-------------|---------|------|
+| 2026-10-07 | 修改 | 设备 U 位结构化（rack_id/u_position+占用校验）+points 网格数据 | backend/src/rental/, backend/src/machine_room/ | ADR-022 | platform-asset-ops |
+
+变更明细：
+- `RentalRecord` 新增 `rack_id`（INT 可空，索引，无硬 FK 指向 rack.id）、`u_position`（INT 可空，1~capacity_u）两列；`rack_location` 自由文本保留但不再驱动点位图
+- 写入校验（create/update）：机架不存在 404；机架与设备机房不一致 400；U 越界 400；同机架同 U 位被其他设备占用 409（detail 含占用设备 machine_model）；只给 rack_id 不给 u_position 合法；解绑 rack_id=null 时 u_position 同步置 null（同时传非空 u_position 则 400）
+- 列表 API 新增 `rack_id` 筛选参数；列表/详情响应新增 `rack_id` / `u_position` / `rack_name`（批量 in 查询填充，无 N+1）
+- `GET /api/machine-rooms/{id}/points` 每个机架新增 `u_cells`（长度=capacity_u，u 从 1 开始，空格设备字段 null）；原 `devices` 前缀匹配逻辑保留（存量兼容）
+- 部署 DDL（asset_ops，create_all 不补列）：`ALTER TABLE rental_record ADD COLUMN rack_id INT NULL COMMENT '机架ID（无硬 FK，指向 rack.id）', ADD COLUMN u_position INT NULL COMMENT 'U 位（1~rack.capacity_u）', ADD INDEX ix_rental_record_rack_id (rack_id);`
+- 验证：`import main` 通过；`backend/scripts/smoke_adr022.py`（临时 SQLite + TestClient）36 项断言全部 PASS（正常占位/U 越界 400/重复占位 409/解绑/机房不一致 400/u_cells 网格含空格）；`test_adr021_smoke.py` 回归全部 PASS；lint 无错误

@@ -38,6 +38,7 @@ import {
   CONTRACT_STATUS_LABEL,
 } from '@/lib/contract'
 import { safeStatusLabel as rentalStatusLabel, safeStatusTagType as rentalStatusTagType } from '@/lib/rental'
+import { parseChangeContent, formatChangeValue } from '@/lib/change-log'
 import {
   getAttachmentSummary,
   type AttachmentSummary,
@@ -339,6 +340,12 @@ function scrollToChangeLogs() {
 function formatChangelogTime(s?: string | null) {
   if (!s) return '-'
   return s.slice(0, 16).replace('T', ' ')
+}
+
+/** 变更记录内容为 JSON 新格式时返回字段数组，否则返回 null（模板内避免重复解析） */
+function changeFields(content: string | null | undefined) {
+  const parsed = parseChangeContent(content)
+  return parsed.type === 'json' ? parsed.fields : null
 }
 
 onMounted(() => {
@@ -719,7 +726,24 @@ watch(
             <span class="col-secondary">{{ formatChangelogTime(row.created_at) }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="content" label="内容" show-overflow-tooltip />
+        <!-- 内容：兼容旧纯文本与新结构化 JSON（字段：旧值 → 新值） -->
+        <el-table-column label="内容" min-width="360">
+          <template #default="{ row }">
+            <template v-if="changeFields(row.content)">
+              <div
+                v-for="(f, i) in changeFields(row.content)!"
+                :key="i"
+                class="change-field-line"
+              >
+                <el-tag size="small" type="info" class="change-field-tag">{{ f.field }}</el-tag>
+                <span class="change-value">{{ formatChangeValue(f.old) }}</span>
+                <span class="change-arrow">→</span>
+                <span class="change-value change-value-new">{{ formatChangeValue(f.new) }}</span>
+              </div>
+            </template>
+            <span v-else>{{ row.content }}</span>
+          </template>
+        </el-table-column>
       </el-table>
       <div class="changelog-add">
         <el-input
@@ -877,6 +901,30 @@ watch(
 .changelog-input {
   flex: 1;
   min-width: 0;
+}
+
+/* 变更记录：结构化 JSON 渲染（字段：旧值 → 新值） */
+.change-field-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  line-height: 1.8;
+}
+.change-field-tag {
+  flex-shrink: 0;
+}
+.change-value {
+  color: var(--text-secondary, #606266);
+  word-break: break-all;
+}
+.change-value-new {
+  color: var(--text-primary, #1f2937);
+  font-weight: 500;
+}
+.change-arrow {
+  color: #909399;
+  flex-shrink: 0;
 }
 
 .renewal-row-current {

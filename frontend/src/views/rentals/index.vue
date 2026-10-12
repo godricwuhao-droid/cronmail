@@ -23,6 +23,7 @@ import {
   type RentalStatus,
 } from '@/api/modules/rental'
 import { getCustomers, type Customer } from '@/api/modules/customer'
+import { getMachineRooms, type MachineRoom } from '@/api/modules/machine-room'
 import { BILLING_MODEL_LABEL, safeStatusLabel, safeStatusTagType } from '@/lib/rental'
 
 const router = useRouter()
@@ -43,6 +44,8 @@ const searchText = ref('')
 const searchField = ref<SearchField>('rack_location')
 const statusFilter = ref<RentalStatus | ''>('')
 const customerFilter = ref('')
+/** 所属机房筛选（ADR-021）：'' 全部 / 'warehoused' 未上架 / 机房 id 字符串 */
+const roomFilter = ref('')
 
 const pagination = reactive({
   page: 1,
@@ -74,6 +77,17 @@ async function loadCustomerOptions() {
   }
 }
 
+// 机房下拉（ADR-021）
+const roomOptions = ref<MachineRoom[]>([])
+async function loadRoomOptions() {
+  try {
+    const res = await getMachineRooms()
+    roomOptions.value = res.items
+  } catch (e) {
+    // 错误已统一处理
+  }
+}
+
 let searchTimer: ReturnType<typeof setTimeout> | null = null
 function handleSearch() {
   if (searchTimer) clearTimeout(searchTimer)
@@ -99,13 +113,14 @@ function handleFilterChange() {
 }
 
 const hasFilters = computed(
-  () => !!(searchText.value.trim() || statusFilter.value || customerFilter.value),
+  () => !!(searchText.value.trim() || statusFilter.value || customerFilter.value || roomFilter.value),
 )
 
 function clearFilters() {
   searchText.value = ''
   statusFilter.value = ''
   customerFilter.value = ''
+  roomFilter.value = ''
   pagination.page = 1
   fetchList()
 }
@@ -121,6 +136,12 @@ async function fetchList() {
     }
     if (customerFilter.value) params.customer_id = customerFilter.value
     if (statusFilter.value) params.status = statusFilter.value
+    // 所属机房筛选：'warehoused' 对应未上架（优先级高于 machine_room_id）
+    if (roomFilter.value === 'warehoused') {
+      params.warehoused = true
+    } else if (roomFilter.value) {
+      params.machine_room_id = Number(roomFilter.value)
+    }
     const trimmed = searchText.value.trim()
     if (trimmed) {
       // 根据当前选中的搜索字段，把文本塞到对应参数上
@@ -268,6 +289,8 @@ const allColumns: ColumnDef[] = [
   { key: 'os_version', title: '操作系统' },
   { key: 'bandwidth_mbps', title: '带宽' },
   { key: 'rack_location', title: '机架位置', default: true },
+  { key: 'machine_room', title: '所属机房', default: true },
+  { key: 'rack_u', title: '机架/U', default: true },
   { key: 'private_ip', title: '内网 IP' },
   { key: 'public_ips', title: '公网 IP' },
   { key: 'ssh_port', title: 'SSH 端口' },
@@ -535,6 +558,15 @@ function getColumnProps(col: ColumnDef): ColumnProps {
     base['min-width'] = 120
     base['show-overflow-tooltip'] = true
     base.sortable = 'custom'
+  } else if (key === 'machine_room') {
+    base.prop = 'machine_room_name'
+    base.label = '所属机房'
+    base['min-width'] = 130
+    base['show-overflow-tooltip'] = true
+  } else if (key === 'rack_u') {
+    base.label = '机架/U'
+    base['min-width'] = 120
+    base['show-overflow-tooltip'] = true
   } else if (key === 'private_ip') {
     base.prop = 'private_ip'
     base.label = '内网 IP'
@@ -565,9 +597,12 @@ function getColumnProps(col: ColumnDef): ColumnProps {
     base.label = '状态'
     base.width = 100
   } else if (key === 'end_date') {
+    base.prop = 'end_date'
     base.label = '到期时间'
     base.width = 120
+    base.sortable = 'custom'
   } else if (key === 'memory_gb') {
+    base.prop = 'memory_gb'
     base.label = '内存'
     base.width = 90
     base.sortable = 'custom'
@@ -587,6 +622,7 @@ function getColumnProps(col: ColumnDef): ColumnProps {
     base.label = 'SSH 账号'
     base.width = 100
   } else if (key === 'bandwidth_mbps') {
+    base.prop = 'bandwidth_mbps'
     base.label = '带宽'
     base.width = 100
     base.sortable = 'custom'
@@ -658,6 +694,7 @@ watch(
 
 onMounted(() => {
   loadCustomerOptions()
+  loadRoomOptions()
   fetchList()
 })
 </script>
@@ -761,6 +798,22 @@ onMounted(() => {
             :key="c.id"
             :label="c.name"
             :value="c.id"
+          />
+        </el-select>
+        <el-select
+          v-model="roomFilter"
+          placeholder="所属机房"
+          clearable
+          filterable
+          style="width: 180px"
+          @change="handleFilterChange"
+        >
+          <el-option label="未上架（在库）" value="warehoused" />
+          <el-option
+            v-for="r in roomOptions"
+            :key="r.id"
+            :label="r.name"
+            :value="String(r.id)"
           />
         </el-select>
         <!-- 搜索：先选字段标签，再输入文本 -->
@@ -867,6 +920,16 @@ onMounted(() => {
                 </span>
               </template>
               <span v-else>-</span>
+            </template>
+            <template v-else-if="col.key === 'machine_room'" #default="{ row }">
+              <span v-if="row.machine_room_name">{{ row.machine_room_name }}</span>
+              <span v-else class="col-muted">—</span>
+            </template>
+            <template v-else-if="col.key === 'rack_u'" #default="{ row }">
+              <span v-if="row.rack_name">
+                {{ row.rack_name }}<template v-if="row.u_position != null"> · U{{ row.u_position }}</template>
+              </span>
+              <span v-else class="col-muted">—</span>
             </template>
             <template v-else-if="col.key === 'public_ips'" #default="{ row }">
               <span

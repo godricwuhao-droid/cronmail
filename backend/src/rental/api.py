@@ -19,7 +19,29 @@ from src.rental.models import RentalRecord
 rental_router = APIRouter(prefix="/api/rentals", tags=["Rental"])
 
 
-def _rental_to_list_item(rental: RentalRecord) -> schemas.RentalRecordListResponse:
+def _get_machine_room_name(db: Session, machine_room_id: Optional[int]) -> Optional[str]:
+    """查询机房名称（单条，详情接口用）"""
+    if machine_room_id is None:
+        return None
+    from src.machine_room.models import MachineRoom
+    room = db.query(MachineRoom).filter(MachineRoom.id == machine_room_id).first()
+    return room.name if room else None
+
+
+def _get_rack_name(db: Session, rack_id: Optional[int]) -> Optional[str]:
+    """查询机架名称（单条，详情接口用）"""
+    if rack_id is None:
+        return None
+    from src.machine_room.models import Rack
+    rack = db.query(Rack).filter(Rack.id == rack_id).first()
+    return rack.name if rack else None
+
+
+def _rental_to_list_item(
+    rental: RentalRecord,
+    machine_room_name: Optional[str] = None,
+    rack_name: Optional[str] = None,
+) -> schemas.RentalRecordListResponse:
     """将 ORM 对象转为列表项响应（不含密码、联系人列表、邮件日志）
     
     客户、日期、计费信息从关联合同继承，若无合同则返回 None/"-"。
@@ -67,7 +89,12 @@ def _rental_to_list_item(rental: RentalRecord) -> schemas.RentalRecordListRespon
         data_disks=data_disks,
         os_version=rental.os_version,
         bandwidth_mbps=rental.bandwidth_mbps,
+        machine_room_id=rental.machine_room_id,
+        machine_room_name=machine_room_name,
         rack_location=rental.rack_location,
+        rack_id=rental.rack_id,
+        u_position=rental.u_position,
+        rack_name=rack_name,
         private_ip=rental.private_ip,
         public_ips=rental.public_ips,
         ssh_port=rental.ssh_port or 22,
@@ -159,7 +186,12 @@ def _rental_to_detail(rental: RentalRecord, db: Session) -> schemas.RentalRecord
         data_disks=data_disks,
         os_version=rental.os_version,
         bandwidth_mbps=rental.bandwidth_mbps,
+        machine_room_id=rental.machine_room_id,
+        machine_room_name=_get_machine_room_name(db, rental.machine_room_id),
         rack_location=rental.rack_location,
+        rack_id=rental.rack_id,
+        u_position=rental.u_position,
+        rack_name=_get_rack_name(db, rental.rack_id),
         private_ip=rental.private_ip,
         public_ips=rental.public_ips,
         ssh_port=rental.ssh_port or 22,
@@ -190,6 +222,9 @@ def list_rentals(
     sort_order: Optional[str] = Query("asc", description="排序方向: asc/desc"),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=200, description="每页条数"),
+    machine_room_id: Optional[int] = Query(None, description="按所属机房ID筛选"),
+    warehoused: bool = Query(False, description="只返回未上架（未关联机房）设备，优先级高于 machine_room_id"),
+    rack_id: Optional[int] = Query(None, description="按机架ID筛选（ADR-022）"),
     db: Session = Depends(get_db),
 ):
     """获取租赁记录列表"""
@@ -206,8 +241,31 @@ def list_rentals(
         unlinked_only=unlinked_only,
         sort_field=sort_field,
         sort_order=sort_order,
+        machine_room_id=machine_room_id,
+        warehoused=warehoused,
+        rack_id=rack_id,
     )
-    result_items = [_rental_to_list_item(item) for item in items]
+    # 批量 in 查询机房/机架名称，避免 N+1
+    room_ids = {r.machine_room_id for r in items if r.machine_room_id is not None}
+    room_names: dict[int, str] = {}
+    rack_names: dict[int, str] = {}
+    if room_ids or any(r.rack_id is not None for r in items):
+        from src.machine_room.models import MachineRoom, Rack
+        if room_ids:
+            rooms = db.query(MachineRoom).filter(MachineRoom.id.in_(room_ids)).all()
+            room_names = {r.id: r.name for r in rooms}
+        rack_ids = {r.rack_id for r in items if r.rack_id is not None}
+        if rack_ids:
+            racks = db.query(Rack).filter(Rack.id.in_(rack_ids)).all()
+            rack_names = {r.id: r.name for r in racks}
+    result_items = [
+        _rental_to_list_item(
+            item,
+            machine_room_name=room_names.get(item.machine_room_id),
+            rack_name=rack_names.get(item.rack_id),
+        )
+        for item in items
+    ]
     return schemas.RentalRecordListWrap(
         items=result_items,
         total=total,

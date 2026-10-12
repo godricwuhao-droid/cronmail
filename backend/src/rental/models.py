@@ -78,7 +78,20 @@ class RentalRecord(Base):
     bandwidth_mbps = Column(Integer, nullable=True, comment="带宽(Mbps)")
 
     # 网络/位置
-    rack_location = Column(String(256), nullable=True, comment="机架位置")
+    machine_room_id = Column(
+        Integer,
+        nullable=True,
+        index=True,
+        comment="所属机房ID（无硬 FK，指向 machine_room.id；NULL 表示未上架/在库）",
+    )
+    rack_location = Column(String(256), nullable=True, comment="机架位置（存量自由文本，ADR-022 起不再用于点位图）")
+    rack_id = Column(
+        Integer,
+        nullable=True,
+        index=True,
+        comment="机架ID（无硬 FK，指向 rack.id；NULL 表示未上架到具体机架）",
+    )
+    u_position = Column(Integer, nullable=True, comment="U 位（1~rack.capacity_u，NULL 表示在架但未定位 U）")
     private_ip = Column(String(64), nullable=True, comment="内网IP")
     public_ips = Column(JSON, nullable=True, comment="公网IP列表(JSON)")
     ssh_port = Column(Integer, default=22, comment="SSH 端口")

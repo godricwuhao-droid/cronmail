@@ -4,12 +4,12 @@
 
 | 库 | 属主平台 | 说明 |
 |----|---------|------|
-| `asset_ops` | 资产运营管理平台（platform-asset-ops 分支） | 独立库，2026-10-07 创建（utf8mb4），含 17 张资产侧表 |
+| `asset_ops` | 资产运营管理平台（platform-asset-ops 分支） | 独立库，2026-10-07 创建（utf8mb4），含 19 张资产侧表 |
 | `cronmail` | 原 CronMail 全功能平台（main 分支） | 原库，保留全部 25 张表（含项目侧 project_* 表），只读参考 |
 
 ### 属主约定
 
-- **资产侧表**（`asset_ops` 库，17 张）：`customer`、`contact`、`rental_record`、`rental_contact`、`contract`、`contract_rental`、`contract_contact`、`change_log`、`email_template`、`email_log`、`smtp_config`、`dingtalk_config`、`system_config`、`attachment_category`、`attachment_item`、`attachment`、`attachment_status`
+- **资产侧表**（`asset_ops` 库，19 张）：`customer`、`contact`、`rental_record`、`rental_contact`、`contract`、`contract_rental`、`contract_contact`、`change_log`、`email_template`、`email_log`、`smtp_config`、`dingtalk_config`、`system_config`、`attachment_category`、`attachment_item`、`attachment`、`attachment_status`、`machine_room`、`rack`
 - **项目侧表**（仅存在于 `cronmail` 库，不迁入 `asset_ops`）：`project_type`、`project_contract`、`project_service_line`、`project_contract_payment`，以及卫星/算力服务侧 `satellite_data_contract`、`compute_service_contract`、`contract_service_line`
 - 数据流向：`cronmail` → `asset_ops` 单向复制（`backend/scripts/migrate_to_asset_ops.py`，幂等可重跑）；`cronmail` 库在任何迁移操作中保持只读
 - 过滤约定：`attachment` / `attachment_status` / `attachment_category` 仅复制 `contract_type='compute_leasing'` 行；`attachment_item` 仅复制 compute_leasing 分类子项；`system_config` 排除 `llm_*` 与 project 相关键
@@ -28,7 +28,9 @@
 
 ### rental_record（设备/租赁记录）
 - PK: `id`
-- 字段: customer_id(FK→customer), machine_model, cpu_model, memory_gb, gpu_info, system_disk, data_disks(JSON), os_version, bandwidth_mbps, rack_location, private_ip, public_ips(JSON), ssh_port, root_username, root_password_enc, billing_model, start_date, end_date, auto_renew, status, remark, created_at, updated_at
+- 字段: customer_id(FK→customer), machine_model, cpu_model, memory_gb, gpu_info, system_disk, data_disks(JSON), os_version, bandwidth_mbps, machine_room_id(INT, 可空, 索引, 无硬 FK, ADR-021), rack_location, rack_id(INT, 可空, 索引, 无硬 FK, ADR-022), u_position(INT, 可空, ADR-022), private_ip, public_ips(JSON), ssh_port, root_username, root_password_enc, billing_model, start_date, end_date, auto_renew, status, remark, created_at, updated_at
+- 说明（ADR-021）: `machine_room_id` 指向 `machine_room.id`，无硬 FK（与 attachment.contract_id 风格一致，查询层保证归属）；NULL 表示未上架/在库
+- 说明（ADR-022）: `rack_id` 指向 `rack.id`，无硬 FK；`u_position` 取值 1~`rack.capacity_u`，NULL 表示在架但未定位 U；同机架同 U 位唯一占用由 API 层校验（409），无数据库唯一约束；`rack_location` 自由文本保留仅存量兼容，不再驱动点位图
 
 ### rental_contact（设备-联系人中间表）
 - PK: (rental_id, contact_id)
@@ -88,8 +90,26 @@
 - PK: `id`
 - 字段: contract_type（仅 compute_leasing）, contract_id, item_id(FK→attachment_item), file_count, confirmed, confirmed_at, created_at
 
+### machine_room（机房，ADR-021 新增）
+- PK: `id` INT AUTO_INCREMENT
+- 字段: name(VARCHAR(128), 唯一), code(VARCHAR(64), 唯一), address(VARCHAR(256), 可空), note(TEXT, 可空), created_at, updated_at
+
+### rack（机架，ADR-021 新增）
+- PK: `id` INT AUTO_INCREMENT
+- 字段: machine_room_id(INT, 可空, 索引, 无硬 FK, 指向 machine_room.id), name(VARCHAR(128), 机房内唯一, 应用层校验), capacity_u(INT, 默认 42), created_at
+- 说明: 机架 = 点位图最小结构化单元；U 位不入库存，设备机位继续用 `rental_record.rack_location` 自由文本；设备归属机架的匹配规则 = 同机房且 `rack_location` 以机架名为前缀
+
 ## 迁移记录
 
 - 2026-10-07：`asset_ops` 库创建（`CREATE DATABASE ... CHARACTER SET utf8mb4`），17 表由 `Base.metadata.create_all` 建立
 - 2026-10-07：执行 `backend/scripts/migrate_to_asset_ops.py`（source=cronmail，target=asset_ops），逐表行数与 dry-run 计划一致；逐行 MD5 哈希全量比对 17 表全部 MATCH；抽样核对（合同金额/邮件日志/客户）通过；`asset_ops` 无 project_* 数据；`cronmail` 库未受影响
 - 迁移脚本特性：幂等（DELETE 过滤范围内 + INSERT）、源库只读、迁移期间临时关闭目标库外键检查（contract 自引用外键）、原生 SELECT/INSERT 保证 JSON 列存储形式保真
+- 2026-10-07（ADR-021）：`asset_ops` 新增 `machine_room`、`rack` 两表，由应用启动时 `Base.metadata.create_all` 自动建表；`rental_record.machine_room_id` 为**存量表加列**，create_all 不会修改已存在表，部署时需执行一次性 DDL：`ALTER TABLE rental_record ADD COLUMN machine_room_id INT NULL, ADD INDEX ix_rental_record_machine_room_id (machine_room_id);`
+- 2026-10-07（ADR-022）：`rental_record` 新增 `rack_id`、`u_position` 两列（存量表加列，create_all 不会修改已存在表），**部署时需执行一次性 DDL**：
+
+```sql
+ALTER TABLE rental_record
+  ADD COLUMN rack_id INT NULL COMMENT '机架ID（无硬 FK，指向 rack.id；NULL 表示未上架到具体机架）',
+  ADD COLUMN u_position INT NULL COMMENT 'U 位（1~rack.capacity_u，NULL 表示在架但未定位 U）',
+  ADD INDEX ix_rental_record_rack_id (rack_id);
+```

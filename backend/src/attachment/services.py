@@ -22,8 +22,8 @@ from src.attachment.schemas import (
 )
 
 
-# 上传根目录
-UPLOAD_BASE_DIR = "/app/uploads"
+# 上传根目录（ADR-020：环境化，默认值保持不变，cronmail 平台行为零变化）
+UPLOAD_BASE_DIR = os.environ.get("UPLOAD_BASE_DIR", "/app/uploads")
 
 # 允许的 MIME 类型
 ALLOWED_MIMETYPES = {

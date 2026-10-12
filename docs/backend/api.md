@@ -864,6 +864,9 @@ HTTP 状态码：200
 - `public_ip`（string，可选）：按公网 IP 模糊搜索（匹配 `public_ips` JSON 数组）
 - `rack_location`（string，可选）：按机架位置模糊搜索
 - `unlinked_only`（bool，默认 false）：仅返回未关联任何合同的设备
+- `machine_room_id`（int，可选，ADR-021 新增）：按所属机房 ID 筛选
+- `warehoused`（bool，默认 false，ADR-021 新增）：仅返回未上架（`machine_room_id IS NULL`）设备，优先级高于 `machine_room_id`
+- `rack_id`（int，可选，ADR-022 新增）：按机架 ID 精确筛选
 - `page`（int，默认 1）
 - `page_size`（int，默认 20，最大 200）
 
@@ -918,6 +921,11 @@ HTTP 状态码：200
 - `items[].auto_renew`（bool）：是否自动续期
 - `items[].remark`（string|null）：备注
 - `items[].updated_at`（datetime|null）：最后更新时间
+- `items[].machine_room_id`（int|null，ADR-021 新增）：所属机房 ID，null 表示未上架/在库
+- `items[].machine_room_name`（string|null，ADR-021 新增）：所属机房名称（批量 in 查询填充，避免 N+1），未上架为 null
+- `items[].rack_id`（int|null，ADR-022 新增）：机架 ID，null 表示未上架到具体机架
+- `items[].u_position`（int|null，ADR-022 新增）：U 位（1~机架 capacity_u），null 表示在架但未定位 U
+- `items[].rack_name`（string|null，ADR-022 新增）：机架名称（批量 in 查询填充，避免 N+1）
 - ⚠️ 列表接口不返回 `root_password`、`contacts`、`email_logs`，详情请用 GET /api/rentals/{id}
 
 ---
@@ -980,10 +988,17 @@ HTTP 状态码：201
 - `root_password`（string，请求时明文传入，响应时解密返回）
 - `contacts`（array）：关联联系人，写入 rental_contact 中间表
 - `data_disks`（array，可选）：数据盘列表
+- `rack_id`（int|null，可选，ADR-022 新增）：机架 ID。须与 `machine_room_id` 同机房；只给 `rack_id` 不给 `u_position` 合法（设备在架但未定位 U）
+- `u_position`（int|null，可选，ADR-022 新增）：U 位（≥1，且 ≤ 机架 `capacity_u`）；提供时必须同时提供 `rack_id`
 
 错误：
 - 404：`{"detail": "客户不存在"}`
 - 404：`{"detail": "联系人不存在: {id}"}`
+- 404：`{"detail": "机架不存在"}`（rack_id 指向不存在的机架）
+- 400：`{"detail": "指定 U 位时必须同时指定机架"}`（只传 u_position 未传 rack_id）
+- 400：`{"detail": "机架 {name} 不属于设备所属机房，无法占位"}`（rack 所属机房 != machine_room_id）
+- 400：`{"detail": "U 位超出范围（机架 {name} 容量为 {capacity_u} U，有效范围 1~{capacity_u}）"}`
+- 409：`{"detail": "机架 {name} 的 U{n} 已被设备 {machine_model} 占用"}`（同机架同 U 位唯一占用）
 
 ---
 
@@ -1050,10 +1065,29 @@ HTTP 状态码：200
 - `contacts`（array，可选）：关联联系人列表。不传则保持旧值；传入时全量替换（传 `[]` 清空）
 - `root_password`（string，可选）：明文传入，后端加密存储
 - `status`（string，可选）：设备物理状态，人工可修改：`运行中 | 维护中 | 已下架 | 故障`
+- `machine_room_id`（int|null，可选，ADR-021 新增）：所属机房 ID。传非空值时校验机房存在（404 若不存在）；传 `null` 表示解绑（变为未上架）
+- `rack_id`（int|null，可选，ADR-022 新增）：机架 ID。传 `null` 表示解绑机架（`u_position` 同步置 null，此时不能再传非空 `u_position`，否则 400）；不传则沿用设备当前机架
+- `u_position`（int|null，可选，ADR-022 新增）：U 位（1~机架 capacity_u）。传 `null` 清除 U 位；不传则沿用当前 U 位（换机架时旧 U 位随迁并重新做占用校验）
+
+**设备变更自动记录（ADR-021）**：更新时后端对实际变化的字段自动写入 `change_log`（`target_type=rental`），`content` 为结构化 JSON 字符串，与主更新同事务（失败一起回滚）；无变化不写日志。`root_password` 变化只记录脱敏值：
+
+```json
+[{"field":"内存(GB)","old":64,"new":128},{"field":"备注","old":null,"new":"升级内存"},{"field":"Root密码","old":"***","new":"***"}]
+```
+
+响应中新增 `machine_room_id`（int|null）与 `machine_room_name`（string|null）。
+
+ADR-022 新增字段：`rack_id`（int|null）、`u_position`（int|null）、`rack_name`（string|null）。
 
 错误：
 - 404：`{"detail": "租赁记录不存在"}`
 - 404：`{"detail": "联系人不存在: {id}"}`
+- 404：`{"detail": "所属机房不存在"}`（machine_room_id 指向不存在的机房）
+- 404：`{"detail": "机架不存在"}`（rack_id 指向不存在的机架）
+- 400：`{"detail": "机架 {name} 不属于设备所属机房，无法占位"}`
+- 400：`{"detail": "U 位超出范围（机架 {name} 容量为 {capacity_u} U，有效范围 1~{capacity_u}）"}`
+- 400：`{"detail": "解绑机架时不能同时指定 U 位"}`（rack_id=null 且 u_position 非空）
+- 409：`{"detail": "机架 {name} 的 U{n} 已被设备 {machine_model} 占用"}`（同机架同 U 位唯一占用，排除设备自身）
 
 ---
 
@@ -3295,3 +3329,260 @@ HTTP 状态码：201
 新增字段：
 - `paid_amount`（Decimal|null）：已回款总额
 - `payment_progress`（float|null）：回款进度百分比
+
+---
+
+## 机房管理 (MachineRoom)
+
+> ADR-021。约定：
+> - `machine_room_id`（设备侧）与 `rack.machine_room_id` 均**无硬 FK**，查询层保证归属
+> - 设备与机架的对应关系：设备 `machine_room_id` == 机架所属机房，且 `rack_location` **以机架名为前缀**（如机架 `A-01` 匹配 `A-01-05-U12`）
+> - 未上架/在库设备 = `machine_room_id IS NULL`
+
+### GET /api/machine-rooms
+
+机房列表，支持 name/code 模糊搜索。
+
+请求：`GET /api/machine-rooms?search=上海`
+
+查询参数：
+- `search`（string，可选）：按名称/编码模糊搜索
+
+响应：
+```json
+{
+  "items": [
+    {
+      "id": 1,
+      "name": "上海一号机房",
+      "code": "SH-01",
+      "address": "上海市",
+      "note": null,
+      "created_at": "2026-10-07T14:28:31.267641",
+      "updated_at": "2026-10-07T14:28:31.267661"
+    }
+  ],
+  "total": 1
+}
+```
+
+HTTP 状态码：200
+
+关键字段：
+- `items`（array）：机房列表（按 id 升序）
+- `total`（int）：总数
+
+---
+
+### POST /api/machine-rooms
+
+创建机房。
+
+请求：`POST /api/machine-rooms`
+```json
+{"name": "上海一号机房", "code": "SH-01", "address": "上海市", "note": "备注"}
+```
+
+响应（201）：
+```json
+{"id": 1, "name": "上海一号机房", "code": "SH-01", "address": "上海市", "note": "备注", "created_at": "2026-10-07T14:28:31.267641", "updated_at": "2026-10-07T14:28:31.267661"}
+```
+
+HTTP 状态码：201
+
+关键字段：
+- `name`（string，必填，1-128 字符，全局唯一）
+- `code`（string，必填，1-64 字符，全局唯一）
+- `address`（string，可选，≤256）
+- `note`（string，可选）
+
+错误：
+- 400：`{"detail": "机房名称 '上海一号机房' 已存在"}` — name 重复
+- 400：`{"detail": "机房编码 'SH-01' 已存在"}` — code 重复
+
+---
+
+### GET /api/machine-rooms/{id}
+
+机房详情。
+
+请求：`GET /api/machine-rooms/1`
+
+响应：同 POST 响应。
+
+HTTP 状态码：200
+
+错误：
+- 404：`{"detail": "机房不存在"}`
+
+---
+
+### PUT /api/machine-rooms/{id}
+
+更新机房，所有字段可选，只更新传入的字段。
+
+请求：`PUT /api/machine-rooms/1`
+```json
+{"note": "updated"}
+```
+
+响应：同 POST 响应。
+
+HTTP 状态码：200
+
+错误：
+- 404：`{"detail": "机房不存在"}`
+- 400：name/code 与其他机房重复
+
+---
+
+### DELETE /api/machine-rooms/{id}
+
+删除机房（软保护：有机房设备则 409 拒绝，不做级联；机架随机房一并删除）。
+
+请求：`DELETE /api/machine-rooms/1`
+
+响应：
+```json
+{"detail": "机房已删除"}
+```
+
+HTTP 状态码：200
+
+错误：
+- 404：`{"detail": "机房不存在"}`
+- 409：`{"detail": "机房下仍有 N 台关联设备，请先迁移或解绑设备后再删除"}` — 存在 `machine_room_id = id` 的设备
+
+---
+
+### GET /api/machine-rooms/{id}/points
+
+机房点位图数据：机架卡片（含 U 位网格 `u_cells` + 每机架设备摘要）+ 仓库未上架设备。
+
+请求：`GET /api/machine-rooms/1/points`
+
+响应：
+```json
+{
+  "room": {"id": 1, "name": "上海一号机房", "code": "SH-01", "address": "上海市", "note": null, "created_at": "...", "updated_at": "..."},
+  "racks": [
+    {
+      "id": 1,
+      "name": "A-01",
+      "capacity_u": 4,
+      "u_cells": [
+        {"u": 1, "rental_id": null, "machine_model": null, "remark": null, "private_ip": null, "status": null},
+        {"u": 2, "rental_id": "cd80c8b0-...", "machine_model": "Dell R740", "remark": "捷易（带宽）", "private_ip": "192.168.180.170", "status": "空闲中"},
+        {"u": 3, "rental_id": null, "machine_model": null, "remark": null, "private_ip": null, "status": null},
+        {"u": 4, "rental_id": null, "machine_model": null, "remark": null, "private_ip": null, "status": null}
+      ],
+      "devices": [
+        {"rental_id": "b04d6b63-...", "machine_model": "Dell R740", "rack_location": "A-01-05-U12", "status": "空闲中"}
+      ]
+    }
+  ],
+  "warehoused": [
+    {"rental_id": "0af2f563-...", "machine_model": "In-Stock R730", "rack_location": "仓库货架3", "status": "空闲中"}
+  ]
+}
+```
+
+HTTP 状态码：200
+
+关键字段：
+- `room`（object）：机房信息
+- `racks`（array）：机架卡片（按机架名升序）
+  - `racks[].u_cells`（array，ADR-022 新增）：U 位网格，长度 = `capacity_u`，`u` 从 1 开始；由 `rental_record.rack_id + u_position` 驱动，空格（无设备）的 `rental_id/machine_model/remark/private_ip/status` 均为 null；未定位 U 的在架设备（`u_position IS NULL`）不出现在 `u_cells` 中
+  - `racks[].devices`（array）：该机架下设备摘要（存量兼容，匹配规则：同机房且 `rack_location` 以机架名为前缀）
+- `warehoused`（array）：仓库未上架设备摘要（`machine_room_id IS NULL`，全局）
+
+错误：
+- 404：`{"detail": "机房不存在"}`
+
+---
+
+### GET /api/machine-rooms/warehoused
+
+未上架（`machine_room_id IS NULL`）设备列表。
+
+请求：`GET /api/machine-rooms/warehoused`
+
+响应：
+```json
+{
+  "items": [
+    {"rental_id": "0af2f563-...", "machine_model": "In-Stock R730", "rack_location": "仓库货架3", "status": "空闲中"}
+  ],
+  "total": 1
+}
+```
+
+HTTP 状态码：200
+
+关键字段：
+- `items`（array）：设备摘要（按创建时间倒序），每项含 `rental_id` / `machine_model` / `rack_location` / `status`
+- `total`（int）：总数
+
+---
+
+### POST /api/machine-rooms/{id}/racks
+
+创建机架。
+
+请求：`POST /api/machine-rooms/1/racks`
+```json
+{"name": "A-01", "capacity_u": 42}
+```
+
+响应（201）：
+```json
+{"id": 1, "machine_room_id": 1, "name": "A-01", "capacity_u": 42, "created_at": "2026-10-07T14:28:31.318793"}
+```
+
+HTTP 状态码：201
+
+关键字段：
+- `name`（string，必填，1-128 字符，机房内唯一，如 `A-01`）
+- `capacity_u`（int，可选，默认 42，≥1）：机架 U 位容量
+
+错误：
+- 404：`{"detail": "机房不存在"}`
+- 400：`{"detail": "机架名称 'A-01' 在该机房内已存在"}`
+
+---
+
+### PUT /api/machine-rooms/{id}/racks/{rack_id}
+
+更新机架，所有字段可选，只更新传入的字段。
+
+请求：`PUT /api/machine-rooms/1/racks/1`
+```json
+{"capacity_u": 24}
+```
+
+响应：同 POST 响应。
+
+HTTP 状态码：200
+
+错误：
+- 404：`{"detail": "机架不存在"}`（机架不存在或不属于该机房）
+- 400：机架名称与同机房其他机架重复
+
+---
+
+### DELETE /api/machine-rooms/{id}/racks/{rack_id}
+
+删除机架（机架下仍有设备则 409 拒绝）。
+
+请求：`DELETE /api/machine-rooms/1/racks/1`
+
+响应：
+```json
+{"detail": "机架已删除"}
+```
+
+HTTP 状态码：200
+
+错误：
+- 404：`{"detail": "机架不存在"}`
+- 409：`{"detail": "机架 A-01 下仍有 N 台设备，请先迁移设备后再删除"}` — 存在同机房且 `rack_location` 以机架名为前缀的设备

@@ -12,6 +12,8 @@ data:
   # 文档转换服务 - 复用 cronmail namespace 的 document-converter ClusterIP（跨 namespace，ADR-019 共享设施）
   # 注：当前分支后端代码未读取该变量（转换在镜像内本地执行），此处为 ADR-019 约定的共享设施声明，供后续模块使用
   DOCUMENT_CONVERTER_URL: "http://document-converter.cronmail.svc.cluster.local:8080"
+  # 附件存储根目录（ADR-020：显式声明，防止将来误改代码默认值导致挂载点漂移）
+  UPLOAD_BASE_DIR: "/app/uploads"
   # 应用元信息
   APP_TITLE: "Asset Ops API"
   APP_VERSION: "0.1.0"

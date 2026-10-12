@@ -22,6 +22,7 @@ import src.mail.models            # noqa: E402, F401
 import src.system.models           # noqa: E402, F401
 import src.scheduler.models       # noqa: E402, F401
 import src.attachment.models      # noqa: E402, F401
+import src.machine_room.models    # noqa: E402, F401
 
 
 # ============================================================
@@ -127,6 +128,7 @@ from src.template.api import template_router  # noqa: E402
 from src.mail.api import log_router  # noqa: E402
 from src.contract.api import contract_router  # noqa: E402
 from src.attachment.api import attachment_router, system_attachment_category_router  # noqa: E402
+from src.machine_room.api import machine_room_router  # noqa: E402
 
 app.include_router(customer_router)
 app.include_router(contact_router)
@@ -137,6 +139,7 @@ app.include_router(log_router)
 app.include_router(contract_router)
 app.include_router(attachment_router)
 app.include_router(system_attachment_category_router)
+app.include_router(machine_room_router)
 
 
 # ============================================================

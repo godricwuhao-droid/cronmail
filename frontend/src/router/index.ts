@@ -117,6 +117,20 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '编辑设备', icon: 'Document', hidden: true },
       },
 
+      // ---------- 机房管理 ----------
+      {
+        path: 'machine-rooms',
+        name: 'MachineRoomList',
+        component: () => import('@/views/machine-rooms/index.vue'),
+        meta: { title: '机房管理', icon: 'OfficeBuilding' },
+      },
+      {
+        path: 'machine-rooms/:id',
+        name: 'MachineRoomDetail',
+        component: () => import('@/views/machine-rooms/detail.vue'),
+        meta: { title: '机房详情', icon: 'OfficeBuilding', hidden: true },
+      },
+
       // ---------- 邮件模板 ----------
       {
         path: 'templates',

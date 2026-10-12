@@ -1,5 +1,5 @@
 # 资产运营管理平台附件存储 PersistentVolumeClaim
-# 显式绑定到 asset-ops-attachments-pv（与 cronmail 共享同一 NFS 路径，见 pv-attachments.yaml 说明）
+# 显式绑定到 asset-ops-attachments-pv（ADR-020：独立 NFS 子路径 /cronmail/asset-ops，与 cronmail 物理隔离，见 pv-attachments.yaml 说明）
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim

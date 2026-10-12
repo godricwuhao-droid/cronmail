@@ -71,7 +71,10 @@ class RentalRecordCreate(BaseModel):
     data_disks: Optional[list[str]] = None
     os_version: Optional[str] = Field(None, max_length=128)
     bandwidth_mbps: Optional[int] = Field(None, ge=0)
+    machine_room_id: Optional[int] = Field(None, description="所属机房ID（可空，NULL 表示未上架/在库）")
     rack_location: Optional[str] = Field(None, max_length=256)
+    rack_id: Optional[int] = Field(None, description="机架ID（可空，须与 machine_room_id 同机房）")
+    u_position: Optional[int] = Field(None, ge=1, description="U 位（可空，1~机架 capacity_u；提供 rack_id 时才有效）")
     private_ip: Optional[str] = Field(None, max_length=64)
     public_ips: Optional[list[str]] = None
     ssh_port: int = 22
@@ -97,7 +100,10 @@ class RentalRecordUpdate(BaseModel):
     data_disks: Optional[list[str]] = None
     os_version: Optional[str] = Field(None, max_length=128)
     bandwidth_mbps: Optional[int] = Field(None, ge=0)
+    machine_room_id: Optional[int] = Field(None, description="所属机房ID（可空，传 null 表示解绑/未上架）")
     rack_location: Optional[str] = Field(None, max_length=256)
+    rack_id: Optional[int] = Field(None, description="机架ID（传 null 表示解绑机架，u_position 同步置 null）")
+    u_position: Optional[int] = Field(None, ge=1, description="U 位（1~机架 capacity_u；传 null 表示清除 U 位）")
     private_ip: Optional[str] = Field(None, max_length=64)
     public_ips: Optional[list[str]] = None
     ssh_port: Optional[int] = None
@@ -127,7 +133,12 @@ class RentalRecordListResponse(BaseModel):
     data_disks: Optional[list[str]] = None
     os_version: Optional[str] = None
     bandwidth_mbps: Optional[int] = None
+    machine_room_id: Optional[int] = None
+    machine_room_name: Optional[str] = None
     rack_location: Optional[str] = None
+    rack_id: Optional[int] = None
+    u_position: Optional[int] = None
+    rack_name: Optional[str] = None
     private_ip: Optional[str] = None
     public_ips: Optional[list[str]] = None
     ssh_port: int = 22
@@ -158,7 +169,12 @@ class RentalRecordDetailResponse(BaseModel):
     data_disks: Optional[list[str]] = None
     os_version: Optional[str] = None
     bandwidth_mbps: Optional[int] = None
+    machine_room_id: Optional[int] = None
+    machine_room_name: Optional[str] = None
     rack_location: Optional[str] = None
+    rack_id: Optional[int] = None
+    u_position: Optional[int] = None
+    rack_name: Optional[str] = None
     private_ip: Optional[str] = None
     public_ips: Optional[list[str]] = None
     ssh_port: int = 22

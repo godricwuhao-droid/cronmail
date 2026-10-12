@@ -7,6 +7,72 @@
 > - 类型：新增 / 修改 / 修复 / 删除 / 重构
 > - Breaking Change 标注 ⚠️
 
+## 2026-10-07 (新增) — 机房管理模块
+
+| 日期 | 类型 | 变更内容 | 影响文件/范围 | 关联任务 | 备注 |
+|------|------|---------|-------------|---------|------|
+| 2026-10-07 | 新增 | 机房管理模块（列表/点位图/仓库上架）+设备机房字段+变更记录JSON渲染+排序bug修复 | frontend/src/views/machine-rooms/, rentals/, contracts/detail.vue | ADR-021 | platform-asset-ops |
+| 2026-10-07 | 修改 | 点位图升级为 U 位点阵图（多机架并排/状态着色）+设备表单机架U位联动 | frontend/src/views/machine-rooms/detail.vue, rentals/ | ADR-022 | platform-asset-ops |
+
+### 新增
+- **机房管理一级菜单 + 列表页 + 详情页（点位图）**
+  - 影响文件：`frontend/src/layouts/MainLayout.vue`、`frontend/src/router/index.ts`、`frontend/src/views/machine-rooms/index.vue`（新建）、`frontend/src/views/machine-rooms/detail.vue`（新建）、`frontend/src/api/modules/machine-room.ts`（新建）
+  - 变更内容：菜单插在"设备管理"之后（同步 menuIndexes）；路由 `/machine-rooms`（列表）与 `/machine-rooms/:id`（详情）；列表页含名称/编码/地址/机架数/设备数/操作（机架数/设备数由 points 接口并行补齐），新建/编辑对话框，删除 409 时展示后端 detail；详情页机架卡片网格（设备数/capacity_u 进度、设备清单点击跳设备详情）+ 添加/编辑/删除机架 + 仓库 tab（未上架设备表格 + 上架选机架调 `PUT /api/rentals/{id}`）
+  - 关联任务：ADR-021
+
+### 修改
+- **设备表单/列表增加机房字段**
+  - 影响文件：`frontend/src/views/rentals/create.vue`、`frontend/src/views/rentals/index.vue`、`frontend/src/api/modules/rental.ts`
+  - 变更内容：表单"系统"区新增"所属机房" el-select（clearable，可空=未上架，编辑/复制模式回填）；列表新增"所属机房"列（空显示 —）与机房筛选下拉（全部/未上架/具体机房，未上架对应 `warehoused=true`）
+  - 关联任务：ADR-021
+
+- **变更记录展示兼容 JSON 新格式**
+  - 影响文件：`frontend/src/views/rentals/detail.vue`、`frontend/src/views/contracts/detail.vue`、`frontend/src/lib/change-log.ts`（新建）
+  - 变更内容：content 尝试 JSON.parse，成功且为含 field 的对象数组 → 渲染"字段：旧值 → 新值"（null 显示 —）；parse 失败原样纯文本展示（兼容存量）；解析逻辑抽到 `lib/change-log.ts` 供两处复用
+  - 关联任务：ADR-021
+
+### 修复
+- **rentals 列表内存/带宽排序 bug**
+  - 影响文件：`frontend/src/views/rentals/index.vue`
+  - 变更内容：`memory_gb`、`bandwidth_mbps` 两列 `getColumnProps` 补 `prop`（与 `end_date` 接法一致），点击列头排序请求带正确 `sort_field`
+  - 关联任务：ADR-021
+
+## 2026-10-07 (修改) — 机房 U 位点阵图（ADR-022）
+
+| 日期 | 类型 | 变更内容 | 影响文件/范围 | 关联任务 | 备注 |
+|------|------|---------|-------------|---------|------|
+| 2026-10-07 | 修改 | 点位图升级为 U 位点阵图（多机架并排/状态着色）+设备表单机架U位联动 | frontend/src/views/machine-rooms/detail.vue, rentals/ | ADR-022 | platform-asset-ops |
+
+### 修改
+- **机房详情页点位图 → U 位点阵图**
+  - 影响文件：`frontend/src/views/machine-rooms/detail.vue`、`frontend/src/api/modules/machine-room.ts`
+  - 变更内容：原机架卡片清单替换为多机架并排表格（列=机架，表头显示"机架名 + 已定位数/capacity"，行=U 位，取所有机架 capacity_u 最大值、自上而下 最大→1，1 在最下）；单元格按状态着色（已断电红 `#fde2e2` / 租赁中·空闲中绿 `#e1f3d8` / 空格灰 `#f5f7fa`），格内三行小字：型号（加粗）/ 备注（用途）/ 内网IP（空显 —），点击有设备格跳 `/rentals/:id`；U 位列 sticky 左固定，机架过多横向滚动；添加/编辑容量/删除机架入口保留（表格上方工具条 + 列表头）；未定位 U 的在架设备（devices 摘要中未出现在该机架 u_cells 的）在点阵图下方单独提示，点击跳详情；仓库 tab 上架流程升级：选机架后增加 U 位输入（可空=不指定），提交 `machine_room_id + rack_id + u_position`，409 冲突展示后端 detail
+  - 关联任务：ADR-022
+- **设备表单三级联动（机房→机架→U 位）**
+  - 影响文件：`frontend/src/views/rentals/create.vue`、`frontend/src/api/modules/rental.ts`
+  - 变更内容：「所属机房」下拉下新增「机架」下拉（clearable，选项=该机房机架列表（经 points 接口按机房缓存加载），机房变更时清空）+「U 位」数字输入（min 1 / max=所选机架 capacity_u，clearable，未选机架禁用，超容量截断提示）；原「机架位置」文本框保留并标注"（兼容旧数据）"；编辑回填 rack_id/u_position（restoring 标记防止联动 watch 误清空），复制模式不复制机架/U 位（避免 409）；提交显式携带 rack_id/u_position（null=解绑/清除）；409 冲突与 400 机架校验错误直接展示后端 detail
+  - 关联任务：ADR-022
+- **设备列表新增「机架/U」列**
+  - 影响文件：`frontend/src/views/rentals/index.vue`
+  - 变更内容：「所属机房」列旁新增「机架/U」列（默认显示，支持列设置/拖拽/置顶），显示 `rack_name · U位`（如 `A-01 · U12`），未定位 U 只显示机架名，空显示 —
+  - 关联任务：ADR-022
+- **API 类型补充**
+  - 影响文件：`frontend/src/api/modules/machine-room.ts`、`frontend/src/api/modules/rental.ts`
+  - 变更内容：新增 `RackCell` 接口，`RackPoint` 增加 `u_cells`；rental 列表/详情/创建/更新类型补充 `rack_id`、`u_position`、`rack_name`，列表参数补充 `rack_id`
+  - 关联任务：ADR-022
+
+## 2026-10-07 (修改) — rentals 列表到期时间排序
+
+| 日期 | 类型 | 变更内容 | 影响文件/范围 | 关联任务 | 备注 |
+|------|------|---------|-------------|---------|------|
+| 2026-10-07 | 新增 | rentals 列表到期时间排序 | frontend/src/views/rentals/index.vue | 到期排序 | platform-asset-ops |
+
+### 修改
+- **`/rentals` 到期时间列支持排序**
+  - 影响文件：`frontend/src/views/rentals/index.vue`
+  - 变更内容：`end_date` 列 `getColumnProps` 增加 `prop='end_date'` + `sortable='custom'`，复用现有 `@sort-change="handleSort"` 机制，点击列头请求带 `sort_field=end_date&sort_order=asc/desc`
+  - 关联任务：到期排序
+
 ## 2026-08-07 (回款页面重写 v2)
 
 ### [重构] 回款页面——双文件匹配 + 附件预览 + Copilot

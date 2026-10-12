@@ -4,6 +4,15 @@
 # （一个 PV 同一时刻只能绑定一个 PVC），且不允许改动现有 PV。
 # 方案：新建一个指向**同一 NFS 路径**（192.168.180.50:/cronmail）的 PV，
 # NFS 支持多客户端同时挂载同一目录，两平台共享同一份附件数据，零文件迁移。
+#
+# 说明（ADR-020 存储隔离）：NFS path 由 /cronmail 改为 /cronmail/asset-ops，
+# asset-ops 平台附件与 cronmail 平台物理隔离到独立子目录。
+# 注意：本 PV 已被 asset-ops-attachments-pvc 通过 claimRef 绑定，
+# 已绑定 PV 的 spec.persistentvolumesource（含 nfs.path）不可变，
+# 切换 path 需「删 PVC → 删 PV（Retain）→ 重建 PV → 重建 PVC」，
+# 且切换后 Pod 内挂载点需滚动重启（或缩容再扩）才会挂载到新路径；
+# 存量文件需先用 backend/scripts/migrate_asset_ops_uploads.py 迁移到
+# /cronmail/asset-ops/ 下（按 asset_ops 库 attachment.file_path 白名单复制）。
 ---
 apiVersion: v1
 kind: PersistentVolume
@@ -23,4 +32,4 @@ spec:
     - lookupcache=none
   nfs:
     server: 192.168.180.50
-    path: /cronmail
+    path: /cronmail/asset-ops
