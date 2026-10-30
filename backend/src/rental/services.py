@@ -8,6 +8,7 @@ from typing import Optional
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, String
+from sqlalchemy.sql.functions import coalesce
 
 from src.core.crypto import encrypt_password, decrypt_password
 from src.core.timezone import local_today
@@ -36,6 +37,7 @@ FIELD_LABELS = {
     "rack_location": "机架位置",
     "rack_id": "机架",
     "u_position": "U位",
+    "u_size": "U数",
     "private_ip": "内网IP",
     "public_ips": "公网IP",
     "ssh_port": "SSH端口",
@@ -94,14 +96,16 @@ def _validate_rack_placement(
     u_position: Optional[int],
     machine_room_id: Optional[int],
     exclude_rental_id: Optional[str] = None,
+    u_size: int = 1,
 ):
     """
-    机架 U 位占位校验（ADR-022）：
+    机架 U 位占位校验（ADR-022，ADR-028 升级为区间校验）：
     - u_position 提供但 rack_id 为空 → 400
     - rack_id 不存在 → 404
     - 机架所属机房与设备 machine_room_id 不一致 → 400
-    - u_position 超出 1~capacity_u → 400
-    - 同机架同 U 位已被其他设备占用 → 409
+    - 占用区间 [u_position, u_position + u_size - 1] 越出机架容量 → 400
+    - 与同机架其他设备（u_position 非空）区间相交 → 409（含原单 U 相等场景）
+    - u_position 为 NULL（解绑/未定位）不做区间校验
     """
     if u_position is not None and rack_id is None:
         raise HTTPException(status_code=400, detail="指定 U 位时必须同时指定机架")
@@ -121,15 +125,20 @@ def _validate_rack_placement(
         )
 
     if u_position is not None:
-        if not (1 <= u_position <= (rack.capacity_u or 0)):
+        u_size = u_size or 1
+        top = u_position + u_size - 1
+        # 越界：区间上端超出机架容量
+        if top > (rack.capacity_u or 0):
             raise HTTPException(
                 status_code=400,
-                detail=f"U 位超出范围（机架 {rack.name} 容量为 {rack.capacity_u} U，有效范围 1~{rack.capacity_u}）",
+                detail=f"{u_size}U 设备无法放置于 {rack.name} 的 U{u_position}，超出机架容量（占用 U{u_position}~U{top}）",
             )
-        # 唯一占用：同机架同 U 位只能有一台设备
+        # 区间重叠：同机架其他设备（u_position 非空）与 [u_position, top] 相交
         occ_query = db.query(RentalRecord).filter(
             RentalRecord.rack_id == rack_id,
-            RentalRecord.u_position == u_position,
+            RentalRecord.u_position.isnot(None),
+            RentalRecord.u_position <= top,
+            (coalesce(RentalRecord.u_size, 1) + RentalRecord.u_position - 1) >= u_position,
         )
         if exclude_rental_id is not None:
             occ_query = occ_query.filter(RentalRecord.id != exclude_rental_id)
@@ -137,7 +146,7 @@ def _validate_rack_placement(
         if occupant:
             raise HTTPException(
                 status_code=409,
-                detail=f"机架 {rack.name} 的 U{u_position} 已被设备 {occupant.machine_model} 占用",
+                detail=f"与 {rack.name} 的 {occupant.machine_model}（U{occupant.u_position}）位置冲突，所选 U{u_position}~U{top} 重叠",
             )
 
 
@@ -237,12 +246,13 @@ def create_rental(db: Session, data: RentalRecordCreate) -> RentalRecord:
     if data.machine_room_id is not None:
         _ensure_machine_room_exists(db, data.machine_room_id)
 
-    # 校验机架 U 位占位（ADR-022）
+    # 校验机架 U 位占位（ADR-022 / ADR-028 区间校验）
     _validate_rack_placement(
         db,
         rack_id=data.rack_id,
         u_position=data.u_position,
         machine_room_id=data.machine_room_id,
+        u_size=data.u_size,
     )
 
     rental = RentalRecord(
@@ -259,6 +269,7 @@ def create_rental(db: Session, data: RentalRecordCreate) -> RentalRecord:
         rack_location=data.rack_location,
         rack_id=data.rack_id,
         u_position=data.u_position,
+        u_size=data.u_size,
         private_ip=data.private_ip,
         public_ips=data.public_ips,
         ssh_port=data.ssh_port,
@@ -298,6 +309,8 @@ def update_rental(db: Session, rental: RentalRecord, data: RentalRecordUpdate) -
         update_data["u_position"] = None
     new_rack_id = update_data.get("rack_id", rental.rack_id)
     new_u = update_data.get("u_position", rental.u_position)
+    # 有效 U 数：本次传了 u_size 用新值，否则用设备当前值（u_size 修改且 u_position 非空时同样触发区间校验，ADR-028）
+    eff_u_size = update_data.get("u_size", getattr(rental, "u_size", None) or 1)
     # 有效机房：本次传了 machine_room_id 用新值，否则用设备当前值
     eff_room = update_data["machine_room_id"] if "machine_room_id" in update_data else rental.machine_room_id
     _validate_rack_placement(
@@ -306,6 +319,7 @@ def update_rental(db: Session, rental: RentalRecord, data: RentalRecordUpdate) -
         u_position=new_u,
         machine_room_id=eff_room,
         exclude_rental_id=rental.id,
+        u_size=eff_u_size,
     )
 
     # 处理密码加密（root_password 明文 → root_password_enc 密文）

@@ -11,6 +11,7 @@
  *  - 关联合同信息卡片（已有）
 
  *  - 变更记录按钮
+ *  - ADR-029：返回按钮 = router.back()（有历史回来源页），无历史 fallback /rentals
  */
 import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -24,7 +25,7 @@ import {
   createChangeLog,
   type ChangeLogEntry,
 } from '@/api/modules/contract'
-import { safeStatusLabel, safeStatusTagType } from '@/lib/rental'
+import { formatRackPath, safeStatusLabel, safeStatusTagType } from '@/lib/rental'
 import { parseChangeContent, formatChangeValue } from '@/lib/change-log'
 
 const route = useRoute()
@@ -52,8 +53,13 @@ function handleEdit() {
   router.push(`/rentals/${route.params.id}/edit`)
 }
 
+/** ADR-029：有历史回来源页（点位图/列表/合同均可），无历史（直接 URL 进入）fallback 设备列表 */
 function goBack() {
-  router.push({ name: 'RentalList' })
+  if (window.history.state?.back) {
+    router.back()
+  } else {
+    router.push({ name: 'RentalList' })
+  }
 }
 
 // === 展示辅助函数 ===
@@ -250,7 +256,14 @@ onMounted(() => {
           <span v-else>-</span>
         </el-descriptions-item>
         <el-descriptions-item label="SSH 端口">{{ record.ssh_port || 22 }}</el-descriptions-item>
-        <el-descriptions-item label="机架位置" :span="2">{{ record.rack_location || '-' }}</el-descriptions-item>
+        <!-- ADR-028：机架（纯机架名，存量 rack_location 文本兜底）+ U位（u_position 保留展示）+ U数（u_size 新增） -->
+        <el-descriptions-item label="机架">{{ formatRackPath(record) }}</el-descriptions-item>
+        <el-descriptions-item label="U位">
+          {{ record.u_position != null ? `U${record.u_position}` : '—' }}
+        </el-descriptions-item>
+        <el-descriptions-item label="U数">
+          {{ (record.u_size ?? 1) }}U
+        </el-descriptions-item>
       </el-descriptions>
     </section>
 

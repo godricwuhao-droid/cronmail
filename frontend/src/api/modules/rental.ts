@@ -60,7 +60,9 @@ export interface RentalListItem {
   rack_id?: number | null
   /** U 位（ADR-022，1~机架 capacity_u），null 表示在架但未定位 U */
   u_position?: number | null
-  /** 机架名称（ADR-022），未上架到机架为 null */
+  /** 设备占用 U 数（ADR-028，≥1，自 u_position 底部起向上占用；后端未上线前前端 ?? 1 兜底） */
+  u_size?: number | null
+  /** 纯机架名（ADR-028，如 A01-45U；ADR-026 曾为 机柜名/机架名 路径），未上架到机架为 null */
   rack_name?: string | null
 }
 
@@ -102,7 +104,9 @@ export interface RentalDetail {
   rack_id?: number | null
   /** U 位（ADR-022，1~机架 capacity_u），null 表示在架但未定位 U */
   u_position?: number | null
-  /** 机架名称（ADR-022），未上架到机架为 null */
+  /** 设备占用 U 数（ADR-028，≥1，自 u_position 底部起向上占用；后端未上线前前端 ?? 1 兜底） */
+  u_size?: number | null
+  /** 纯机架名（ADR-028，如 A01-45U；ADR-026 曾为 机柜名/机架名 路径），未上架到机架为 null */
   rack_name?: string | null
   private_ip: string | null
   public_ips: string[] | null
@@ -143,10 +147,12 @@ export interface RentalCreatePayload {
   rack_location?: string
   /** 所属机房 ID（ADR-021），null 表示未上架/在库 */
   machine_room_id?: number | null
-  /** 机架 ID（ADR-022），须与 machine_room_id 同机房；只给 rack_id 不给 u_position 合法 */
+  /** 机架 ID（ADR-022），须与 machine_room_id 同机房；只给 rack_id 不给 u_position 合法（已定架未定位） */
   rack_id?: number | null
-  /** U 位（ADR-022，≥1 且 ≤ 机架 capacity_u）；提供时必须同时提供 rack_id */
+  /** U 位（ADR-022，≥1 且 ≤ 机架 capacity_u）；提供时必须同时提供 rack_id。ADR-028 起表单不再录入（由点位图点选上架决定） */
   u_position?: number | null
+  /** 设备占用 U 数（ADR-028，≥1 整数，默认 1） */
+  u_size?: number
   private_ip?: string
   public_ips?: string[]
   ssh_port?: number
@@ -171,8 +177,10 @@ export interface RentalUpdatePayload {
   machine_room_id?: number | null
   /** 机架 ID（ADR-022），传 null 表示解绑机架（u_position 同步置 null）；不传则沿用当前机架 */
   rack_id?: number | null
-  /** U 位（ADR-022），传 null 清除 U 位；不传则沿用当前 U 位（换机架时旧 U 位随迁并重新校验占用） */
+  /** U 位（ADR-022），传 null 清除 U 位；不传则沿用当前 U 位（换机架时旧 U 位随迁并重新校验占用）。ADR-028 起表单仅在解绑机架时显式传 null */
   u_position?: number | null
+  /** 设备占用 U 数（ADR-028，≥1 整数；u_position 非空时后端重新做区间校验） */
+  u_size?: number
   private_ip?: string
   public_ips?: string[]
   ssh_port?: number

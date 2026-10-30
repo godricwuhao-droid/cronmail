@@ -24,7 +24,7 @@ import {
 } from '@/api/modules/rental'
 import { getCustomers, type Customer } from '@/api/modules/customer'
 import { getMachineRooms, type MachineRoom } from '@/api/modules/machine-room'
-import { BILLING_MODEL_LABEL, safeStatusLabel, safeStatusTagType } from '@/lib/rental'
+import { BILLING_MODEL_LABEL, formatRackPath, safeStatusLabel, safeStatusTagType } from '@/lib/rental'
 
 const router = useRouter()
 
@@ -40,7 +40,7 @@ const total = ref(0)
 
 // 筛选条件（query 中下拉类筛选用 '' 表示「全部」，发送时跳过）
 const searchText = ref('')
-/** 当前搜索字段（默认机架位置） */
+/** 当前搜索字段（默认机架） */
 const searchField = ref<SearchField>('rack_location')
 const statusFilter = ref<RentalStatus | ''>('')
 const customerFilter = ref('')
@@ -60,7 +60,7 @@ const STATUS_OPTIONS: Array<{ label: string; value: RentalStatus }> = [
 
 /** 搜索字段标签选项 */
 const SEARCH_FIELD_OPTIONS: Array<{ label: string; value: SearchField }> = [
-  { label: '机架位置', value: 'rack_location' },
+  { label: '机架', value: 'rack_location' },
   { label: '机器型号', value: 'machine_model' },
   { label: '内网 IP', value: 'private_ip' },
   { label: '公网 IP', value: 'public_ip' },
@@ -288,9 +288,10 @@ const allColumns: ColumnDef[] = [
   { key: 'data_disks', title: '数据盘' },
   { key: 'os_version', title: '操作系统' },
   { key: 'bandwidth_mbps', title: '带宽' },
-  { key: 'rack_location', title: '机架位置', default: true },
+  // ADR-028：key 复用、语义变更——rack_location 列显示纯机架名（rack_name）；u_position key 改「U数」显示 u_size
+  { key: 'rack_location', title: '机架', default: true },
+  { key: 'u_position', title: 'U数', default: true },
   { key: 'machine_room', title: '所属机房', default: true },
-  { key: 'rack_u', title: '机架/U', default: true },
   { key: 'private_ip', title: '内网 IP' },
   { key: 'public_ips', title: '公网 IP' },
   { key: 'ssh_port', title: 'SSH 端口' },
@@ -318,16 +319,29 @@ const DEFAULT_VISIBLE: string[] = allColumns
 /** 默认列顺序：与 allColumns 声明顺序一致 */
 const DEFAULT_ORDER: string[] = allColumns.map((c) => c.key)
 
+/**
+ * 存量列 key 兼容别名（ADR-024 表头去重：rack_u 拆为「位置 + U位」两列）
+ * 旧配置里可见的 rack_u 直接映射为 u_position，保证新列在不写迁移逻辑的前提下默认可见
+ */
+const LEGACY_COLUMN_KEYS: Record<string, string> = { rack_u: 'u_position' }
+
+/** 归一化列 key：别名映射 + 合法性校验，非法 key 返回 null（由调用方过滤掉） */
+function normalizeColumnKey(k: unknown): string | null {
+  if (typeof k !== 'string') return null
+  const key = LEGACY_COLUMN_KEYS[k] ?? k
+  return allColumns.some((c) => c.key === key) ? key : null
+}
+
 function loadVisibleColumns(): string[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return [...DEFAULT_VISIBLE]
     const parsed = JSON.parse(raw) as unknown
     if (!Array.isArray(parsed)) return [...DEFAULT_VISIBLE]
-    // 过滤掉无效 key，且保证 required（操作）列始终存在
-    const valid = parsed.filter(
-      (k): k is string => typeof k === 'string' && allColumns.some((c) => c.key === k),
-    )
+    // 过滤掉无效 key（含被移除的旧列），且保证 required（操作）列始终存在
+    const valid = parsed
+      .map(normalizeColumnKey)
+      .filter((k): k is string => k !== null)
     if (!valid.includes('actions')) valid.push('actions')
     return valid
   } catch {
@@ -341,10 +355,10 @@ function loadColumnOrder(): string[] {
     if (!raw) return [...DEFAULT_ORDER]
     const parsed = JSON.parse(raw) as unknown
     if (!Array.isArray(parsed)) return [...DEFAULT_ORDER]
-    // 过滤掉无效 key，缺失的补在尾部，未知的多余项丢弃
-    const valid = parsed.filter(
-      (k): k is string => typeof k === 'string' && allColumns.some((c) => c.key === k),
-    )
+    // 过滤掉无效 key（含被移除的旧列），缺失的补在尾部，未知的多余项丢弃
+    const valid = parsed
+      .map(normalizeColumnKey)
+      .filter((k): k is string => k !== null)
     // 缺失列补上
     for (const c of allColumns) {
       if (!valid.includes(c.key)) valid.push(c.key)
@@ -553,19 +567,21 @@ function getColumnProps(col: ColumnDef): ColumnProps {
     base['min-width'] = 140
     base['show-overflow-tooltip'] = true
   } else if (key === 'rack_location') {
+    // ADR-028：列名「机架」，显示纯机架名（rack_name，如 A01-45U；存量 rack_location 文本兜底）
     base.prop = 'rack_location'
-    base.label = '机架位置'
+    base.label = '机架'
     base['min-width'] = 120
     base['show-overflow-tooltip'] = true
     base.sortable = 'custom'
+  } else if (key === 'u_position') {
+    // ADR-028：key 复用，列名「U数」，显示 u_size
+    base.label = 'U数'
+    base.width = 80
+    base.align = 'center'
   } else if (key === 'machine_room') {
     base.prop = 'machine_room_name'
     base.label = '所属机房'
     base['min-width'] = 130
-    base['show-overflow-tooltip'] = true
-  } else if (key === 'rack_u') {
-    base.label = '机架/U'
-    base['min-width'] = 120
     base['show-overflow-tooltip'] = true
   } else if (key === 'private_ip') {
     base.prop = 'private_ip'
@@ -921,14 +937,18 @@ onMounted(() => {
               </template>
               <span v-else>-</span>
             </template>
-            <template v-else-if="col.key === 'machine_room'" #default="{ row }">
-              <span v-if="row.machine_room_name">{{ row.machine_room_name }}</span>
+            <template v-else-if="col.key === 'rack_location'" #default="{ row }">
+              <!-- ADR-028：「机架」列显示纯机架名（rack_name，如 A01-45U），存量 rack_location 文本兜底 -->
+              <span v-if="row.rack_name || row.rack_location">{{ formatRackPath(row) }}</span>
               <span v-else class="col-muted">—</span>
             </template>
-            <template v-else-if="col.key === 'rack_u'" #default="{ row }">
-              <span v-if="row.rack_name">
-                {{ row.rack_name }}<template v-if="row.u_position != null"> · U{{ row.u_position }}</template>
-              </span>
+            <template v-else-if="col.key === 'u_position'" #default="{ row }">
+              <!-- ADR-028：「U数」列显示 u_size（后端未上线前 ?? 1 兜底） -->
+              <span v-if="row.u_size != null">{{ row.u_size }}U</span>
+              <span v-else class="col-muted">—</span>
+            </template>
+            <template v-else-if="col.key === 'machine_room'" #default="{ row }">
+              <span v-if="row.machine_room_name">{{ row.machine_room_name }}</span>
               <span v-else class="col-muted">—</span>
             </template>
             <template v-else-if="col.key === 'public_ips'" #default="{ row }">

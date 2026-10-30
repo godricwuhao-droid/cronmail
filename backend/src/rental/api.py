@@ -29,7 +29,7 @@ def _get_machine_room_name(db: Session, machine_room_id: Optional[int]) -> Optio
 
 
 def _get_rack_name(db: Session, rack_id: Optional[int]) -> Optional[str]:
-    """查询机架名称（单条，详情接口用）"""
+    """查询纯机架名（单条，详情接口用）：`A01-45U`（ADR-028 去掉 ADR-026 的「机柜名/」前缀）"""
     if rack_id is None:
         return None
     from src.machine_room.models import Rack
@@ -94,6 +94,7 @@ def _rental_to_list_item(
         rack_location=rental.rack_location,
         rack_id=rental.rack_id,
         u_position=rental.u_position,
+        u_size=rental.u_size or 1,
         rack_name=rack_name,
         private_ip=rental.private_ip,
         public_ips=rental.public_ips,
@@ -191,6 +192,7 @@ def _rental_to_detail(rental: RentalRecord, db: Session) -> schemas.RentalRecord
         rack_location=rental.rack_location,
         rack_id=rental.rack_id,
         u_position=rental.u_position,
+        u_size=rental.u_size or 1,
         rack_name=_get_rack_name(db, rental.rack_id),
         private_ip=rental.private_ip,
         public_ips=rental.public_ips,
@@ -245,7 +247,7 @@ def list_rentals(
         warehoused=warehoused,
         rack_id=rack_id,
     )
-    # 批量 in 查询机房/机架名称，避免 N+1
+    # 批量 in 查询机房/机架名，避免 N+1（rack_name = 纯机架名，ADR-028）
     room_ids = {r.machine_room_id for r in items if r.machine_room_id is not None}
     room_names: dict[int, str] = {}
     rack_names: dict[int, str] = {}

@@ -47,3 +47,40 @@ export const BILLING_MODEL_LABEL: Record<string, string> = {
   monthly: '按月',
   yearly: '按年',
 }
+
+/**
+ * 仅机架名展示（列表「机架」列，ADR-028 由「机柜/机架位置」列改名；ADR-024 表头去重修订）：
+ *  - 有 rack_name → 原样返回（ADR-028 起为纯机架名，如 `A01-45U`），**不带 U 位**
+ *  - 无 rack_name 但有 rack_location 存量文本 → 原样显示
+ *  - 都无 → '—'
+ *
+ * U 数单独由「U数」列（u_size）展示，避免与机架列信息重复。
+ */
+export function formatRackPath(record: {
+  rack_name?: string | null
+  rack_location?: string | null
+}): string {
+  if (record.rack_name) return record.rack_name
+  if (record.rack_location) return record.rack_location
+  return '—'
+}
+
+/**
+ * 统一位置展示（ADR-024）：
+ *  - 有 rack_name → `{rack_name}-U{u_position}`（如 A01-U12；u_position 为空时只返回 rack_name）
+ *  - 无 rack_name 但有 rack_location 存量文本 → 原样显示
+ *  - 都无 → '—'
+ *
+ * 注意：含 U 位，适合详情页/合同明细等单行展示场景；列表列请用 formatRackPath。
+ */
+export function formatRackLocation(record: {
+  rack_name?: string | null
+  u_position?: number | null
+  rack_location?: string | null
+}): string {
+  if (record.rack_name) {
+    return record.u_position != null ? `${record.rack_name}-U${record.u_position}` : record.rack_name
+  }
+  if (record.rack_location) return record.rack_location
+  return '—'
+}

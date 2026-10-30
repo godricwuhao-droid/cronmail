@@ -92,6 +92,12 @@ class RentalRecord(Base):
         comment="机架ID（无硬 FK，指向 rack.id；NULL 表示未上架到具体机架）",
     )
     u_position = Column(Integer, nullable=True, comment="U 位（1~rack.capacity_u，NULL 表示在架但未定位 U）")
+    u_size = Column(
+        Integer,
+        nullable=False,
+        default=1,
+        comment="设备占用U数（自 u_position 底部起向上占用 u_size 个连续 U 位，默认 1，ADR-028）",
+    )
     private_ip = Column(String(64), nullable=True, comment="内网IP")
     public_ips = Column(JSON, nullable=True, comment="公网IP列表(JSON)")
     ssh_port = Column(Integer, default=22, comment="SSH 端口")

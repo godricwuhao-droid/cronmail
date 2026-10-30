@@ -128,7 +128,7 @@ from src.template.api import template_router  # noqa: E402
 from src.mail.api import log_router  # noqa: E402
 from src.contract.api import contract_router  # noqa: E402
 from src.attachment.api import attachment_router, system_attachment_category_router  # noqa: E402
-from src.machine_room.api import machine_room_router  # noqa: E402
+from src.machine_room.api import machine_room_router, cabinet_router, rack_router  # noqa: E402
 
 app.include_router(customer_router)
 app.include_router(contact_router)
@@ -140,6 +140,8 @@ app.include_router(contract_router)
 app.include_router(attachment_router)
 app.include_router(system_attachment_category_router)
 app.include_router(machine_room_router)
+app.include_router(cabinet_router)
+app.include_router(rack_router)
 
 
 # ============================================================

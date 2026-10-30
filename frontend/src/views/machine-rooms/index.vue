@@ -3,10 +3,10 @@
  * 机房管理 - 列表页（ADR-021）
  *
  * 功能：
- *  - 机房列表（名称/编码/地址/机架数/设备数/操作），支持名称/编码模糊搜索
+ *  - 机房列表（名称/编码/地址/机柜数/设备数/操作），支持名称/编码模糊搜索
  *  - 新建/编辑对话框（name/code/address/note）
  *  - 删除：confirmDelete 二次确认；409（机房下仍有设备）展示后端 detail
- *  - 机架数/设备数：列表接口不返回，逐机房并行调 points 接口补齐（机房数量少，可接受）
+ *  - 机柜数/设备数：列表接口不返回，逐机房并行调 point-map 接口补齐（机房数量少，可接受）
  */
 import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
@@ -16,8 +16,8 @@ import { confirmDelete } from '@/lib/confirm'
 import {
   createMachineRoom,
   deleteMachineRoom,
-  getMachineRoomPoints,
   getMachineRooms,
+  getPointMap,
   updateMachineRoom,
   type MachineRoom,
 } from '@/api/modules/machine-room'
@@ -31,8 +31,8 @@ const loading = ref(false)
 const list = ref<MachineRoom[]>([])
 const searchText = ref('')
 
-/** 机架数/设备数（points 接口补齐，key 为机房 id） */
-const counts = ref<Record<number, { rack_count: number; device_count: number }>>({})
+/** 机柜数/设备数（point-map 接口补齐，key 为机房 id） */
+const counts = ref<Record<number, { cabinet_count: number; device_count: number }>>({})
 
 let searchTimer: ReturnType<typeof setTimeout> | null = null
 function handleSearch() {
@@ -53,17 +53,30 @@ async function fetchList() {
     if (trimmed) params.search = trimmed
     const res = await getMachineRooms(params)
     list.value = res.items
-    // 并行补齐机架数/设备数（失败静默，不影响列表展示）
+    // 并行补齐机柜数/设备数（失败静默，不影响列表展示）
     counts.value = {}
     const results = await Promise.all(
       res.items.map(async (room) => {
         try {
-          const points = await getMachineRoomPoints(room.id, { __silent: true })
+          const pointMap = await getPointMap(room.id, { __silent: true })
           return [
             room.id,
             {
-              rack_count: points.racks.length,
-              device_count: points.racks.reduce((sum, r) => sum + r.devices.length, 0),
+              cabinet_count: pointMap.rows.reduce((sum, r) => sum + r.cabinets.length, 0),
+              device_count: pointMap.rows.reduce(
+                (sum, r) =>
+                  sum +
+                  r.cabinets.reduce(
+                    (s, c) =>
+                      s +
+                      c.racks.reduce(
+                        (s2, rk) => s2 + rk.u_cells.filter((cell) => cell.rental_id != null).length,
+                        0,
+                      ),
+                    0,
+                  ),
+                0,
+              ),
             },
           ] as const
         } catch {
@@ -155,7 +168,7 @@ async function handleSubmit() {
 // 删除（409 时展示后端 detail）
 // ============================================================
 async function handleDelete(row: MachineRoom) {
-  if (!(await confirmDelete(`确定删除机房「${row.name}」？删除后其下机架一并删除。`))) return
+  if (!(await confirmDelete(`确定删除机房「${row.name}」？删除后其下排、机柜、机架一并删除。`))) return
   try {
     await deleteMachineRoom(row.id, { __silent: true })
     ElMessage.success('机房已删除')
@@ -223,9 +236,9 @@ onMounted(fetchList)
             <span v-else class="col-muted">—</span>
           </template>
         </el-table-column>
-        <el-table-column label="机架数" width="100" align="center">
+        <el-table-column label="机柜数" width="100" align="center">
           <template #default="{ row }">
-            {{ counts[row.id]?.rack_count ?? '—' }}
+            {{ counts[row.id]?.cabinet_count ?? '—' }}
           </template>
         </el-table-column>
         <el-table-column label="设备数" width="100" align="center">

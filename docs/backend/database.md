@@ -9,7 +9,7 @@
 
 ### 属主约定
 
-- **资产侧表**（`asset_ops` 库，19 张）：`customer`、`contact`、`rental_record`、`rental_contact`、`contract`、`contract_rental`、`contract_contact`、`change_log`、`email_template`、`email_log`、`smtp_config`、`dingtalk_config`、`system_config`、`attachment_category`、`attachment_item`、`attachment`、`attachment_status`、`machine_room`、`rack`
+- **资产侧表**（`asset_ops` 库，21 张）：`customer`、`contact`、`rental_record`、`rental_contact`、`contract`、`contract_rental`、`contract_contact`、`change_log`、`email_template`、`email_log`、`smtp_config`、`dingtalk_config`、`system_config`、`attachment_category`、`attachment_item`、`attachment`、`attachment_status`、`machine_room`、`rack`、`rack_row`（ADR-026）、`cabinet`（ADR-026）
 - **项目侧表**（仅存在于 `cronmail` 库，不迁入 `asset_ops`）：`project_type`、`project_contract`、`project_service_line`、`project_contract_payment`，以及卫星/算力服务侧 `satellite_data_contract`、`compute_service_contract`、`contract_service_line`
 - 数据流向：`cronmail` → `asset_ops` 单向复制（`backend/scripts/migrate_to_asset_ops.py`，幂等可重跑）；`cronmail` 库在任何迁移操作中保持只读
 - 过滤约定：`attachment` / `attachment_status` / `attachment_category` 仅复制 `contract_type='compute_leasing'` 行；`attachment_item` 仅复制 compute_leasing 分类子项；`system_config` 排除 `llm_*` 与 project 相关键
@@ -28,9 +28,10 @@
 
 ### rental_record（设备/租赁记录）
 - PK: `id`
-- 字段: customer_id(FK→customer), machine_model, cpu_model, memory_gb, gpu_info, system_disk, data_disks(JSON), os_version, bandwidth_mbps, machine_room_id(INT, 可空, 索引, 无硬 FK, ADR-021), rack_location, rack_id(INT, 可空, 索引, 无硬 FK, ADR-022), u_position(INT, 可空, ADR-022), private_ip, public_ips(JSON), ssh_port, root_username, root_password_enc, billing_model, start_date, end_date, auto_renew, status, remark, created_at, updated_at
+- 字段: customer_id(FK→customer), machine_model, cpu_model, memory_gb, gpu_info, system_disk, data_disks(JSON), os_version, bandwidth_mbps, machine_room_id(INT, 可空, 索引, 无硬 FK, ADR-021), rack_location, rack_id(INT, 可空, 索引, 无硬 FK, ADR-022), u_position(INT, 可空, ADR-022), u_size(INT, NOT NULL DEFAULT 1, ADR-028), private_ip, public_ips(JSON), ssh_port, root_username, root_password_enc, billing_model, start_date, end_date, auto_renew, status, remark, created_at, updated_at
 - 说明（ADR-021）: `machine_room_id` 指向 `machine_room.id`，无硬 FK（与 attachment.contract_id 风格一致，查询层保证归属）；NULL 表示未上架/在库
-- 说明（ADR-022）: `rack_id` 指向 `rack.id`，无硬 FK；`u_position` 取值 1~`rack.capacity_u`，NULL 表示在架但未定位 U；同机架同 U 位唯一占用由 API 层校验（409），无数据库唯一约束；`rack_location` 自由文本保留仅存量兼容，不再驱动点位图
+- 说明（ADR-022）: `rack_id` 指向 `rack.id`，无硬 FK；`u_position` 取值 1~`rack.capacity_u`，NULL 表示在架但未定位 U；`rack_location` 自由文本保留仅存量兼容，不再驱动点位图
+- 说明（ADR-028）: `u_size` 为设备占用 U 数（≥1，默认 1）；`u_position` 为设备**底部** U，占用区间 `[u_position, u_position + u_size - 1]`（向上延伸）；`u_position` 为 NULL 时无区间；越界（区间上端 > `rack.capacity_u`）由 API 层校验 400，与同机架其他设备区间重叠由 API 层校验 409（覆盖原单 U 相等场景），均无数据库约束
 
 ### rental_contact（设备-联系人中间表）
 - PK: (rental_id, contact_id)
@@ -94,10 +95,20 @@
 - PK: `id` INT AUTO_INCREMENT
 - 字段: name(VARCHAR(128), 唯一), code(VARCHAR(64), 唯一), address(VARCHAR(256), 可空), note(TEXT, 可空), created_at, updated_at
 
-### rack（机架，ADR-021 新增）
+### rack_row（排，ADR-026 新增）
 - PK: `id` INT AUTO_INCREMENT
-- 字段: machine_room_id(INT, 可空, 索引, 无硬 FK, 指向 machine_room.id), name(VARCHAR(128), 机房内唯一, 应用层校验), capacity_u(INT, 默认 42), created_at
-- 说明: 机架 = 点位图最小结构化单元；U 位不入库存，设备机位继续用 `rental_record.rack_location` 自由文本；设备归属机架的匹配规则 = 同机房且 `rack_location` 以机架名为前缀
+- 字段: machine_room_id(INT, 可空, 索引, 无硬 FK, 指向 machine_room.id), name(VARCHAR(128), 机房内唯一, 应用层校验), note(TEXT, 可空), created_at
+
+### cabinet（机柜，ADR-026 新增）
+- PK: `id` INT AUTO_INCREMENT
+- 字段: rack_row_id(INT, 可空, 索引, 无硬 FK, 指向 rack_row.id), name(VARCHAR(128), 排内唯一, 应用层校验), power_on(BOOLEAN, NOT NULL, 默认 1, 通电状态, ADR-026 自 rack 上移), created_at
+
+### rack（机架，ADR-021 新增，ADR-026 改造）
+- PK: `id` INT AUTO_INCREMENT
+- 字段: machine_room_id(INT, 可空, 索引, 无硬 FK, 指向 machine_room.id), cabinet_id(INT, 可空, 索引, 无硬 FK, 指向 cabinet.id, ADR-026 新增), name(VARCHAR(128), 机柜内唯一, 应用层校验), capacity_u(INT, 默认 42), created_at
+- 说明: 机架 = 点位图最小结构化单元；层级 机房→排→机柜→机架→设备，归属链 `rack.cabinet_id → cabinet.rack_row_id → rack_row.machine_room_id`，`rack.machine_room_id` 由迁移脚本保证一致，查询层以 cabinet 归属为准
+- 说明（ADR-026）: `power_on` 列已上移 `cabinet.power_on`（整柜断电），`rack.power_on` 列迁移后 **DROP**；ORM 模型不再映射该列
+- 说明（存量兼容）: 设备归属机架的删除保护仍保留「同机房且 `rack_location` 以机架名为前缀」条件（ADR-024 双条件）
 
 ## 迁移记录
 
@@ -112,4 +123,61 @@ ALTER TABLE rental_record
   ADD COLUMN rack_id INT NULL COMMENT '机架ID（无硬 FK，指向 rack.id；NULL 表示未上架到具体机架）',
   ADD COLUMN u_position INT NULL COMMENT 'U 位（1~rack.capacity_u，NULL 表示在架但未定位 U）',
   ADD INDEX ix_rental_record_rack_id (rack_id);
+```
+
+- 2026-10-19（ADR-023）：`rack` 新增 `power_on` 列（存量表加列，create_all 不会修改已存在表），**部署时需执行一次性 DDL**：
+
+```sql
+ALTER TABLE rack ADD COLUMN power_on BOOLEAN NOT NULL DEFAULT 1 COMMENT '通电状态（true=通电, false=未通电）';
+```
+
+- 2026-10-19（ADR-026）：机房层级模型升级（机房→排→机柜→机架）。新增 `rack_row` / `cabinet` 两表，`rack` 新增 `cabinet_id` 列；`rack.power_on` 上移 `cabinet.power_on`，迁移后 DROP。**部署 DDL 与执行顺序**（⚠️ 必须按序执行，迁移窗口内停写）：
+
+  **第 1 步：建表 + 加列**（`rack_row` / `cabinet` 也可由新版应用启动时 `Base.metadata.create_all` 自动建表；`rack.cabinet_id` 为存量表加列，create_all 不会修改已存在表，必须手工执行）：
+
+```sql
+CREATE TABLE rack_row (
+  id INT NOT NULL AUTO_INCREMENT COMMENT '排ID',
+  machine_room_id INT NULL COMMENT '所属机房ID（无硬 FK，指向 machine_room.id，查询层保证归属）',
+  name VARCHAR(128) NOT NULL COMMENT '排名称（机房内唯一，如 A排）',
+  note TEXT NULL COMMENT '备注',
+  created_at DATETIME NOT NULL COMMENT '创建时间',
+  PRIMARY KEY (id),
+  KEY ix_rack_row_machine_room_id (machine_room_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='排（机房内一排机柜，ADR-026）';
+
+CREATE TABLE cabinet (
+  id INT NOT NULL AUTO_INCREMENT COMMENT '机柜ID',
+  rack_row_id INT NULL COMMENT '所属排ID（无硬 FK，指向 rack_row.id，查询层保证归属）',
+  name VARCHAR(128) NOT NULL COMMENT '机柜名称（排内唯一，如 A01）',
+  power_on BOOLEAN NOT NULL DEFAULT 1 COMMENT '通电状态（true=通电, false=未通电；ADR-026 自 rack.power_on 上移）',
+  created_at DATETIME NOT NULL COMMENT '创建时间',
+  PRIMARY KEY (id),
+  KEY ix_cabinet_rack_row_id (rack_row_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='机柜（ADR-026）';
+
+ALTER TABLE rack
+  ADD COLUMN cabinet_id INT NULL COMMENT '所属机柜ID（无硬 FK，指向 cabinet.id，ADR-026）',
+  ADD INDEX ix_rack_cabinet_id (cabinet_id);
+```
+
+  **第 2 步：执行存量迁移脚本**（幂等，先 dry-run 再执行；按机架名首字母归排「X排」，存量 rack→机柜同名+power_on 迁移，机架改名 `{原rack名}-{capacity_u}U`，回填 `rack.cabinet_id` / `machine_room_id`；设备 `rack_id` 不变）：
+
+```bash
+# 演练（不写入）
+python scripts/migrate_rack_hierarchy.py --url "mysql+pymysql://user:pass@host:3306/asset_ops" --dry-run
+# 真实迁移
+python scripts/migrate_rack_hierarchy.py --url "mysql+pymysql://user:pass@host:3306/asset_ops"
+```
+
+  **第 3 步：删除 `rack.power_on` 列**（确认迁移结果后执行；可用脚本开关 `--drop-power-on` 代替手工 DDL）：
+
+```sql
+ALTER TABLE rack DROP COLUMN power_on;
+```
+
+- 2026-10-27（ADR-028）：`rental_record` 新增 `u_size` 列（存量表加列，create_all 不会修改已存在表），**部署时需执行一次性 DDL**（存量数据默认 1，行为与现状等价，无需迁移数据）：
+
+```sql
+ALTER TABLE rental_record ADD COLUMN u_size INT NOT NULL DEFAULT 1 COMMENT '设备占用U数（自 u_position 底部起向上占用 u_size 个连续 U 位，默认 1）';
 ```

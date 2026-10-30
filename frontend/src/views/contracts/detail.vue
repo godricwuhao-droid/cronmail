@@ -37,7 +37,11 @@ import {
   CONTRACT_BILLING_MODEL_LABEL,
   CONTRACT_STATUS_LABEL,
 } from '@/lib/contract'
-import { safeStatusLabel as rentalStatusLabel, safeStatusTagType as rentalStatusTagType } from '@/lib/rental'
+import {
+  formatRackLocation,
+  safeStatusLabel as rentalStatusLabel,
+  safeStatusTagType as rentalStatusTagType,
+} from '@/lib/rental'
 import { parseChangeContent, formatChangeValue } from '@/lib/change-log'
 import {
   getAttachmentSummary,
@@ -227,7 +231,9 @@ const candidateRentals = computed<RentalListItem[]>(() => {
 })
 
 function rentalLabel(row: RentalListItem) {
-  const rack = row.rack_location ? ` · ${row.rack_location}` : ' · -'
+  // ADR-024：统一位置展示（结构化优先，存量 rack_location 文本兜底）
+  const loc = formatRackLocation(row)
+  const rack = loc === '—' ? ' · -' : ` · ${loc}`
   return `${row.machine_model}${rack}`
 }
 
@@ -513,7 +519,8 @@ watch(
         </el-table-column>
         <el-table-column label="机架位置" min-width="140" show-overflow-tooltip>
           <template #default="{ row }">
-            <span v-if="row.rack_location">{{ row.rack_location }}</span>
+            <!-- ADR-024：统一位置展示（结构化优先，存量 rack_location 文本兜底） -->
+            <span v-if="formatRackLocation(row) !== '—'">{{ formatRackLocation(row) }}</span>
             <span v-else class="col-muted">-</span>
           </template>
         </el-table-column>

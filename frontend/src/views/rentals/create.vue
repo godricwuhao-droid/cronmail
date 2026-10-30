@@ -8,6 +8,8 @@
  *
  * 表单仅保留硬件信息，客户/日期/计费/联系人由合同管理。
  * 编辑模式下展示从合同继承的信息（el-descriptions 只读）。
+ * ADR-028 字段收敛：机房/机架均为下拉（机架按机柜分组+搜索，纯机架名 A01-45U），
+ * 「U位」改「U数」（u_size），u_position 移交点位图点选上架录入。
  *
  * UI 参考 device-input-temp.html 风格：
  *  - 分区标题：16px / 600 字重 / 左侧蓝色竖条装饰
@@ -29,10 +31,10 @@ import {
   type RentalUpdatePayload,
 } from '@/api/modules/rental'
 import {
+  getLocations,
   getMachineRooms,
-  getMachineRoomPoints,
   type MachineRoom,
-  type RackPoint,
+  type MachineRoomLocations,
 } from '@/api/modules/machine-room'
 
 const route = useRoute()
@@ -53,13 +55,12 @@ interface RentalForm {
   data_disks: string[]
   os_version: string
   bandwidth_mbps: number
-  rack_location: string
   /** 所属机房 ID（ADR-021），null 表示未上架/在库 */
   machine_room_id: number | null
-  /** 机架 ID（ADR-022），null 表示未上架到具体机架 */
+  /** 机架 ID（ADR-022/028：单一下拉字段），null 表示未上架到具体机架 */
   rack_id: number | null
-  /** U 位（ADR-022，1~机架 capacity_u），null 表示不指定 U 位 */
-  u_position: number | null
+  /** 设备占用 U 数（ADR-028，≥1 整数，默认 1；U 位由点位图点选上架决定，表单不再录入 u_position） */
+  u_size: number
   private_ip: string
   public_ips_text: string
   ssh_port: number
@@ -78,10 +79,9 @@ const form = reactive<RentalForm>({
   data_disks: ['2000GB NVMe SSD'],
   os_version: '',
   bandwidth_mbps: 1000,
-  rack_location: '',
   machine_room_id: null,
   rack_id: null,
-  u_position: null,
+  u_size: 1,
   private_ip: '',
   public_ips_text: '',
   ssh_port: 22,
@@ -105,70 +105,59 @@ async function loadRoomOptions() {
 }
 
 // ============================================================
-// 机架 / U 位联动（ADR-022：机房 → 机架 → U 位）
+// 机架单一下拉（ADR-028：按机柜 el-option-group 分组 + filterable 搜索）
+// 数据源 GET /locations（排→机柜→机架），前端扁平化为 机柜 → 机架 两级分组；
+// option label = 机架名（A01-45U 格式），value = rack_id
 // ============================================================
-const rackOptions = ref<RackPoint[]>([])
-/** 机架列表按机房缓存，避免机房来回切换重复请求 */
-const rackCache = new Map<number, RackPoint[]>()
+/** 机架选项分组（无机架的机柜不出现，避免空分组） */
+const rackGroups = ref<Array<{ cabinetName: string; racks: Array<{ id: number; name: string }> }>>([])
+/** 级联数据按机房缓存，避免机房来回切换重复请求 */
+const locationCache = new Map<number, MachineRoomLocations>()
 
-async function loadRackOptions(roomId: number) {
-  const cached = rackCache.get(roomId)
+/** 由 locations 数据构建机架分组选项 */
+function applyLocations(data: MachineRoomLocations) {
+  const groups: typeof rackGroups.value = []
+  for (const row of data.rows) {
+    for (const cab of row.cabinets) {
+      if (cab.racks.length === 0) continue
+      groups.push({
+        cabinetName: cab.name,
+        racks: cab.racks.map((r) => ({ id: r.id, name: r.name })),
+      })
+    }
+  }
+  rackGroups.value = groups
+}
+
+async function loadLocations(roomId: number) {
+  const cached = locationCache.get(roomId)
   if (cached) {
-    rackOptions.value = cached
+    applyLocations(cached)
     return
   }
   try {
-    const res = await getMachineRoomPoints(roomId)
-    rackCache.set(roomId, res.racks)
-    rackOptions.value = res.racks
+    const data = await getLocations(roomId)
+    locationCache.set(roomId, data)
+    applyLocations(data)
   } catch (e) {
     // 错误已统一处理
   }
 }
 
-/** 当前选中机架（取 capacity_u 约束 U 位范围） */
-const selectedRack = computed(
-  () => rackOptions.value.find((r) => r.id === form.rack_id) ?? null,
-)
-
-/** 回填标记：编辑/复制回填期间不让联动 watch 清空机架/U 位 */
+/** 回填标记：编辑/复制回填期间不让联动 watch 清空机架 */
 let restoring = false
 
-/** 机房变更：清空机架与 U 位，加载新机房机架列表 */
+/** 机房变更：清空机架选择，加载新机房机架选项 */
 watch(
   () => form.machine_room_id,
   (roomId, oldRoomId) => {
     if (roomId === oldRoomId) return
     if (!restoring) {
       form.rack_id = null
-      form.u_position = null
-      rackOptions.value = []
+      rackGroups.value = []
     }
     if (roomId != null) {
-      loadRackOptions(roomId)
-    }
-  },
-)
-
-/** 机架变更：清空 U 位（容量不同） */
-watch(
-  () => form.rack_id,
-  (rackId, oldRackId) => {
-    if (rackId === oldRackId) return
-    if (!restoring) {
-      form.u_position = null
-    }
-  },
-)
-
-/** U 位超出所选机架容量时截断并提示 */
-watch(
-  () => form.u_position,
-  (u) => {
-    const rack = selectedRack.value
-    if (rack && u != null && u > rack.capacity_u) {
-      ElMessage.warning(`U 位超出机架 ${rack.name} 容量（1~${rack.capacity_u}）`)
-      form.u_position = rack.capacity_u
+      loadLocations(roomId)
     }
   },
 )
@@ -213,10 +202,9 @@ async function loadDetail() {
     form.data_disks = data.data_disks ?? []
     form.os_version = data.os_version ?? ''
     form.bandwidth_mbps = data.bandwidth_mbps ?? 1000
-    form.rack_location = data.rack_location ?? ''
     form.machine_room_id = data.machine_room_id ?? null
     form.rack_id = data.rack_id ?? null
-    form.u_position = data.u_position ?? null
+    form.u_size = data.u_size ?? 1
     form.private_ip = data.private_ip ?? ''
     form.public_ips_text = (data.public_ips ?? []).join(',')
     form.ssh_port = data.ssh_port
@@ -224,9 +212,9 @@ async function loadDetail() {
     form.root_password = data.root_password ?? ''
     form.remark = data.remark ?? ''
     form.status = data.status ?? '空闲中'
-    // 回填机架下拉选项（watch 因值未变化不会触发，这里手动加载）
+    // 回填级联选项（watch 因值未变化不会触发，这里手动加载；applyLocations 内按 rack_id 反查回显）
     if (form.machine_room_id != null) {
-      loadRackOptions(form.machine_room_id)
+      loadLocations(form.machine_room_id)
     }
     // 等联动 watch 回调执行完再放开回填标记
     await nextTick()
@@ -274,11 +262,15 @@ function buildPayload(): RentalCreatePayload | RentalUpdatePayload {
     data_disks: form.data_disks,
     os_version: form.os_version,
     bandwidth_mbps: form.bandwidth_mbps,
-    rack_location: form.rack_location,
+    // ADR-024：rack_location 自由文本录入已移除（位置统一为 机房/机架/U 位）；
+    // 不传该字段时后端 partial update 不清空存量值
     machine_room_id: form.machine_room_id || null,
-    // 显式传 null 表示解绑机架 / 清除 U 位（编辑模式清空选择时生效）
+    // 显式传 null 表示解绑机架（编辑模式清空选择时生效）
     rack_id: form.rack_id,
-    u_position: form.u_position,
+    // ADR-028：表单不再录入 u_position（由点位图点选上架决定）；
+    // 解绑机架时显式传 null，避免后端沿用旧 U 位；选中机架时不传（沿用/未定位）
+    u_position: form.rack_id == null ? null : undefined,
+    u_size: form.u_size,
     private_ip: form.private_ip,
     public_ips,
     ssh_port: form.ssh_port,
@@ -345,11 +337,11 @@ async function loadCopyFrom(copyId: string) {
     form.data_disks = d.data_disks ?? []
     form.os_version = d.os_version ?? ''
     form.bandwidth_mbps = d.bandwidth_mbps ?? 1000
-    form.rack_location = d.rack_location ?? ''
     form.machine_room_id = d.machine_room_id ?? null
-    // 机架/U 位不复制：同机架同 U 位唯一占用，直接复制会 409，由用户重新指定
+    // 机架不复制：同机架同 U 位唯一占用，直接复制会 409，由用户重新指定
     form.rack_id = null
-    form.u_position = null
+    // U 数是硬件属性，随设备复制
+    form.u_size = d.u_size ?? 1
     form.private_ip = d.private_ip ?? ''
     form.public_ips_text = (d.public_ips ?? []).join(',')
     form.ssh_port = d.ssh_port ?? 22
@@ -359,7 +351,7 @@ async function loadCopyFrom(copyId: string) {
     form.remark = d.remark ?? ''
     form.status = d.status ?? '空闲中'
     if (form.machine_room_id != null) {
-      loadRackOptions(form.machine_room_id)
+      loadLocations(form.machine_room_id)
     }
     await nextTick()
     restoring = false
@@ -610,38 +602,36 @@ onMounted(async () => {
               <el-form-item label="机架">
                 <el-select
                   v-model="form.rack_id"
-                  :placeholder="form.machine_room_id == null ? '请先选择所属机房' : '选择机架（可空）'"
+                  placeholder="选择机房后选择机架（可搜索）"
                   :disabled="form.machine_room_id == null"
                   clearable
                   filterable
                   style="width: 100%"
                 >
-                  <el-option
-                    v-for="r in rackOptions"
-                    :key="r.id"
-                    :label="`${r.name}（${r.capacity_u} U）`"
-                    :value="r.id"
-                  />
+                  <el-option-group
+                    v-for="g in rackGroups"
+                    :key="g.cabinetName"
+                    :label="g.cabinetName"
+                  >
+                    <el-option
+                      v-for="r in g.racks"
+                      :key="r.id"
+                      :label="r.name"
+                      :value="r.id"
+                    />
+                  </el-option-group>
                 </el-select>
               </el-form-item>
             </el-col>
             <el-col :xs="24" :sm="12">
-              <el-form-item label="U 位">
+              <el-form-item label="U 数">
                 <el-input-number
-                  v-model="form.u_position"
+                  v-model="form.u_size"
                   :min="1"
-                  :max="selectedRack ? selectedRack.capacity_u : undefined"
-                  :disabled="form.rack_id == null"
-                  :placeholder="form.rack_id == null ? '请先选择机架' : '可空 = 不指定 U 位'"
+                  :max="1024"
+                  :step="1"
+                  :precision="0"
                   style="width: 100%"
-                />
-              </el-form-item>
-            </el-col>
-            <el-col :xs="24" :sm="12">
-              <el-form-item label="机架位置（兼容旧数据）">
-                <el-input
-                  v-model="form.rack_location"
-                  placeholder="旧版自由文本位置，新设备建议用上方机架 + U 位"
                 />
               </el-form-item>
             </el-col>

@@ -2106,3 +2106,146 @@ INSERT IGNORE INTO system_config (id, `key`, value, description) VALUES (UUID(),
 - `GET /api/machine-rooms/{id}/points` 每个机架新增 `u_cells`（长度=capacity_u，u 从 1 开始，空格设备字段 null）；原 `devices` 前缀匹配逻辑保留（存量兼容）
 - 部署 DDL（asset_ops，create_all 不补列）：`ALTER TABLE rental_record ADD COLUMN rack_id INT NULL COMMENT '机架ID（无硬 FK，指向 rack.id）', ADD COLUMN u_position INT NULL COMMENT 'U 位（1~rack.capacity_u）', ADD INDEX ix_rental_record_rack_id (rack_id);`
 - 验证：`import main` 通过；`backend/scripts/smoke_adr022.py`（临时 SQLite + TestClient）36 项断言全部 PASS（正常占位/U 越界 400/重复占位 409/解绑/机房不一致 400/u_cells 网格含空格）；`test_adr021_smoke.py` 回归全部 PASS；lint 无错误
+
+---
+
+## 2026-10-19 (新增) — 机架电源状态字段 power_on（CRUD + points 透出）
+
+| 日期 | 类型 | 变更内容 | 影响文件/范围 | 关联任务 | 备注 |
+|------|------|---------|-------------|---------|------|
+| 2026-10-19 | 新增 | 机架电源状态字段 power_on（CRUD + points 透出） | backend/src/machine_room/ | ADR-023 | platform-asset-ops |
+
+变更明细：
+- `Rack` 模型新增 `power_on`（BOOLEAN NOT NULL DEFAULT 1，通电状态）；存量行由 DDL 默认值保证为 True
+- `POST /api/machine-rooms/{id}/racks`：请求体新增可选 `power_on`（bool，缺省 true）；响应含 `power_on`
+- `PUT /api/machine-rooms/{id}/racks/{rack_id}`：请求体新增可选 `power_on`；`RackUpdate` 移除 `name`（机架名只读，与 ADR-023 契约对齐——原实现误开放 name 可改，前端更新机架仅传 capacity_u，无影响）
+- `GET /api/machine-rooms/{id}/points`：每个机架 item 新增 `power_on`（bool）
+- 部署 DDL（asset_ops，create_all 不补列）：`ALTER TABLE rack ADD COLUMN power_on BOOLEAN NOT NULL DEFAULT 1 COMMENT '通电状态（true=通电, false=未通电）';`
+- 验证：`import main` 通过；`test_adr021_smoke.py`、`scripts/smoke_adr022.py` 回归全部 PASS；power_on 专项 9 项断言全部 PASS（默认 true / 传 false / 单独改 power_on / 改 capacity_u 不影响 power_on / 传 name 被忽略 / points 透出）；lint 无错误
+
+---
+
+## 2026-10-19 (修改) — ADR-023 上线部署
+
+| 日期 | 类型 | 变更内容 | 影响文件/范围 | 关联任务 | 备注 |
+|------|------|---------|-------------|---------|------|
+| 2026-10-19 | 修改 | ADR-023 上线：DDL(rack.power_on) + 后端镜像构建推送 + asset-ops ns 三 deployment 滚动 | asset_ops 库, asset-ops ns | ADR-023 | 镜像 tag latest（digest sha256:eca9535da2df…）；验证通过：/docs 200，points 响应含 `"power_on":true`，3 pod Running 0 重启；另补齐 ADR-022 遗留 DDL（rental_record.rack_id/u_position + ix_rental_record_rack_id，幂等确认），否则 points 接口 500（Unknown column 'rental_record.rack_id'） |
+
+## 2026-10-19 (新增) — ADR-024 后端配套（points 新增 unlocated + 机架删除保护双条件）
+
+| 日期 | 类型 | 变更内容 | 影响文件/范围 | 关联任务 | 备注 |
+|------|------|---------|-------------|---------|------|
+| 2026-10-19 | 新增 | points 响应新增 unlocated（rack_id 视角未定位 U 设备）+ 机架删除保护增加 rack_id 条件 | backend/src/machine_room/ | ADR-024 | 纯只增字段 + 删除保护或条件，无 DDL |
+
+### 变更明细
+- **`GET /api/machine-rooms/{id}/points` 响应新增 `unlocated`（array，ADR-024）**
+  - 影响文件：`backend/src/machine_room/schemas.py`、`services.py`
+  - 数据源：`machine_room_id=本机房 AND rack_id IS NOT NULL AND u_position IS NULL`（在架但未定位 U 的设备）
+  - 元素结构与 `RackDeviceBrief` 一致（`rental_id/machine_model/rack_location/private_ip/status`）；无数据时为空数组，不省略字段
+  - 原因：新数据不再写 `rack_location` 文本，前端原"devices 前缀匹配 − u_cells"本地算法失效，改由后端按 rack_id 视角提供
+  - `racks[].devices`（前缀匹配摘要）保留不动（存量兼容）
+- **`RackDeviceBrief` 新增 `private_ip`（Optional，ADR-024）**
+  - 影响文件：`backend/src/machine_room/schemas.py`、`services.py`、`api.py`
+  - 只增字段，`points`（devices/unlocated）与 `GET /api/machine-rooms/warehoused` 响应同步透出，向后兼容
+- **机架删除保护改为双条件（或条件，ADR-024）**
+  - 影响文件：`backend/src/machine_room/services.py`（`count_rack_devices` / `delete_rack`）
+  - 现逻辑：`rack_id == 该机架 id` 的设备存在（结构化，新数据）**或** 原前缀匹配（同机房且 `rack_location` 以机架名为前缀，存量兼容）任一命中 → 409，detail 文案风格不变（"机架 X 下仍有 N 台设备，请先迁移设备后再删除"）
+  - `u_cells` 结构、409 占用校验语义、rental 模块均未改动
+- 验证：`import main` 通过；`test_adr021_smoke.py`、`scripts/smoke_adr022.py` 回归全部 PASS；ADR-024 专项临时验证（SQLite + TestClient，11 项断言：unlocated 字段存在/空数组/含未定位设备/排除已定位与前缀设备/brief 字段完整、rack_id 条件 409、前缀条件 409、无设备机架可删）全部 PASS 后已删除临时脚本；lint 无错误
+
+---
+
+## 2026-10-19 (修改) — ADR-024 上线部署
+
+| 日期 | 类型 | 变更内容 | 影响文件/范围 | 关联任务 | 备注 |
+|------|------|---------|-------------|---------|------|
+| 2026-10-19 | 修改 | ADR-024 上线：后端镜像构建推送 + asset-ops ns 三 deployment 滚动 | asset-ops ns | ADR-024 | 镜像 id 1e1fca32ca6c（digest sha256:4f2496c89824…85bb0，tag latest）；验证通过：/docs 200，points 响应含 `unlocated` 字段（当前为空数组），3 pod Running 0 重启；无 DDL |
+
+---
+
+## 2026-10-19 (重构) — 机房层级模型升级（排→机柜→机架）
+
+| 日期 | 类型 | 变更内容 | 影响文件/范围 | 关联任务 | 备注 |
+|------|------|---------|-------------|---------|------|
+| 2026-10-19 | 重构 | 机房层级模型升级：rack_row/cabinet 新表+三层 CRUD+point-map/locations 接口+迁移脚本（ADR-026）；rack.power_on 上移 cabinet | backend/src/machine_room/、rental/、scripts/ | ADR-026 | ⚠️ Breaking：删除旧 /racks 与 /points 路由 |
+
+### 变更明细
+
+- **数据模型（asset_ops 库）**
+  - 新增 `rack_row`（排）：id, machine_room_id(无硬FK), name(机房内唯一), note, created_at
+  - 新增 `cabinet`（机柜）：id, rack_row_id(无硬FK), name(排内唯一), power_on(自 rack 上移, 默认 1), created_at
+  - `rack`（机架）新增 `cabinet_id`（可空, 索引, 无硬FK）；保留 `machine_room_id`（迁移脚本保证与 cabinet→row→room 一致，查询层以 cabinet 归属为准）；**`power_on` 列移除**（ORM 不再映射，存量列由迁移脚本读取后 DDL DROP）
+  - 影响文件：`backend/src/machine_room/models.py`
+- **API（`/api/machine-rooms` 域整体重构，⚠️ Breaking）**
+  - 排：`GET/POST /api/machine-rooms/{room_id}/rows`、`PUT/DELETE /api/machine-rooms/{room_id}/rows/{row_id}`（删除有机柜 → 409）
+  - 机柜：`GET/POST /api/machine-rooms/{room_id}/rows/{row_id}/cabinets`（创建 `{name, power_on=true}`）、`PUT/DELETE /api/cabinets/{cabinet_id}`（删除有机架 → 409）
+  - 机架：`GET/POST /api/cabinets/{cabinet_id}/racks`（创建 `{name, capacity_u}`）、`PUT/DELETE /api/racks/{rack_id}`（删除有设备 → 409，沿用 ADR-024 双条件保护）
+  - 点位图：`GET /api/machine-rooms/{room_id}/point-map` → `{room, rows:[{id,name,note,cabinets:[{id,name,power_on,racks:[{id,name,capacity_u,u_cells:[…]}]}]}], unlocated:[…], warehoused:[…]}`（u_cells 结构与原 points 一致；unlocated/warehoused 沿用含 private_ip 的 brief）
+  - 级联选择源：`GET /api/machine-rooms/{room_id}/locations` → `{rows:[{id,name,cabinets:[{id,name,racks:[{id,name,capacity_u}]}]}]}`（设备表单三级级联用，轻量版）
+  - **删除旧路由**：`GET /{room_id}/points`、`POST/PUT/DELETE /{room_id}/racks`（前端同步切换）
+  - 唯一性：排内排名唯一、排内柜名唯一、柜内机架名唯一（400，模块现有风格）；404 文案沿用「排/机柜/机架不存在」
+  - 影响文件：`backend/src/machine_room/schemas.py`、`services.py`、`api.py`、`backend/main.py`（注册 cabinet_router/rack_router）
+- **rental 域（字段名不变，值变化）**
+  - 列表/详情 `rack_name` 字段名保留，值改为层级路径 `机柜名/机架名`（如 `A01/A01-42U`）；批量 in 查询填充（rack → cabinet 两次 in 查询），无 N+1
+  - 设备 409 占用校验、warehoused/search 筛选、rack_id/u_position 占位语义零变化
+  - 影响文件：`backend/src/rental/api.py`
+- **存量迁移脚本（新建）**
+  - `backend/scripts/migrate_rack_hierarchy.py`：幂等 + `--dry-run` + `--drop-power-on`（默认不删列）
+  - 策略：按机架名首字母归排「X排」（已存在复用）→ 存量 rack→机柜同名（power_on 迁移）→ 机架改名 `{原rack名}-{capacity_u}U` → 回填 `rack.cabinet_id` / `machine_room_id`；设备 `rack_id` 不变
+  - 前置：先执行 DDL 建表 + `rack.cabinet_id` 加列（见 database.md）；迁移窗口内停写
+- **部署 DDL（asset_ops，本次不执行，部署阶段按序执行）**：① CREATE TABLE rack_row / cabinet + ALTER rack ADD cabinet_id → ② 跑迁移脚本 → ③ ALTER TABLE rack DROP COLUMN power_on（全文见 database.md）
+- **smoke 脚本同步更新**：`test_adr021_smoke.py`、`scripts/smoke_adr022.py` 适配三层路由/point-map 嵌套/rack_name 层级路径
+- 验证：`import main` 通过；`test_adr021_smoke.py` 全部 PASS；`scripts/smoke_adr022.py` 全部 PASS；ADR-026 专项临时验证（SQLite + TestClient + subprocess 跑迁移脚本，37 项断言：三层 CRUD/唯一性 400/删除保护链 409/point-map 嵌套/locations/旧路由 404/迁移 dry-run 不写/执行/重跑幂等/drop-power-on 幂等）全部 PASS 后已删除临时脚本；lint 无错误
+## 2026-10-19 (重构) — ADR-026 上线部署
+
+| 日期 | 类型 | 变更内容 | 影响文件/范围 | 关联任务 | 备注 |
+|------|------|---------|-------------|---------|------|
+| 2026-10-19 | 重构 | ADR-026 上线：DDL(rack_row/cabinet/rack.cabinet_id) + 存量层级迁移(幂等×2) + 后端镜像滚动 + DROP rack.power_on | asset_ops 库, asset-ops ns | ADR-026 | ⚠️ Breaking：旧 /racks 与 /points 路由 404；镜像 id 7775bd58cd21（digest sha256:bad3e1204f64ef8736da0bd56ef7aba5390224578eeabb10e9f66e3e3d3929c8）；迁移：10 rack → A排 + 机柜 A01~A10 + 机架 A01-45U…A10-42U，dry-run 核对后执行，重跑幂等（待迁移 0）；3 deployment 滚动成功，3 pod Running 0 重启；验证通过：/docs 200，point-map 200（A排→A01~A10 含 power_on→A01-45U 等含 u_cells），locations 200 层级正确，rentals rack_name=`A03/A03-45U` 层级路径，旧 /points 404 |
+
+---
+
+## 2026-10-27 (新增) — 设备 u_size（U数）+ 上架空间校验（越界400/区间重叠409）+ point-map 多U区间标记 + rack_name 改纯机架名
+
+| 日期 | 类型 | 变更内容 | 影响文件/范围 | 关联任务 | 备注 |
+|------|------|---------|-------------|---------|------|
+| 2026-10-27 | 新增 | 设备 u_size（U数）+ 上架空间校验（越界400/区间重叠409）+ point-map 多U区间标记 + rack_name 改纯机架名 | backend/src/rental/, backend/src/machine_room/ | ADR-028 | 部署 DDL（本次不执行，部署阶段执行）：`ALTER TABLE rental_record ADD COLUMN u_size INT NOT NULL DEFAULT 1 COMMENT '设备占用U数（自 u_position 底部起向上占用 u_size 个连续 U 位，默认 1）';` |
+
+### 变更明细
+- **数据模型**：`RentalRecord` 新增 `u_size`（INT NOT NULL DEFAULT 1）；占用区间 `[u_position, u_position + u_size - 1]`（u_position 为设备底部；NULL=未定位无区间）；存量默认 1 行为等价，无需迁移
+- **API（rental 域）**
+  - create/update 请求体新增可选 `u_size`（int ≥ 1，默认 1）；列表/详情响应透出 `u_size`
+  - 定位校验升级（update 提交 rack_id + u_position 非空时，409 之前先校验）：
+    - 越界：`u_position + u_size - 1 > rack.capacity_u` → **400**，detail：`4U 设备无法放置于 A01-45U 的 U45，超出机架容量（占用 U45~U48）`
+    - 重叠：与同机架其他设备（rack_id 相同、u_position 非空）区间相交 → **409**，detail：`与 A01-45U 的 {machine_model}（U28）位置冲突，所选 U26~U29 重叠`（区间重叠含原单 U 相等场景，原 409 逻辑被覆盖合并）
+    - u_size 被修改且 u_position 非空时同样触发越界/重叠校验；机架与机房一致性校验保留；u_position=NULL（解绑/未定位）不做区间校验
+  - ⚠️ 列表/详情 `rack_name` **字段名不变**，值改为**纯机架名**（`A01-45U`，去掉 ADR-026 的「机柜名/」前缀）；批量填充逻辑同步简化（rack 一次 in 查询，去掉 cabinet 查询）
+  - change_log diff 新增字段 label「U数」
+  - 影响文件：`backend/src/rental/models.py`、`schemas.py`、`services.py`、`api.py`
+- **点位图（machine_room 域）**：`point-map` 的 `u_cells` 中多 U 设备的**区间内每个 U 格**均标记该设备（结构不变 `{u, rental_id, machine_model, remark, private_ip, status}`，前端按 rental_id 连续格合并渲染）；`locations` 结构不变（前端自行按机柜分组扁平化）
+  - 影响文件：`backend/src/machine_room/services.py`
+- **smoke 脚本同步更新**：`test_adr021_smoke.py`（u_size 默认 1 断言）、`scripts/smoke_adr022.py`（rack_name 纯机架名、越界/重叠新文案、2U 设备 u_cells 区间标记断言）
+- 验证：`import main` 通过；ADR-028 专项临时验证（SQLite + TestClient，21 项断言：1U/4U 创建默认与显式 u_size、45U 架 4U 放 U45 → 400 精确文案、U28 有 1U 设备时 4U 放 U26 → 409 精确文案、单 U 相等 409、u_size 修改触发重校验（越界 400/重叠 409/无冲突 200）、u_cells 区间标记与移位后原区间释放、rack_name 纯机架名、unlocated 不校验、1U 放 U45 边界 201、u_size=0 → 422）全部 PASS 后已删除临时脚本；`test_adr021_smoke.py`、`scripts/smoke_adr022.py` 回归全部 PASS；lint 无错误
+
+## 2026-10-27 (修改) — ADR-028 上线部署
+
+| 日期 | 类型 | 变更内容 | 影响文件/范围 | 关联任务 | 备注 |
+|------|------|---------|-------------|---------|------|
+| 2026-10-27 | 修改 | ADR-028 上线：DDL(rental_record.u_size) + 后端镜像构建推送 + 三 deployment 滚动 | asset_ops 库, asset-ops ns | ADR-028 | 镜像 id 1079f79270d6（digest sha256:5093dc8a1c70352eb47c41f0ff2a9bdc9d359035fd26eb5b4dc91719571eb8d3）；DDL：rental_record.u_size INT NOT NULL DEFAULT 1（先 SHOW COLUMNS 确认不存在后执行）；api/worker/beat 三 deployment 滚动成功，3 pod Running 0 重启；验证通过：/docs 200；/api/rentals 响应含 u_size=1，rack_name 为纯机架名（`A01-45U`/`A03-45U`，无「机柜/」前缀），无机架设备 rack_name=null；point-map 200 结构正常，抽查 A01-45U 已定位设备 u_cells 区间标记正常（U45 单格标记 rental 3c786547） |
+
+## 2026-10-27 (修改) — 存量数据 u_size 批量修正
+
+| 日期 | 类型 | 变更内容 | 影响文件/范围 | 关联任务 | 备注 |
+|------|------|---------|-------------|---------|------|
+| 2026-10-27 | 修改 | 存量数据：4090/8468 设备 u_size→4、6133→2，已定位设备区间合法性调整（2 台） | asset_ops 库 rental_record | ADR-028 | 共 21 台（8卡4090×16、GPU 8468×4、CPU 6133×1）；19 台未定位仅改 u_size（4090 中 f827440c 原已为 4 未动）；2 台已定位因越界下移：3c786547（8卡4090，A01-45U）u_position 45→42（原上端 45 保持，区间 [42,45]）、6fdcb4da（GPU 8468，A03-45U）u_position 43→40（原上端 43 保持，区间 [40,43]），两机架均无其他已定位设备故无重叠；改后全库已定位设备区间校验全部通过，无无合法位置设备；脚本 `scripts/fix_u_size_20261027.py` |
+| 2026-10-27 | 修改 | 存量数据：全部设备归属雅安机房（20台）+ 批量录入 E/F/C 排 21 个 45U 机柜（含机架） | asset_ops 库 rental_record / rack_row / cabinet / rack | ADR-026 | ① rental_record.machine_room_id IS NULL 20 台 → 全部置为雅安机房（id=1，code=M202），改后 0 NULL；② 新建排 3（E排 id=3 / F排 id=4 / C排 id=5，A排 id=1 已存在复用）、机柜 21（E08~E11、F01~F09、C01~C08，power_on=1）、机架 21（名 `{柜名}-45U`，capacity_u=45，machine_room_id=1）；A排 A01~A10 检查确认全部存在未重复建（其中 A04~A10 机架为存量 42U 命名，未改动）；脚本 `backend/scripts/batch_cabinets_20261027.py`（幂等可重跑，重跑 0 新建；`GET /api/machine-rooms/1/point-map` 复查：A排10/C排8/E排4/F排9 柜，新建 21 机架名与 45U 全部一致） |
+| 2026-10-27 | 修改 | 存量数据：A排 A04~A10 机架统一 45U（扩容+改名 -45U） | asset_ops 库 rack | ADR-026 | 用户指令「机柜数据都是45U」补齐：A04-42U（capacity 已是 45，ADR-026 迁移遗留名称/容量不一致）仅改名 A04-45U；A05~A10-42U（6 个）capacity_u 42→45 + 改名 A0X-45U，共 7 条 UPDATE；改前已定位设备仅 2 台（A01-45U 区间[42,45]、A03-45U 区间[40,43]，均在 42 以下无 43~45 区间设备），扩容只放宽不破坏；改后复查 A 排 10 机架全部 `A0X-45U`+capacity 45、已定位设备区间合法无冲突；`GET /api/machine-rooms/1/point-map` 200 抽查 A 排机架名全部已更新；脚本 `backend/scripts/fix_a_row_45u_20261027.py`（幂等可重跑，重跑 0 条 UPDATE） |
+
+---
+
+## 2026-10-30 (新增) — 机架容量收缩校验
+
+| 日期 | 类型 | 变更内容 | 影响文件/范围 | 关联任务 | 备注 |
+|------|------|---------|-------------|---------|------|
+| 2026-10-30 | 新增 | 机架容量收缩校验：capacity_u < 已占用最大 U 上端 → 400 | backend/src/machine_room/ | ADR-029 | `PUT /api/racks/{rack_id}` 修改 capacity_u 时，若新容量 < 该机架已定位设备（u_position 非空）的最大占用上端 max(u_position + u_size - 1) → 400，detail：`机架容量不能小于已占用的最大 U 位（U{max}）`；扩大容量不设限，无已定位设备不限制；service 层 `_check_capacity_shrink`（与 409 占用校验同层风格），schema 不变；验证：import main 通过、临时 SQLite 专项验证（45U 架 U42~45 设备缩 40→400 文案正确 / 45→200 / 60→200 / 空架缩 10→200 / unlocated 不限制）全部 PASS 后删除临时脚本，test_adr021_smoke.py 与 scripts/smoke_adr022.py 回归全部 PASS，lint 无错误 |
+
+---

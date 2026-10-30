@@ -75,6 +75,7 @@ class RentalRecordCreate(BaseModel):
     rack_location: Optional[str] = Field(None, max_length=256)
     rack_id: Optional[int] = Field(None, description="机架ID（可空，须与 machine_room_id 同机房）")
     u_position: Optional[int] = Field(None, ge=1, description="U 位（可空，1~机架 capacity_u；提供 rack_id 时才有效）")
+    u_size: int = Field(1, ge=1, description="设备占用U数（自 u_position 底部起向上占用 u_size 个连续 U 位，默认 1，ADR-028）")
     private_ip: Optional[str] = Field(None, max_length=64)
     public_ips: Optional[list[str]] = None
     ssh_port: int = 22
@@ -104,6 +105,7 @@ class RentalRecordUpdate(BaseModel):
     rack_location: Optional[str] = Field(None, max_length=256)
     rack_id: Optional[int] = Field(None, description="机架ID（传 null 表示解绑机架，u_position 同步置 null）")
     u_position: Optional[int] = Field(None, ge=1, description="U 位（1~机架 capacity_u；传 null 表示清除 U 位）")
+    u_size: Optional[int] = Field(None, ge=1, description="设备占用U数（≥1；修改且 u_position 非空时重新做越界/重叠校验，ADR-028）")
     private_ip: Optional[str] = Field(None, max_length=64)
     public_ips: Optional[list[str]] = None
     ssh_port: Optional[int] = None
@@ -138,6 +140,7 @@ class RentalRecordListResponse(BaseModel):
     rack_location: Optional[str] = None
     rack_id: Optional[int] = None
     u_position: Optional[int] = None
+    u_size: int = 1
     rack_name: Optional[str] = None
     private_ip: Optional[str] = None
     public_ips: Optional[list[str]] = None
@@ -174,6 +177,7 @@ class RentalRecordDetailResponse(BaseModel):
     rack_location: Optional[str] = None
     rack_id: Optional[int] = None
     u_position: Optional[int] = None
+    u_size: int = 1
     rack_name: Optional[str] = None
     private_ip: Optional[str] = None
     public_ips: Optional[list[str]] = None
